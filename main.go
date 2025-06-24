@@ -4,9 +4,9 @@ import (
     "flag"
     "fmt"
     "image"
-    "image/jpeg"
-    "image/png"
     _ "image/gif"
+    _ "image/jpeg"
+    _ "image/png"
     "log"
     "math"
     "os"
@@ -16,8 +16,8 @@ import (
 
     "github.com/hajimehoshi/ebiten/v2"
     "github.com/hajimehoshi/ebiten/v2/inpututil"
-    "golang.org/x/image/webp"
     _ "golang.org/x/image/bmp"
+    _ "golang.org/x/image/webp"
 )
 
 func isSupportedExt(path string) bool {
@@ -37,17 +37,7 @@ func loadImage(path string) (*ebiten.Image, error) {
     }
     defer f.Close()
 
-    var img image.Image
-    switch strings.ToLower(filepath.Ext(path)) {
-    case ".webp":
-        img, err = webp.Decode(f)
-    case ".png":
-        img, err = png.Decode(f)
-    case ".jpg", ".jpeg":
-        img, err = jpeg.Decode(f)
-    default:
-        img, _, err = image.Decode(f)
-    }
+    img, _, err := image.Decode(f)
     if err != nil {
         return nil, fmt.Errorf("decoding %s: %v", path, err)
     }
