@@ -104,7 +104,6 @@ func loadImage(path string) (*ebiten.Image, error) {
 }
 
 type Game struct {
-	images     []*ebiten.Image
 	paths      []string
 	idx        int
 	fullscreen bool
@@ -112,6 +111,87 @@ type Game struct {
 	savedWinW int
 	savedWinH int
 	config    Config
+
+	// Image cache - only keep a few images in memory
+	imageCache map[int]*ebiten.Image
+}
+
+func (g *Game) getCurrentImage() *ebiten.Image {
+	if len(g.paths) == 0 {
+		return nil
+	}
+
+	// Check if image is already in cache
+	if img, exists := g.imageCache[g.idx]; exists {
+		return img
+	}
+
+	// Load image on demand
+	img, err := loadImage(g.paths[g.idx])
+	if err != nil {
+		log.Printf("failed to load %s: %v", g.paths[g.idx], err)
+		return nil
+	}
+
+	// Add to cache
+	g.imageCache[g.idx] = img
+
+	// Clean cache if it gets too large (keep only 3 images)
+	if len(g.imageCache) > 3 {
+		g.cleanCache()
+	}
+
+	return img
+}
+
+func (g *Game) cleanCache() {
+	// Keep current, previous, and next images in cache
+	keepIndices := make(map[int]bool)
+	keepIndices[g.idx] = true
+
+	if g.idx > 0 {
+		keepIndices[g.idx-1] = true
+	} else if len(g.paths) > 1 {
+		keepIndices[len(g.paths)-1] = true // wrap to last
+	}
+
+	if g.idx < len(g.paths)-1 {
+		keepIndices[g.idx+1] = true
+	} else if len(g.paths) > 1 {
+		keepIndices[0] = true // wrap to first
+	}
+
+	// Remove images not in keep list
+	for idx := range g.imageCache {
+		if !keepIndices[idx] {
+			delete(g.imageCache, idx)
+		}
+	}
+}
+
+func (g *Game) preloadAdjacentImages() {
+	if len(g.paths) <= 1 {
+		return
+	}
+
+	// Preload previous image
+	prevIdx := g.idx - 1
+	if prevIdx < 0 {
+		prevIdx = len(g.paths) - 1
+	}
+	if _, exists := g.imageCache[prevIdx]; !exists {
+		if img, err := loadImage(g.paths[prevIdx]); err == nil {
+			g.imageCache[prevIdx] = img
+		}
+	}
+
+	// Preload next image
+	nextIdx := (g.idx + 1) % len(g.paths)
+	if _, exists := g.imageCache[nextIdx]; !exists {
+		if img, err := loadImage(g.paths[nextIdx]); err == nil {
+			g.imageCache[nextIdx] = img
+		}
+	}
 }
 
 func (g *Game) saveCurrentWindowSize() {
@@ -131,7 +211,7 @@ func (g *Game) saveCurrentWindowSize() {
 }
 
 func (g *Game) Update() error {
-	if len(g.images) == 0 {
+	if len(g.paths) == 0 {
 		return nil
 	}
 
@@ -143,13 +223,15 @@ func (g *Game) Update() error {
 
 	// Next / Prev keys
 	if inpututil.IsKeyJustPressed(ebiten.KeySpace) || inpututil.IsKeyJustPressed(ebiten.KeyN) {
-		g.idx = (g.idx + 1) % len(g.images)
+		g.idx = (g.idx + 1) % len(g.paths)
+		g.preloadAdjacentImages() // Preload next images for smooth navigation
 	}
 	if inpututil.IsKeyJustPressed(ebiten.KeyBackspace) || inpututil.IsKeyJustPressed(ebiten.KeyP) {
 		g.idx--
 		if g.idx < 0 {
-			g.idx = len(g.images) - 1
+			g.idx = len(g.paths) - 1
 		}
+		g.preloadAdjacentImages() // Preload next images for smooth navigation
 	}
 
 	// Toggle fullscreen / fit
@@ -170,10 +252,11 @@ func (g *Game) Update() error {
 }
 
 func (g *Game) Draw(screen *ebiten.Image) {
-	if len(g.images) == 0 {
+	img := g.getCurrentImage()
+	if img == nil {
 		return
 	}
-	img := g.images[g.idx]
+
 	iw, ih := img.Bounds().Dx(), img.Bounds().Dy()
 	w, h := screen.Bounds().Dx(), screen.Bounds().Dy()
 
@@ -243,27 +326,17 @@ func main() {
 		log.Fatal("no image files specified")
 	}
 
-	var images []*ebiten.Image
-	for _, p := range paths {
-		img, err := loadImage(p)
-		if err != nil {
-			log.Printf("failed to load %s: %v", p, err)
-			continue
-		}
-		images = append(images, img)
-	}
-	if len(images) == 0 {
-		log.Fatal("no images could be loaded")
-	}
-
 	config := loadConfig()
 
 	g := &Game{
-		images: images,
-		paths:  paths,
-		idx:    0,
-		config: config,
+		paths:      paths,
+		idx:        0,
+		config:     config,
+		imageCache: make(map[int]*ebiten.Image),
 	}
+
+	// Preload the first image and adjacent ones for faster startup
+	g.preloadAdjacentImages()
 
 	ebiten.SetWindowTitle("Ebiten Image Viewer")
 	ebiten.SetWindowSize(config.WindowWidth, config.WindowHeight)
