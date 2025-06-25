@@ -3,7 +3,6 @@ package main
 import (
 	"archive/zip"
 	"bytes"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"image"
@@ -26,12 +25,6 @@ import (
 )
 
 const (
-	// Window size constants
-	defaultWidth  = 800
-	defaultHeight = 600
-	minWidth      = 400
-	minHeight     = 300
-
 	// Book mode layout constants
 	imageGap = 10 // Gap between images in book mode
 
@@ -43,69 +36,6 @@ const (
 	maxCacheSize = 4 // Maximum number of images to keep in cache
 )
 
-type Config struct {
-	WindowWidth          int     `json:"window_width"`
-	WindowHeight         int     `json:"window_height"`
-	AspectRatioThreshold float64 `json:"aspect_ratio_threshold"`
-	RightToLeft          bool    `json:"right_to_left"`
-}
-
-func getConfigPath() string {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return "nv.json"
-	}
-	return filepath.Join(homeDir, ".nv.json")
-}
-
-func loadConfig() Config {
-	return loadConfigFromPath(getConfigPath())
-}
-
-func loadConfigFromPath(configPath string) Config {
-	config := Config{
-		WindowWidth:          defaultWidth,
-		WindowHeight:         defaultHeight,
-		AspectRatioThreshold: 1.5,   // Default threshold for aspect ratio compatibility
-		RightToLeft:          false, // Default to left-to-right reading (Western style)
-	}
-
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		return config
-	}
-
-	json.Unmarshal(data, &config)
-
-	// Validate minimum size
-	if config.WindowWidth < minWidth {
-		config.WindowWidth = defaultWidth
-	}
-	if config.WindowHeight < minHeight {
-		config.WindowHeight = defaultHeight
-	}
-
-	// Validate aspect ratio threshold
-	if config.AspectRatioThreshold <= 1.0 {
-		config.AspectRatioThreshold = 1.5
-	}
-
-	return config
-}
-
-func saveConfig(config Config) {
-	// Don't save if size is too small
-	if config.WindowWidth < minWidth || config.WindowHeight < minHeight {
-		return
-	}
-
-	data, err := json.MarshalIndent(config, "", "  ")
-	if err != nil {
-		return
-	}
-
-	os.WriteFile(getConfigPath(), data, 0644)
-}
 
 type ImagePath struct {
 	Path        string // Local file path or archive:entry format
@@ -659,6 +589,32 @@ func extractImagesFromRar(archivePath string) ([]ImagePath, error) {
 	return images, nil
 }
 
+func processArchive(archivePath string) ([]ImagePath, error) {
+	if !isArchiveExt(archivePath) {
+		return []ImagePath{}, nil
+	}
+
+	var archiveImages []ImagePath
+	var err error
+
+	ext := strings.ToLower(filepath.Ext(archivePath))
+	switch ext {
+	case ".zip":
+		archiveImages, err = extractImagesFromZip(archivePath)
+	case ".rar":
+		archiveImages, err = extractImagesFromRar(archivePath)
+	default:
+		return []ImagePath{}, fmt.Errorf("unsupported archive format: %s", ext)
+	}
+
+	if err != nil {
+		log.Printf("Error reading archive %s: %v", archivePath, err)
+		return []ImagePath{}, err
+	}
+
+	return archiveImages, nil
+}
+
 func collectImages(args []string) ([]ImagePath, error) {
 	var list []ImagePath
 	for _, p := range args {
@@ -681,17 +637,8 @@ func collectImages(args []string) ([]ImagePath, error) {
 						EntryPath:   "",
 					})
 				} else if isArchiveExt(path) {
-					var archiveImages []ImagePath
-					ext := strings.ToLower(filepath.Ext(path))
-					switch ext {
-					case ".zip":
-						archiveImages, err = extractImagesFromZip(path)
-					case ".rar":
-						archiveImages, err = extractImagesFromRar(path)
-					}
-					if err != nil {
-						log.Printf("Error reading archive %s: %v", path, err)
-					} else {
+					archiveImages, err := processArchive(path)
+					if err == nil {
 						list = append(list, archiveImages...)
 					}
 				}
@@ -708,17 +655,8 @@ func collectImages(args []string) ([]ImagePath, error) {
 					EntryPath:   "",
 				})
 			} else if isArchiveExt(p) {
-				var archiveImages []ImagePath
-				ext := strings.ToLower(filepath.Ext(p))
-				switch ext {
-				case ".zip":
-					archiveImages, err = extractImagesFromZip(p)
-				case ".rar":
-					archiveImages, err = extractImagesFromRar(p)
-				}
-				if err != nil {
-					log.Printf("Error reading archive %s: %v", p, err)
-				} else {
+				archiveImages, err := processArchive(p)
+				if err == nil {
 					list = append(list, archiveImages...)
 				}
 			}
