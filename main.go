@@ -22,10 +22,21 @@ import (
 )
 
 const (
+	// Window size constants
 	defaultWidth  = 800
 	defaultHeight = 600
 	minWidth      = 400
 	minHeight     = 300
+
+	// Book mode layout constants
+	imageGap = 10 // Gap between images in book mode
+
+	// Aspect ratio thresholds
+	minAspectRatio = 0.4 // Extremely tall images
+	maxAspectRatio = 2.5 // Extremely wide images
+
+	// Cache size limits
+	maxCacheSize = 4 // Maximum number of images to keep in cache
 )
 
 type Config struct {
@@ -162,7 +173,8 @@ func (g *Game) shouldUseBookMode(leftImg, rightImg *ebiten.Image) bool {
 	rightAspect := float64(rightImg.Bounds().Dx()) / float64(rightImg.Bounds().Dy())
 
 	// Check for extremely tall or wide images (should be single page)
-	if leftAspect < 0.4 || leftAspect > 2.5 || rightAspect < 0.4 || rightAspect > 2.5 {
+	if leftAspect < minAspectRatio || leftAspect > maxAspectRatio ||
+		rightAspect < minAspectRatio || rightAspect > maxAspectRatio {
 		return false
 	}
 
@@ -196,8 +208,8 @@ func (g *Game) getImageAtIndex(idx int) *ebiten.Image {
 	// Add to cache
 	g.imageCache[idx] = img
 
-	// Clean cache if it gets too large (keep only 4 images for book mode)
-	if len(g.imageCache) > 4 {
+	// Clean cache if it gets too large
+	if len(g.imageCache) > maxCacheSize {
 		g.cleanCache()
 	}
 
@@ -275,16 +287,25 @@ func (g *Game) Update() error {
 		return nil
 	}
 
-	// Quit keys
+	g.handleExitKeys()
+	g.handleModeToggleKeys()
+	g.handleNavigationKeys()
+	g.handleFullscreenToggle()
+
+	return nil
+}
+
+func (g *Game) handleExitKeys() {
 	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) || inpututil.IsKeyJustPressed(ebiten.KeyQ) {
 		g.saveCurrentWindowSize()
 		os.Exit(0)
 	}
+}
 
-	// Book mode and reading direction toggles
+func (g *Game) handleModeToggleKeys() {
 	if inpututil.IsKeyJustPressed(ebiten.KeyB) {
 		if ebiten.IsKeyPressed(ebiten.KeyShift) {
-			// SHIFT+B: Toggle reading direction (right-to-left vs left-to-right)
+			// SHIFT+B: Toggle reading direction
 			g.config.RightToLeft = !g.config.RightToLeft
 			saveConfig(g.config)
 		} else {
@@ -299,41 +320,53 @@ func (g *Game) Update() error {
 			g.preloadAdjacentImages()
 		}
 	}
+}
 
-	// Next / Prev keys
+func (g *Game) handleNavigationKeys() {
+	// Next page
 	if inpututil.IsKeyJustPressed(ebiten.KeySpace) || inpututil.IsKeyJustPressed(ebiten.KeyN) {
-		if g.bookMode && !ebiten.IsKeyPressed(ebiten.KeyShift) {
-			// Move by 2 in book mode (normal spread navigation)
-			g.idx = (g.idx + 2) % len(g.paths)
-		} else {
-			// Move by 1 (single page mode or SHIFT+key for fine adjustment)
-			g.idx = (g.idx + 1) % len(g.paths)
-		}
-		g.preloadAdjacentImages() // Preload next images for smooth navigation
+		g.navigateNext()
+		g.preloadAdjacentImages()
 	}
+	// Previous page
 	if inpututil.IsKeyJustPressed(ebiten.KeyBackspace) || inpututil.IsKeyJustPressed(ebiten.KeyP) {
-		if g.bookMode && !ebiten.IsKeyPressed(ebiten.KeyShift) {
-			// Move by 2 in book mode (normal spread navigation)
-			g.idx -= 2
-			if g.idx < 0 {
-				// Find the last even index
-				lastEvenIdx := len(g.paths) - 1
-				if lastEvenIdx%2 != 0 {
-					lastEvenIdx--
-				}
-				g.idx = lastEvenIdx
-			}
-		} else {
-			// Move by 1 (single page mode or SHIFT+key for fine adjustment)
-			g.idx--
-			if g.idx < 0 {
-				g.idx = len(g.paths) - 1
-			}
-		}
-		g.preloadAdjacentImages() // Preload next images for smooth navigation
+		g.navigatePrevious()
+		g.preloadAdjacentImages()
 	}
+}
 
-	// Toggle fullscreen / fit
+func (g *Game) navigateNext() {
+	if g.bookMode && !ebiten.IsKeyPressed(ebiten.KeyShift) {
+		// Move by 2 in book mode (normal spread navigation)
+		g.idx = (g.idx + 2) % len(g.paths)
+	} else {
+		// Move by 1 (single page mode or SHIFT+key for fine adjustment)
+		g.idx = (g.idx + 1) % len(g.paths)
+	}
+}
+
+func (g *Game) navigatePrevious() {
+	if g.bookMode && !ebiten.IsKeyPressed(ebiten.KeyShift) {
+		// Move by 2 in book mode (normal spread navigation)
+		g.idx -= 2
+		if g.idx < 0 {
+			// Find the last even index
+			lastEvenIdx := len(g.paths) - 1
+			if lastEvenIdx%2 != 0 {
+				lastEvenIdx--
+			}
+			g.idx = lastEvenIdx
+		}
+	} else {
+		// Move by 1 (single page mode or SHIFT+key for fine adjustment)
+		g.idx--
+		if g.idx < 0 {
+			g.idx = len(g.paths) - 1
+		}
+	}
+}
+
+func (g *Game) handleFullscreenToggle() {
 	if inpututil.IsKeyJustPressed(ebiten.KeyZ) {
 		g.fullscreen = !g.fullscreen
 		if g.fullscreen {
@@ -346,8 +379,6 @@ func (g *Game) Update() error {
 			}
 		}
 	}
-
-	return nil
 }
 
 func (g *Game) Draw(screen *ebiten.Image) {
@@ -400,76 +431,70 @@ func (g *Game) drawBookMode(screen *ebiten.Image) {
 	}
 
 	w, h := screen.Bounds().Dx(), screen.Bounds().Dy()
-	const gap = 10 // Gap between images
 
 	// Calculate available width for each image
-	availableWidth := (w - gap) / 2
+	availableWidth := (w - imageGap) / 2
 
 	// Draw left image (right-aligned within its region)
 	g.drawBookImageInRegion(screen, leftImg, 0, 0, availableWidth, h, "right")
 
 	// Draw right image if exists (left-aligned within its region)
 	if rightImg != nil {
-		g.drawBookImageInRegion(screen, rightImg, availableWidth+gap, 0, availableWidth, h, "left")
+		rightX := availableWidth + imageGap
+		g.drawBookImageInRegion(screen, rightImg, rightX, 0, availableWidth, h, "left")
 	}
 }
 
 func (g *Game) drawImageInRegion(screen *ebiten.Image, img *ebiten.Image, x, y, maxW, maxH int) {
-	iw, ih := img.Bounds().Dx(), img.Bounds().Dy()
-
-	var scale float64
-	if g.fullscreen {
-		scale = math.Min(float64(maxW)/float64(iw), float64(maxH)/float64(ih))
-	} else {
-		if iw > maxW || ih > maxH {
-			scale = math.Min(float64(maxW)/float64(iw), float64(maxH)/float64(ih))
-		} else {
-			scale = 1
-		}
-	}
-
-	op := &ebiten.DrawImageOptions{}
-	op.GeoM.Scale(scale, scale)
-	sw, sh := float64(iw)*scale, float64(ih)*scale
-	op.GeoM.Translate(float64(x)+float64(maxW)/2-sw/2, float64(y)+float64(maxH)/2-sh/2)
-
-	screen.DrawImage(img, op)
+	g.drawImageInRegionWithAlign(screen, img, x, y, maxW, maxH, "center")
 }
 
 func (g *Game) drawBookImageInRegion(screen *ebiten.Image, img *ebiten.Image, x, y, maxW, maxH int, align string) {
-	iw, ih := img.Bounds().Dx(), img.Bounds().Dy()
+	g.drawImageInRegionWithAlign(screen, img, x, y, maxW, maxH, align)
+}
 
-	var scale float64
-	if g.fullscreen {
-		scale = math.Min(float64(maxW)/float64(iw), float64(maxH)/float64(ih))
-	} else {
-		if iw > maxW || ih > maxH {
-			scale = math.Min(float64(maxW)/float64(iw), float64(maxH)/float64(ih))
-		} else {
-			scale = 1
-		}
-	}
+func (g *Game) drawImageInRegionWithAlign(screen *ebiten.Image, img *ebiten.Image, x, y, maxW, maxH int, align string) {
+	// Calculate scaling
+	scale := g.calculateImageScale(img, maxW, maxH)
 
+	// Create draw options
 	op := &ebiten.DrawImageOptions{}
 	op.GeoM.Scale(scale, scale)
-	sw, sh := float64(iw)*scale, float64(ih)*scale
 
-	// Calculate horizontal position based on alignment
-	var xPos float64
-	switch align {
-	case "left":
-		xPos = float64(x) // Left-aligned
-	case "right":
-		xPos = float64(x+maxW) - sw // Right-aligned
-	default: // center
-		xPos = float64(x) + float64(maxW)/2 - sw/2 // Centered
-	}
+	// Calculate position based on alignment
+	scaledW := float64(img.Bounds().Dx()) * scale
+	scaledH := float64(img.Bounds().Dy()) * scale
 
-	// Vertical centering remains the same
-	yPos := float64(y) + float64(maxH)/2 - sh/2
+	xPos := g.calculateHorizontalPosition(x, maxW, scaledW, align)
+	yPos := float64(y) + float64(maxH)/2 - scaledH/2 // Always center vertically
 
 	op.GeoM.Translate(xPos, yPos)
 	screen.DrawImage(img, op)
+}
+
+func (g *Game) calculateImageScale(img *ebiten.Image, maxW, maxH int) float64 {
+	iw, ih := img.Bounds().Dx(), img.Bounds().Dy()
+
+	if g.fullscreen {
+		return math.Min(float64(maxW)/float64(iw), float64(maxH)/float64(ih))
+	}
+
+	// In windowed mode, don't scale up small images
+	if iw > maxW || ih > maxH {
+		return math.Min(float64(maxW)/float64(iw), float64(maxH)/float64(ih))
+	}
+	return 1
+}
+
+func (g *Game) calculateHorizontalPosition(x, maxW int, scaledW float64, align string) float64 {
+	switch align {
+	case "left":
+		return float64(x)
+	case "right":
+		return float64(x+maxW) - scaledW
+	default: // "center"
+		return float64(x) + float64(maxW)/2 - scaledW/2
+	}
 }
 
 func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {
