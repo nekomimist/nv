@@ -32,6 +32,7 @@ type Config struct {
 	WindowWidth          int     `json:"window_width"`
 	WindowHeight         int     `json:"window_height"`
 	AspectRatioThreshold float64 `json:"aspect_ratio_threshold"`
+	RightToLeft          bool    `json:"right_to_left"`
 }
 
 func getConfigPath() string {
@@ -46,7 +47,8 @@ func loadConfig() Config {
 	config := Config{
 		WindowWidth:          defaultWidth,
 		WindowHeight:         defaultHeight,
-		AspectRatioThreshold: 1.5, // Default threshold for aspect ratio compatibility
+		AspectRatioThreshold: 1.5,   // Default threshold for aspect ratio compatibility
+		RightToLeft:          false, // Default to left-to-right reading (Western style)
 	}
 
 	data, err := os.ReadFile(getConfigPath())
@@ -133,13 +135,18 @@ func (g *Game) getBookModeImages() (*ebiten.Image, *ebiten.Image) {
 		return nil, nil
 	}
 
-	// Get left image (current index)
-	leftImg := g.getImageAtIndex(g.idx)
+	var leftImg, rightImg *ebiten.Image
 
-	// Get right image (next index, or nil if at the end)
-	var rightImg *ebiten.Image
-	if g.idx+1 < len(g.paths) {
-		rightImg = g.getImageAtIndex(g.idx + 1)
+	if g.config.RightToLeft {
+		// Right-to-left reading (Japanese manga style): [next][current]
+		leftImg = g.getImageAtIndex(g.idx + 1) // Next image on left
+		rightImg = g.getImageAtIndex(g.idx)    // Current image on right
+	} else {
+		// Left-to-right reading (Western style): [current][next]
+		leftImg = g.getImageAtIndex(g.idx) // Current image on left
+		if g.idx+1 < len(g.paths) {
+			rightImg = g.getImageAtIndex(g.idx + 1) // Next image on right
+		}
 	}
 
 	return leftImg, rightImg
@@ -274,16 +281,23 @@ func (g *Game) Update() error {
 		os.Exit(0)
 	}
 
-	// Book mode toggle
+	// Book mode and reading direction toggles
 	if inpututil.IsKeyJustPressed(ebiten.KeyB) {
-		g.bookMode = !g.bookMode
-		// Ensure even index in book mode for proper pairing
-		if g.bookMode && g.idx%2 != 0 {
-			if g.idx > 0 {
-				g.idx--
+		if ebiten.IsKeyPressed(ebiten.KeyShift) {
+			// SHIFT+B: Toggle reading direction (right-to-left vs left-to-right)
+			g.config.RightToLeft = !g.config.RightToLeft
+			saveConfig(g.config)
+		} else {
+			// B: Toggle book mode
+			g.bookMode = !g.bookMode
+			// Ensure even index in book mode for proper pairing
+			if g.bookMode && g.idx%2 != 0 {
+				if g.idx > 0 {
+					g.idx--
+				}
 			}
+			g.preloadAdjacentImages()
 		}
-		g.preloadAdjacentImages()
 	}
 
 	// Next / Prev keys

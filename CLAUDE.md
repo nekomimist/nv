@@ -46,6 +46,7 @@ go mod tidy
 - **Space/N**: Next image (2 images in book mode)
 - **Backspace/P**: Previous image (2 images in book mode)
 - **B**: Toggle book mode (spread view - displays 2 images side by side)
+- **Shift+B**: Toggle reading direction (left-to-right ↔ right-to-left)
 - **Z**: Toggle fullscreen
 - **Escape/Q**: Quit application
 
@@ -55,6 +56,7 @@ go mod tidy
 - Lazy loading with intelligent image cache (keeps 3-4 images in memory)
 - `collectImages()` recursively finds supported image files in directories
 - Book mode displays two images side by side for spread viewing
+- Configurable reading direction (left-to-right Western style or right-to-left Japanese manga style)
 - Intelligent aspect ratio detection in book mode (fallback to single page for mismatched ratios)
 - Window scaling logic handles both windowed and fullscreen modes
 - Window size persistence using JSON config file at `~/.nv.json`
@@ -68,8 +70,10 @@ The application saves settings to `~/.nv.json`:
 {
   "window_width": 800,
   "window_height": 600,
-  "aspect_ratio_threshold": 1.5
+  "aspect_ratio_threshold": 1.5,
+  "right_to_left": false
 }
 ```
 
 - **aspect_ratio_threshold**: Controls when to use single page mode in book mode. Higher values allow more different aspect ratios to be displayed side-by-side. Default: 1.5
+- **right_to_left**: Reading direction for book mode. `false` for left-to-right (Western style), `true` for right-to-left (Japanese manga style). Default: false
