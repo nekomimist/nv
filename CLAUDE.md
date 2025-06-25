@@ -55,5 +55,21 @@ go mod tidy
 - Lazy loading with intelligent image cache (keeps 3-4 images in memory)
 - `collectImages()` recursively finds supported image files in directories
 - Book mode displays two images side by side for spread viewing
+- Intelligent aspect ratio detection in book mode (fallback to single page for mismatched ratios)
 - Window scaling logic handles both windowed and fullscreen modes
 - Window size persistence using JSON config file at `~/.nv.json`
+- Configurable aspect ratio threshold for book mode compatibility
+
+## Configuration
+
+The application saves settings to `~/.nv.json`:
+
+```json
+{
+  "window_width": 800,
+  "window_height": 600,
+  "aspect_ratio_threshold": 1.5
+}
+```
+
+- **aspect_ratio_threshold**: Controls when to use single page mode in book mode. Higher values allow more different aspect ratios to be displayed side-by-side. Default: 1.5

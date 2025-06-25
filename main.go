@@ -29,8 +29,9 @@ const (
 )
 
 type Config struct {
-	WindowWidth  int `json:"window_width"`
-	WindowHeight int `json:"window_height"`
+	WindowWidth          int     `json:"window_width"`
+	WindowHeight         int     `json:"window_height"`
+	AspectRatioThreshold float64 `json:"aspect_ratio_threshold"`
 }
 
 func getConfigPath() string {
@@ -43,8 +44,9 @@ func getConfigPath() string {
 
 func loadConfig() Config {
 	config := Config{
-		WindowWidth:  defaultWidth,
-		WindowHeight: defaultHeight,
+		WindowWidth:          defaultWidth,
+		WindowHeight:         defaultHeight,
+		AspectRatioThreshold: 1.5, // Default threshold for aspect ratio compatibility
 	}
 
 	data, err := os.ReadFile(getConfigPath())
@@ -60,6 +62,11 @@ func loadConfig() Config {
 	}
 	if config.WindowHeight < minHeight {
 		config.WindowHeight = defaultHeight
+	}
+
+	// Validate aspect ratio threshold
+	if config.AspectRatioThreshold <= 1.0 {
+		config.AspectRatioThreshold = 1.5
 	}
 
 	return config
@@ -136,6 +143,30 @@ func (g *Game) getBookModeImages() (*ebiten.Image, *ebiten.Image) {
 	}
 
 	return leftImg, rightImg
+}
+
+func (g *Game) shouldUseBookMode(leftImg, rightImg *ebiten.Image) bool {
+	if leftImg == nil || rightImg == nil {
+		return false // Can't do book mode with only one image
+	}
+
+	// Calculate aspect ratios
+	leftAspect := float64(leftImg.Bounds().Dx()) / float64(leftImg.Bounds().Dy())
+	rightAspect := float64(rightImg.Bounds().Dx()) / float64(rightImg.Bounds().Dy())
+
+	// Check for extremely tall or wide images (should be single page)
+	if leftAspect < 0.4 || leftAspect > 2.5 || rightAspect < 0.4 || rightAspect > 2.5 {
+		return false
+	}
+
+	// Calculate the ratio between the two aspect ratios
+	aspectRatio := leftAspect / rightAspect
+	if aspectRatio < 1.0 {
+		aspectRatio = 1.0 / aspectRatio // Always use the larger ratio
+	}
+
+	// Use single page if aspect ratios are too different
+	return aspectRatio <= g.config.AspectRatioThreshold
 }
 
 func (g *Game) getImageAtIndex(idx int) *ebiten.Image {
@@ -342,6 +373,13 @@ func (g *Game) drawSingleImage(screen *ebiten.Image) {
 func (g *Game) drawBookMode(screen *ebiten.Image) {
 	leftImg, rightImg := g.getBookModeImages()
 	if leftImg == nil {
+		return
+	}
+
+	// Check if images are compatible for book mode display
+	if !g.shouldUseBookMode(leftImg, rightImg) {
+		// Fall back to single page display
+		g.drawSingleImage(screen)
 		return
 	}
 
