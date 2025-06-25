@@ -302,17 +302,18 @@ func (g *Game) Update() error {
 
 	// Next / Prev keys
 	if inpututil.IsKeyJustPressed(ebiten.KeySpace) || inpututil.IsKeyJustPressed(ebiten.KeyN) {
-		if g.bookMode {
-			// Move by 2 in book mode
+		if g.bookMode && !ebiten.IsKeyPressed(ebiten.KeyShift) {
+			// Move by 2 in book mode (normal spread navigation)
 			g.idx = (g.idx + 2) % len(g.paths)
 		} else {
+			// Move by 1 (single page mode or SHIFT+key for fine adjustment)
 			g.idx = (g.idx + 1) % len(g.paths)
 		}
 		g.preloadAdjacentImages() // Preload next images for smooth navigation
 	}
 	if inpututil.IsKeyJustPressed(ebiten.KeyBackspace) || inpututil.IsKeyJustPressed(ebiten.KeyP) {
-		if g.bookMode {
-			// Move by 2 in book mode
+		if g.bookMode && !ebiten.IsKeyPressed(ebiten.KeyShift) {
+			// Move by 2 in book mode (normal spread navigation)
 			g.idx -= 2
 			if g.idx < 0 {
 				// Find the last even index
@@ -323,6 +324,7 @@ func (g *Game) Update() error {
 				g.idx = lastEvenIdx
 			}
 		} else {
+			// Move by 1 (single page mode or SHIFT+key for fine adjustment)
 			g.idx--
 			if g.idx < 0 {
 				g.idx = len(g.paths) - 1
@@ -403,12 +405,12 @@ func (g *Game) drawBookMode(screen *ebiten.Image) {
 	// Calculate available width for each image
 	availableWidth := (w - gap) / 2
 
-	// Draw left image
-	g.drawImageInRegion(screen, leftImg, 0, 0, availableWidth, h)
+	// Draw left image (right-aligned within its region)
+	g.drawBookImageInRegion(screen, leftImg, 0, 0, availableWidth, h, "right")
 
-	// Draw right image if exists
+	// Draw right image if exists (left-aligned within its region)
 	if rightImg != nil {
-		g.drawImageInRegion(screen, rightImg, availableWidth+gap, 0, availableWidth, h)
+		g.drawBookImageInRegion(screen, rightImg, availableWidth+gap, 0, availableWidth, h, "left")
 	}
 }
 
@@ -431,6 +433,42 @@ func (g *Game) drawImageInRegion(screen *ebiten.Image, img *ebiten.Image, x, y, 
 	sw, sh := float64(iw)*scale, float64(ih)*scale
 	op.GeoM.Translate(float64(x)+float64(maxW)/2-sw/2, float64(y)+float64(maxH)/2-sh/2)
 
+	screen.DrawImage(img, op)
+}
+
+func (g *Game) drawBookImageInRegion(screen *ebiten.Image, img *ebiten.Image, x, y, maxW, maxH int, align string) {
+	iw, ih := img.Bounds().Dx(), img.Bounds().Dy()
+
+	var scale float64
+	if g.fullscreen {
+		scale = math.Min(float64(maxW)/float64(iw), float64(maxH)/float64(ih))
+	} else {
+		if iw > maxW || ih > maxH {
+			scale = math.Min(float64(maxW)/float64(iw), float64(maxH)/float64(ih))
+		} else {
+			scale = 1
+		}
+	}
+
+	op := &ebiten.DrawImageOptions{}
+	op.GeoM.Scale(scale, scale)
+	sw, sh := float64(iw)*scale, float64(ih)*scale
+
+	// Calculate horizontal position based on alignment
+	var xPos float64
+	switch align {
+	case "left":
+		xPos = float64(x) // Left-aligned
+	case "right":
+		xPos = float64(x+maxW) - sw // Right-aligned
+	default: // center
+		xPos = float64(x) + float64(maxW)/2 - sw/2 // Centered
+	}
+
+	// Vertical centering remains the same
+	yPos := float64(y) + float64(maxH)/2 - sh/2
+
+	op.GeoM.Translate(xPos, yPos)
 	screen.DrawImage(img, op)
 }
 

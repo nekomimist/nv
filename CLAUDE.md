@@ -45,6 +45,8 @@ go mod tidy
 
 - **Space/N**: Next image (2 images in book mode)
 - **Backspace/P**: Previous image (2 images in book mode)
+- **Shift+Space/Shift+N**: Single page forward (for fine adjustment in book mode)
+- **Shift+Backspace/Shift+P**: Single page backward (for fine adjustment in book mode)
 - **B**: Toggle book mode (spread view - displays 2 images side by side)
 - **Shift+B**: Toggle reading direction (left-to-right ↔ right-to-left)
 - **Z**: Toggle fullscreen
