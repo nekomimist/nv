@@ -11,6 +11,7 @@ This is an image viewer application built using Go and the Ebiten game engine. T
 - **Main Application**: Single-file application in `main.go` that implements the entire image viewer
 - **Game Loop**: Uses Ebiten's game interface with `Update()`, `Draw()`, and `Layout()` methods
 - **Image Loading**: Supports PNG, JPEG, WebP, BMP, and GIF formats
+- **Archive Support**: Supports ZIP and RAR archives containing images
 - **Navigation**: Keyboard-based navigation between images with fullscreen toggle
 
 ## Development Commands
@@ -27,6 +28,9 @@ go run main.go image1.png image2.jpg
 
 # Run with a directory of images
 go run main.go ./images/
+
+# Run with archive files
+go run main.go images.zip manga.rar
 
 # Test the code
 go test ./...
@@ -56,7 +60,8 @@ go mod tidy
 
 - Single `Game` struct implements the Ebiten game interface
 - Lazy loading with intelligent image cache (keeps 3-4 images in memory)
-- `collectImages()` recursively finds supported image files in directories
+- `collectImages()` recursively finds supported image files in directories and archives
+- Archive extraction supports both ZIP and RAR formats with automatic image detection
 - Book mode displays two images side by side for spread viewing
 - Configurable reading direction (left-to-right Western style or right-to-left Japanese manga style)
 - Intelligent aspect ratio detection in book mode (fallback to single page for mismatched ratios)

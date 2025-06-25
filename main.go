@@ -1,6 +1,8 @@
 package main
 
 import (
+	"archive/zip"
+	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -8,6 +10,7 @@ import (
 	_ "image/gif"
 	_ "image/jpeg"
 	_ "image/png"
+	"io"
 	"log"
 	"math"
 	"os"
@@ -17,6 +20,7 @@ import (
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
+	"github.com/nwaples/rardecode"
 	_ "golang.org/x/image/bmp"
 	_ "golang.org/x/image/webp"
 )
@@ -103,6 +107,22 @@ func saveConfig(config Config) {
 	os.WriteFile(getConfigPath(), data, 0644)
 }
 
+type ImagePath struct {
+	Path        string // Local file path or archive:entry format
+	ArchivePath string // Empty for regular files, path to archive for entries
+	EntryPath   string // Empty for regular files, path within archive for entries
+}
+
+func isArchiveExt(path string) bool {
+	ext := strings.ToLower(filepath.Ext(path))
+	switch ext {
+	case ".zip", ".rar":
+		return true
+	default:
+		return false
+	}
+}
+
 func isSupportedExt(path string) bool {
 	ext := strings.ToLower(filepath.Ext(path))
 	switch ext {
@@ -113,22 +133,103 @@ func isSupportedExt(path string) bool {
 	}
 }
 
-func loadImage(path string) (*ebiten.Image, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-
-	img, _, err := image.Decode(f)
+func loadImageFromBytes(data []byte, path string) (*ebiten.Image, error) {
+	reader := bytes.NewReader(data)
+	img, _, err := image.Decode(reader)
 	if err != nil {
 		return nil, fmt.Errorf("decoding %s: %v", path, err)
 	}
 	return ebiten.NewImageFromImage(img), nil
 }
 
+func loadImageFromZip(archivePath, entryPath string) (*ebiten.Image, error) {
+	r, err := zip.OpenReader(archivePath)
+	if err != nil {
+		return nil, err
+	}
+	defer r.Close()
+
+	for _, f := range r.File {
+		if f.Name == entryPath {
+			rc, err := f.Open()
+			if err != nil {
+				return nil, err
+			}
+			defer rc.Close()
+
+			data, err := io.ReadAll(rc)
+			if err != nil {
+				return nil, err
+			}
+
+			return loadImageFromBytes(data, entryPath)
+		}
+	}
+	return nil, fmt.Errorf("entry %s not found in %s", entryPath, archivePath)
+}
+
+func loadImageFromRar(archivePath, entryPath string) (*ebiten.Image, error) {
+	f, err := os.Open(archivePath)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	r, err := rardecode.NewReader(f, "")
+	if err != nil {
+		return nil, err
+	}
+
+	for {
+		header, err := r.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+
+		if header.Name == entryPath {
+			data, err := io.ReadAll(r)
+			if err != nil {
+				return nil, err
+			}
+			return loadImageFromBytes(data, entryPath)
+		}
+	}
+	return nil, fmt.Errorf("entry %s not found in %s", entryPath, archivePath)
+}
+
+func loadImage(imagePath ImagePath) (*ebiten.Image, error) {
+	if imagePath.ArchivePath == "" {
+		// Regular file
+		f, err := os.Open(imagePath.Path)
+		if err != nil {
+			return nil, err
+		}
+		defer f.Close()
+
+		img, _, err := image.Decode(f)
+		if err != nil {
+			return nil, fmt.Errorf("decoding %s: %v", imagePath.Path, err)
+		}
+		return ebiten.NewImageFromImage(img), nil
+	} else {
+		// Archive entry
+		ext := strings.ToLower(filepath.Ext(imagePath.ArchivePath))
+		switch ext {
+		case ".zip":
+			return loadImageFromZip(imagePath.ArchivePath, imagePath.EntryPath)
+		case ".rar":
+			return loadImageFromRar(imagePath.ArchivePath, imagePath.EntryPath)
+		default:
+			return nil, fmt.Errorf("unsupported archive format: %s", ext)
+		}
+	}
+}
+
 type Game struct {
-	paths      []string
+	paths      []ImagePath
 	idx        int
 	fullscreen bool
 	bookMode   bool // Book/spread view mode
@@ -205,7 +306,7 @@ func (g *Game) getImageAtIndex(idx int) *ebiten.Image {
 	// Load image on demand
 	img, err := loadImage(g.paths[idx])
 	if err != nil {
-		log.Printf("failed to load %s: %v", g.paths[idx], err)
+		log.Printf("failed to load %s: %v", g.paths[idx].Path, err)
 		return nil
 	}
 
@@ -505,8 +606,61 @@ func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {
 	return outsideWidth, outsideHeight
 }
 
-func collectImages(args []string) ([]string, error) {
-	var list []string
+func extractImagesFromZip(archivePath string) ([]ImagePath, error) {
+	r, err := zip.OpenReader(archivePath)
+	if err != nil {
+		return nil, err
+	}
+	defer r.Close()
+
+	var images []ImagePath
+	for _, f := range r.File {
+		if !f.FileInfo().IsDir() && isSupportedExt(f.Name) {
+			images = append(images, ImagePath{
+				Path:        archivePath + ":" + f.Name,
+				ArchivePath: archivePath,
+				EntryPath:   f.Name,
+			})
+		}
+	}
+	return images, nil
+}
+
+func extractImagesFromRar(archivePath string) ([]ImagePath, error) {
+	f, err := os.Open(archivePath)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	r, err := rardecode.NewReader(f, "")
+	if err != nil {
+		return nil, err
+	}
+
+	var images []ImagePath
+	for {
+		header, err := r.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+
+		if !header.IsDir && isSupportedExt(header.Name) {
+			images = append(images, ImagePath{
+				Path:        archivePath + ":" + header.Name,
+				ArchivePath: archivePath,
+				EntryPath:   header.Name,
+			})
+		}
+	}
+	return images, nil
+}
+
+func collectImages(args []string) ([]ImagePath, error) {
+	var list []ImagePath
 	for _, p := range args {
 		info, err := os.Stat(p)
 		if err != nil {
@@ -521,7 +675,25 @@ func collectImages(args []string) ([]string, error) {
 					return nil
 				}
 				if isSupportedExt(path) {
-					list = append(list, path)
+					list = append(list, ImagePath{
+						Path:        path,
+						ArchivePath: "",
+						EntryPath:   "",
+					})
+				} else if isArchiveExt(path) {
+					var archiveImages []ImagePath
+					ext := strings.ToLower(filepath.Ext(path))
+					switch ext {
+					case ".zip":
+						archiveImages, err = extractImagesFromZip(path)
+					case ".rar":
+						archiveImages, err = extractImagesFromRar(path)
+					}
+					if err != nil {
+						log.Printf("Error reading archive %s: %v", path, err)
+					} else {
+						list = append(list, archiveImages...)
+					}
 				}
 				return nil
 			})
@@ -530,11 +702,33 @@ func collectImages(args []string) ([]string, error) {
 			}
 		} else {
 			if isSupportedExt(p) {
-				list = append(list, p)
+				list = append(list, ImagePath{
+					Path:        p,
+					ArchivePath: "",
+					EntryPath:   "",
+				})
+			} else if isArchiveExt(p) {
+				var archiveImages []ImagePath
+				ext := strings.ToLower(filepath.Ext(p))
+				switch ext {
+				case ".zip":
+					archiveImages, err = extractImagesFromZip(p)
+				case ".rar":
+					archiveImages, err = extractImagesFromRar(p)
+				}
+				if err != nil {
+					log.Printf("Error reading archive %s: %v", p, err)
+				} else {
+					list = append(list, archiveImages...)
+				}
 			}
 		}
 	}
-	sort.Strings(list)
+
+	// Sort by path for consistent ordering
+	sort.Slice(list, func(i, j int) bool {
+		return list[i].Path < list[j].Path
+	})
 	return list, nil
 }
 
