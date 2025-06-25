@@ -43,15 +43,17 @@ go mod tidy
 
 ## Application Controls
 
-- **Space/N**: Next image
-- **Backspace/P**: Previous image  
+- **Space/N**: Next image (2 images in book mode)
+- **Backspace/P**: Previous image (2 images in book mode)
+- **B**: Toggle book mode (spread view - displays 2 images side by side)
 - **Z**: Toggle fullscreen
 - **Escape/Q**: Quit application
 
 ## Architecture Notes
 
 - Single `Game` struct implements the Ebiten game interface
-- Images are loaded into memory at startup using `loadImage()` function
+- Lazy loading with intelligent image cache (keeps 3-4 images in memory)
 - `collectImages()` recursively finds supported image files in directories
+- Book mode displays two images side by side for spread viewing
 - Window scaling logic handles both windowed and fullscreen modes
-- No external configuration files - all settings are hardcoded defaults
+- Window size persistence using JSON config file at `~/.nv.json`

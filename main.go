@@ -107,6 +107,7 @@ type Game struct {
 	paths      []string
 	idx        int
 	fullscreen bool
+	bookMode   bool // Book/spread view mode
 
 	savedWinW int
 	savedWinH int
@@ -117,27 +118,48 @@ type Game struct {
 }
 
 func (g *Game) getCurrentImage() *ebiten.Image {
+	return g.getImageAtIndex(g.idx)
+}
+
+func (g *Game) getBookModeImages() (*ebiten.Image, *ebiten.Image) {
 	if len(g.paths) == 0 {
+		return nil, nil
+	}
+
+	// Get left image (current index)
+	leftImg := g.getImageAtIndex(g.idx)
+
+	// Get right image (next index, or nil if at the end)
+	var rightImg *ebiten.Image
+	if g.idx+1 < len(g.paths) {
+		rightImg = g.getImageAtIndex(g.idx + 1)
+	}
+
+	return leftImg, rightImg
+}
+
+func (g *Game) getImageAtIndex(idx int) *ebiten.Image {
+	if idx < 0 || idx >= len(g.paths) {
 		return nil
 	}
 
 	// Check if image is already in cache
-	if img, exists := g.imageCache[g.idx]; exists {
+	if img, exists := g.imageCache[idx]; exists {
 		return img
 	}
 
 	// Load image on demand
-	img, err := loadImage(g.paths[g.idx])
+	img, err := loadImage(g.paths[idx])
 	if err != nil {
-		log.Printf("failed to load %s: %v", g.paths[g.idx], err)
+		log.Printf("failed to load %s: %v", g.paths[idx], err)
 		return nil
 	}
 
 	// Add to cache
-	g.imageCache[g.idx] = img
+	g.imageCache[idx] = img
 
-	// Clean cache if it gets too large (keep only 3 images)
-	if len(g.imageCache) > 3 {
+	// Clean cache if it gets too large (keep only 4 images for book mode)
+	if len(g.imageCache) > 4 {
 		g.cleanCache()
 	}
 
@@ -221,15 +243,45 @@ func (g *Game) Update() error {
 		os.Exit(0)
 	}
 
+	// Book mode toggle
+	if inpututil.IsKeyJustPressed(ebiten.KeyB) {
+		g.bookMode = !g.bookMode
+		// Ensure even index in book mode for proper pairing
+		if g.bookMode && g.idx%2 != 0 {
+			if g.idx > 0 {
+				g.idx--
+			}
+		}
+		g.preloadAdjacentImages()
+	}
+
 	// Next / Prev keys
 	if inpututil.IsKeyJustPressed(ebiten.KeySpace) || inpututil.IsKeyJustPressed(ebiten.KeyN) {
-		g.idx = (g.idx + 1) % len(g.paths)
+		if g.bookMode {
+			// Move by 2 in book mode
+			g.idx = (g.idx + 2) % len(g.paths)
+		} else {
+			g.idx = (g.idx + 1) % len(g.paths)
+		}
 		g.preloadAdjacentImages() // Preload next images for smooth navigation
 	}
 	if inpututil.IsKeyJustPressed(ebiten.KeyBackspace) || inpututil.IsKeyJustPressed(ebiten.KeyP) {
-		g.idx--
-		if g.idx < 0 {
-			g.idx = len(g.paths) - 1
+		if g.bookMode {
+			// Move by 2 in book mode
+			g.idx -= 2
+			if g.idx < 0 {
+				// Find the last even index
+				lastEvenIdx := len(g.paths) - 1
+				if lastEvenIdx%2 != 0 {
+					lastEvenIdx--
+				}
+				g.idx = lastEvenIdx
+			}
+		} else {
+			g.idx--
+			if g.idx < 0 {
+				g.idx = len(g.paths) - 1
+			}
 		}
 		g.preloadAdjacentImages() // Preload next images for smooth navigation
 	}
@@ -252,6 +304,14 @@ func (g *Game) Update() error {
 }
 
 func (g *Game) Draw(screen *ebiten.Image) {
+	if g.bookMode {
+		g.drawBookMode(screen)
+	} else {
+		g.drawSingleImage(screen)
+	}
+}
+
+func (g *Game) drawSingleImage(screen *ebiten.Image) {
 	img := g.getCurrentImage()
 	if img == nil {
 		return
@@ -275,6 +335,49 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	op.GeoM.Scale(scale, scale)
 	sw, sh := float64(iw)*scale, float64(ih)*scale
 	op.GeoM.Translate(float64(w)/2-sw/2, float64(h)/2-sh/2)
+
+	screen.DrawImage(img, op)
+}
+
+func (g *Game) drawBookMode(screen *ebiten.Image) {
+	leftImg, rightImg := g.getBookModeImages()
+	if leftImg == nil {
+		return
+	}
+
+	w, h := screen.Bounds().Dx(), screen.Bounds().Dy()
+	const gap = 10 // Gap between images
+
+	// Calculate available width for each image
+	availableWidth := (w - gap) / 2
+
+	// Draw left image
+	g.drawImageInRegion(screen, leftImg, 0, 0, availableWidth, h)
+
+	// Draw right image if exists
+	if rightImg != nil {
+		g.drawImageInRegion(screen, rightImg, availableWidth+gap, 0, availableWidth, h)
+	}
+}
+
+func (g *Game) drawImageInRegion(screen *ebiten.Image, img *ebiten.Image, x, y, maxW, maxH int) {
+	iw, ih := img.Bounds().Dx(), img.Bounds().Dy()
+
+	var scale float64
+	if g.fullscreen {
+		scale = math.Min(float64(maxW)/float64(iw), float64(maxH)/float64(ih))
+	} else {
+		if iw > maxW || ih > maxH {
+			scale = math.Min(float64(maxW)/float64(iw), float64(maxH)/float64(ih))
+		} else {
+			scale = 1
+		}
+	}
+
+	op := &ebiten.DrawImageOptions{}
+	op.GeoM.Scale(scale, scale)
+	sw, sh := float64(iw)*scale, float64(ih)*scale
+	op.GeoM.Translate(float64(x)+float64(maxW)/2-sw/2, float64(y)+float64(maxH)/2-sh/2)
 
 	screen.DrawImage(img, op)
 }
