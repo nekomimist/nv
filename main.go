@@ -55,6 +55,10 @@ func getConfigPath() string {
 }
 
 func loadConfig() Config {
+	return loadConfigFromPath(getConfigPath())
+}
+
+func loadConfigFromPath(configPath string) Config {
 	config := Config{
 		WindowWidth:          defaultWidth,
 		WindowHeight:         defaultHeight,
@@ -62,7 +66,7 @@ func loadConfig() Config {
 		RightToLeft:          false, // Default to left-to-right reading (Western style)
 	}
 
-	data, err := os.ReadFile(getConfigPath())
+	data, err := os.ReadFile(configPath)
 	if err != nil {
 		return config
 	}
