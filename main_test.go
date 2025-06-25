@@ -9,6 +9,33 @@ import (
 	"github.com/hajimehoshi/ebiten/v2"
 )
 
+func TestIsArchiveExt(t *testing.T) {
+	tests := []struct {
+		name     string
+		path     string
+		expected bool
+	}{
+		{"ZIP file", "test.zip", true},
+		{"RAR file", "test.rar", true},
+		{"ZIP uppercase", "test.ZIP", true},
+		{"RAR uppercase", "test.RAR", true},
+		{"PNG file", "test.png", false},
+		{"Text file", "test.txt", false},
+		{"No extension", "test", false},
+		{"Empty string", "", false},
+		{"Path with directory", "/path/to/test.zip", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := isArchiveExt(tt.path)
+			if result != tt.expected {
+				t.Errorf("isArchiveExt(%s) = %v, want %v", tt.path, result, tt.expected)
+			}
+		})
+	}
+}
+
 func TestIsSupportedExt(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -155,9 +182,13 @@ func TestGameNavigation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create paths slice
-			paths := make([]string, tt.pathsCount)
+			paths := make([]ImagePath, tt.pathsCount)
 			for i := 0; i < tt.pathsCount; i++ {
-				paths[i] = "image" + string(rune('0'+i)) + ".jpg"
+				paths[i] = ImagePath{
+					Path:        "image" + string(rune('0'+i)) + ".jpg",
+					ArchivePath: "",
+					EntryPath:   "",
+				}
 			}
 
 			g := &Game{
@@ -215,7 +246,7 @@ func TestCollectImages(t *testing.T) {
 		{"photo.jpeg", true},
 	}
 
-	var expectedFiles []string
+	var expectedFiles []ImagePath
 	for _, file := range testFiles {
 		filePath := filepath.Join(tempDir, file.name)
 		f, err := os.Create(filePath)
@@ -225,7 +256,11 @@ func TestCollectImages(t *testing.T) {
 		f.Close()
 
 		if file.shouldAdd {
-			expectedFiles = append(expectedFiles, filePath)
+			expectedFiles = append(expectedFiles, ImagePath{
+				Path:        filePath,
+				ArchivePath: "",
+				EntryPath:   "",
+			})
 		}
 	}
 
@@ -237,8 +272,12 @@ func TestCollectImages(t *testing.T) {
 
 	if len(result) != len(expectedFiles) {
 		t.Errorf("Expected %d images, got %d", len(expectedFiles), len(result))
-		t.Errorf("Expected: %v", expectedFiles)
-		t.Errorf("Got: %v", result)
+		for i, expected := range expectedFiles {
+			t.Errorf("Expected[%d]: %+v", i, expected)
+		}
+		for i, got := range result {
+			t.Errorf("Got[%d]: %+v", i, got)
+		}
 	}
 
 	// Test individual file collection
@@ -248,8 +287,13 @@ func TestCollectImages(t *testing.T) {
 		t.Fatalf("collectImages with single file failed: %v", err)
 	}
 
-	if len(result) != 1 || result[0] != singleFile {
-		t.Errorf("Expected [%s], got %v", singleFile, result)
+	expectedSingle := ImagePath{
+		Path:        singleFile,
+		ArchivePath: "",
+		EntryPath:   "",
+	}
+	if len(result) != 1 || !reflect.DeepEqual(result[0], expectedSingle) {
+		t.Errorf("Expected [%+v], got %v", expectedSingle, result)
 	}
 }
 
@@ -294,7 +338,13 @@ func TestAspectRatioCompatibility(t *testing.T) {
 
 func TestImageCacheCleanup(t *testing.T) {
 	g := &Game{
-		paths: []string{"1.jpg", "2.jpg", "3.jpg", "4.jpg", "5.jpg"},
+		paths: []ImagePath{
+			{Path: "1.jpg"},
+			{Path: "2.jpg"},
+			{Path: "3.jpg"},
+			{Path: "4.jpg"},
+			{Path: "5.jpg"},
+		},
 		idx:   2, // Current index
 		imageCache: map[int]*ebiten.Image{
 			0: ebiten.NewImage(10, 10),
@@ -349,6 +399,52 @@ func TestCalculateHorizontalPosition(t *testing.T) {
 			result := g.calculateHorizontalPosition(tt.x, tt.maxW, tt.scaledW, tt.align)
 			if result != tt.expected {
 				t.Errorf("Expected %.1f, got %.1f", tt.expected, result)
+			}
+		})
+	}
+}
+
+func TestImagePathCreation(t *testing.T) {
+	tests := []struct {
+		name        string
+		path        string
+		archivePath string
+		entryPath   string
+		expected    ImagePath
+	}{
+		{
+			name:     "Regular file",
+			path:     "/path/to/image.jpg",
+			expected: ImagePath{Path: "/path/to/image.jpg", ArchivePath: "", EntryPath: ""},
+		},
+		{
+			name:        "Archive entry",
+			path:        "archive.zip:image.png",
+			archivePath: "archive.zip",
+			entryPath:   "image.png",
+			expected:    ImagePath{Path: "archive.zip:image.png", ArchivePath: "archive.zip", EntryPath: "image.png"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var imagePath ImagePath
+			if tt.archivePath != "" {
+				imagePath = ImagePath{
+					Path:        tt.path,
+					ArchivePath: tt.archivePath,
+					EntryPath:   tt.entryPath,
+				}
+			} else {
+				imagePath = ImagePath{
+					Path:        tt.path,
+					ArchivePath: "",
+					EntryPath:   "",
+				}
+			}
+
+			if !reflect.DeepEqual(imagePath, tt.expected) {
+				t.Errorf("ImagePath creation failed.\nExpected: %+v\nGot: %+v", tt.expected, imagePath)
 			}
 		})
 	}
