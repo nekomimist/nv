@@ -20,6 +20,7 @@ type Config struct {
 	WindowHeight         int     `json:"window_height"`
 	AspectRatioThreshold float64 `json:"aspect_ratio_threshold"`
 	RightToLeft          bool    `json:"right_to_left"`
+	HelpFontSize         float64 `json:"help_font_size"`
 }
 
 func getConfigPath() string {
@@ -40,6 +41,7 @@ func loadConfigFromPath(configPath string) Config {
 		WindowHeight:         defaultHeight,
 		AspectRatioThreshold: 1.5,   // Default threshold for aspect ratio compatibility
 		RightToLeft:          false, // Default to left-to-right reading (Western style)
+		HelpFontSize:         24.0,  // Default help font size
 	}
 
 	data, err := os.ReadFile(configPath)
@@ -56,6 +58,7 @@ func loadConfigFromPath(configPath string) Config {
 			WindowHeight:         defaultHeight,
 			AspectRatioThreshold: 1.5,
 			RightToLeft:          false,
+			HelpFontSize:         24.0,
 		}
 	}
 
@@ -70,6 +73,11 @@ func loadConfigFromPath(configPath string) Config {
 	// Validate aspect ratio threshold
 	if config.AspectRatioThreshold <= 1.0 {
 		config.AspectRatioThreshold = 1.5
+	}
+
+	// Validate help font size (minimum 12px for readability)
+	if config.HelpFontSize <= 12.0 {
+		config.HelpFontSize = 24.0
 	}
 
 	return config

@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"flag"
+	"image/color"
 	"log"
 	"math"
 	"os"
@@ -11,6 +13,9 @@ import (
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
+	"github.com/hajimehoshi/ebiten/v2/text/v2"
+	"github.com/hajimehoshi/ebiten/v2/vector"
+	"golang.org/x/image/font/gofont/goregular"
 )
 
 const (
@@ -47,6 +52,7 @@ type Game struct {
 	idx          int
 	fullscreen   bool
 	bookMode     bool // Book/spread view mode
+	showHelp     bool // Help overlay display
 
 	savedWinW int
 	savedWinH int
@@ -108,6 +114,7 @@ func (g *Game) Update() error {
 	}
 
 	g.handleExitKeys()
+	g.handleHelpToggle()
 	g.handleModeToggleKeys()
 	g.handleNavigationKeys()
 	g.handleFullscreenToggle()
@@ -119,6 +126,12 @@ func (g *Game) handleExitKeys() {
 	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) || inpututil.IsKeyJustPressed(ebiten.KeyQ) {
 		g.saveCurrentWindowSize()
 		os.Exit(0)
+	}
+}
+
+func (g *Game) handleHelpToggle() {
+	if inpututil.IsKeyJustPressed(ebiten.KeyH) {
+		g.showHelp = !g.showHelp
 	}
 }
 
@@ -208,6 +221,11 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		g.drawBookMode(screen)
 	} else {
 		g.drawSingleImage(screen)
+	}
+
+	// Draw help overlay if enabled
+	if g.showHelp {
+		g.drawHelpOverlay(screen)
 	}
 }
 
@@ -321,6 +339,131 @@ func (g *Game) calculateHorizontalPosition(x, maxW int, scaledW float64, align s
 
 func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {
 	return outsideWidth, outsideHeight
+}
+
+// Help text data - keys and descriptions separated for better alignment
+var helpSections = []struct {
+	title string
+	items []struct {
+		key  string
+		desc string
+	}
+}{
+	{
+		title: "Navigation:",
+		items: []struct {
+			key  string
+			desc string
+		}{
+			{"Space/N", "Next image (2 images in book mode)"},
+			{"Backspace/P", "Previous image (2 images in book mode)"},
+			{"Shift+Space/N", "Single page forward (fine adjustment)"},
+			{"Shift+Backspace/P", "Single page backward (fine adjustment)"},
+		},
+	},
+	{
+		title: "Display Modes:",
+		items: []struct {
+			key  string
+			desc string
+		}{
+			{"B", "Toggle book mode (dual image view)"},
+			{"Shift+B", "Toggle reading direction (LTR ↔ RTL)"},
+			{"Z", "Toggle fullscreen"},
+		},
+	},
+	{
+		title: "Other:",
+		items: []struct {
+			key  string
+			desc string
+		}{
+			{"H", "Show/hide this help"},
+			{"Escape/Q", "Quit application"},
+		},
+	},
+}
+
+var (
+	helpFontSource *text.GoTextFaceSource
+)
+
+func init() {
+	// Initialize font source with lightweight goregular
+	s, err := text.NewGoTextFaceSource(bytes.NewReader(goregular.TTF))
+	if err != nil {
+		log.Fatal(err)
+	}
+	helpFontSource = s
+}
+
+func (g *Game) drawHelpOverlay(screen *ebiten.Image) {
+	w, h := screen.Bounds().Dx(), screen.Bounds().Dy()
+
+	// Semi-transparent black background (lighter for more image transparency)
+	vector.DrawFilledRect(screen, 0, 0, float32(w), float32(h), color.RGBA{0, 0, 0, 128}, false)
+
+	// Help text area with semi-transparent black background
+	padding := 40
+	textAreaX := float32(padding)
+	textAreaY := float32(padding)
+	textAreaW := float32(w - padding*2)
+	textAreaH := float32(h - padding*2)
+
+	// Semi-transparent black background for text area
+	vector.DrawFilledRect(screen, textAreaX, textAreaY, textAreaW, textAreaH, color.RGBA{0, 0, 0, 160}, false)
+
+	// Create font with size from config
+	helpFont := &text.GoTextFace{
+		Source: helpFontSource,
+		Size:   g.config.HelpFontSize,
+	}
+
+	// Draw title
+	titleY := float64(padding + 30)
+	titleOp := &text.DrawOptions{}
+	titleOp.GeoM.Translate(float64(padding+20), titleY)
+	titleOp.ColorScale.ScaleWithColor(color.RGBA{255, 255, 255, 255})
+	text.Draw(screen, "CONTROLS:", helpFont, titleOp)
+
+	// Calculate column positions
+	keyColumnX := float64(padding + 220)       // Key column (right-aligned)
+	descColumnX := float64(padding + 270)      // Description column (left-aligned)
+	
+	currentY := titleY + g.config.HelpFontSize*2 // Start below title
+	lineHeight := g.config.HelpFontSize * 1.5
+
+	// Draw each section
+	for _, section := range helpSections {
+		// Draw section title
+		sectionOp := &text.DrawOptions{}
+		sectionOp.GeoM.Translate(float64(padding+20), currentY)
+		sectionOp.ColorScale.ScaleWithColor(color.RGBA{255, 255, 255, 255})
+		text.Draw(screen, section.title, helpFont, sectionOp)
+		currentY += lineHeight
+
+		// Draw each key-description pair
+		for _, item := range section.items {
+			// Draw key (right-aligned)
+			keyOp := &text.DrawOptions{}
+			keyOp.GeoM.Translate(keyColumnX, currentY)
+			keyOp.ColorScale.ScaleWithColor(color.RGBA{255, 255, 255, 255})
+			keyOp.PrimaryAlign = text.AlignEnd // Right align keys
+			text.Draw(screen, item.key, helpFont, keyOp)
+
+			// Draw description (left-aligned)
+			descOp := &text.DrawOptions{}
+			descOp.GeoM.Translate(descColumnX, currentY)
+			descOp.ColorScale.ScaleWithColor(color.RGBA{255, 255, 255, 255})
+			descOp.PrimaryAlign = text.AlignStart // Left align descriptions
+			text.Draw(screen, item.desc, helpFont, descOp)
+
+			currentY += lineHeight
+		}
+		
+		// Add extra space between sections
+		currentY += lineHeight * 0.5
+	}
 }
 
 func main() {

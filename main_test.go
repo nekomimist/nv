@@ -466,6 +466,7 @@ func TestLoadConfigDefaults(t *testing.T) {
 		WindowHeight:         defaultHeight,
 		AspectRatioThreshold: 1.5,
 		RightToLeft:          false,
+		HelpFontSize:         24.0,
 	}
 
 	if !reflect.DeepEqual(config, expectedConfig) {
