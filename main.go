@@ -55,8 +55,9 @@ type Game struct {
 	imageManager ImageManager
 	idx          int
 	fullscreen   bool
-	bookMode     bool // Book/spread view mode
-	showHelp     bool // Help overlay display
+	bookMode     bool     // Book/spread view mode
+	tempSingleMode bool   // Temporary single page mode (return to book mode after navigation)
+	showHelp     bool     // Help overlay display
 
 	// Boundary message state
 	boundaryMessage string
@@ -183,6 +184,21 @@ func (g *Game) handleNavigationKeys() {
 
 func (g *Game) navigateNext() {
 	pathsCount := g.imageManager.GetPathsCount()
+	
+	// Handle temporary single mode navigation
+	if g.tempSingleMode {
+		// From temp single mode, try to go to next pair
+		newIdx := g.idx + 1
+		if newIdx >= pathsCount {
+			g.showBoundaryMessage("Last page")
+			return
+		}
+		g.idx = newIdx
+		g.tempSingleMode = false
+		g.bookMode = true
+		return
+	}
+	
 	if g.bookMode && !ebiten.IsKeyPressed(ebiten.KeyShift) {
 		// Check if we can actually display in book mode
 		leftImg, rightImg := g.imageManager.GetBookModeImages(g.idx, g.config.RightToLeft)
@@ -190,7 +206,22 @@ func (g *Game) navigateNext() {
 			// Move by 2 in book mode (normal spread navigation)
 			newIdx := g.idx + 2
 			if newIdx >= pathsCount {
-				g.showBoundaryMessage("Last page")
+				// Check if there's one page left to display in temp single mode
+				if g.idx + 1 < pathsCount {
+					g.idx = g.idx + 1
+					g.bookMode = false
+					g.tempSingleMode = true
+				} else {
+					g.showBoundaryMessage("Last page")
+				}
+				return
+			}
+			// Check if next pair would be incomplete (only one page left after this pair)
+			if newIdx + 1 >= pathsCount {
+				// Move to the last single page in temp single mode
+				g.idx = newIdx
+				g.bookMode = false
+				g.tempSingleMode = true
 				return
 			}
 			g.idx = newIdx
@@ -215,13 +246,40 @@ func (g *Game) navigateNext() {
 }
 
 func (g *Game) navigatePrevious() {
+	// Handle temporary single mode navigation
+	if g.tempSingleMode {
+		// From temp single mode, try to go to previous pair
+		if g.idx < 2 {
+			// Check if we can move to the first page
+			if g.idx > 0 {
+				g.idx = 0
+				g.tempSingleMode = false
+				g.bookMode = true
+			} else {
+				g.showBoundaryMessage("First page")
+			}
+			return
+		}
+		g.idx -= 2
+		g.tempSingleMode = false
+		g.bookMode = true
+		return
+	}
+	
 	if g.bookMode && !ebiten.IsKeyPressed(ebiten.KeyShift) {
 		// Check if we can actually display in book mode
 		leftImg, rightImg := g.imageManager.GetBookModeImages(g.idx, g.config.RightToLeft)
 		if g.shouldUseBookMode(leftImg, rightImg) {
 			// Move by 2 in book mode (normal spread navigation)
 			if g.idx < 2 {
-				g.showBoundaryMessage("First page")
+				// Check if we can move to first page in temp single mode
+				if g.idx > 0 {
+					g.idx = 0
+					g.bookMode = false
+					g.tempSingleMode = true
+				} else {
+					g.showBoundaryMessage("First page")
+				}
 				return
 			}
 			g.idx -= 2
@@ -259,10 +317,12 @@ func (g *Game) handleFullscreenToggle() {
 }
 
 func (g *Game) Draw(screen *ebiten.Image) {
-	if g.bookMode {
-		g.drawBookMode(screen)
-	} else {
+	if g.tempSingleMode || !g.bookMode {
+		// Single page mode or temporary single mode
 		g.drawSingleImage(screen)
+	} else {
+		// Book mode
+		g.drawBookMode(screen)
 	}
 
 	// Draw help overlay if enabled
