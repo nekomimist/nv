@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"log"
 	"os"
 	"path/filepath"
 )
@@ -43,10 +44,20 @@ func loadConfigFromPath(configPath string) Config {
 
 	data, err := os.ReadFile(configPath)
 	if err != nil {
+		// Config file not found is not an error - use defaults
 		return config
 	}
 
-	json.Unmarshal(data, &config)
+	if err := json.Unmarshal(data, &config); err != nil {
+		// Invalid config file - log warning and use defaults
+		log.Printf("Warning: Invalid config file %s, using defaults: %v", configPath, err)
+		return Config{
+			WindowWidth:          defaultWidth,
+			WindowHeight:         defaultHeight,
+			AspectRatioThreshold: 1.5,
+			RightToLeft:          false,
+		}
+	}
 
 	// Validate minimum size
 	if config.WindowWidth < minWidth {
@@ -67,13 +78,19 @@ func loadConfigFromPath(configPath string) Config {
 func saveConfig(config Config) {
 	// Don't save if size is too small
 	if config.WindowWidth < minWidth || config.WindowHeight < minHeight {
+		log.Printf("Warning: Not saving config with invalid window size: %dx%d",
+			config.WindowWidth, config.WindowHeight)
 		return
 	}
 
 	data, err := json.MarshalIndent(config, "", "  ")
 	if err != nil {
+		log.Printf("Error: Failed to marshal config: %v", err)
 		return
 	}
 
-	os.WriteFile(getConfigPath(), data, 0644)
+	configPath := getConfigPath()
+	if err := os.WriteFile(configPath, data, 0644); err != nil {
+		log.Printf("Error: Failed to save config to %s: %v", configPath, err)
+	}
 }

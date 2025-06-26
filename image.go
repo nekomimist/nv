@@ -103,7 +103,8 @@ func (m *DefaultImageManager) GetImage(idx int) *ebiten.Image {
 	// Load image on demand
 	img, err := loadImage(m.paths[idx])
 	if err != nil {
-		log.Printf("failed to load %s: %v", m.paths[idx].Path, err)
+		log.Printf("Error: Failed to load image [%d/%d] %s: %v",
+			idx+1, len(m.paths), m.paths[idx].Path, err)
 		return nil
 	}
 
@@ -156,6 +157,8 @@ func (m *DefaultImageManager) PreloadAdjacentImages(idx int) {
 	if _, exists := m.imageCache[prevIdx]; !exists {
 		if img, err := loadImage(m.paths[prevIdx]); err == nil {
 			m.imageCache[prevIdx] = img
+		} else {
+			log.Printf("Debug: Failed to preload previous image %s: %v", m.paths[prevIdx].Path, err)
 		}
 	}
 
@@ -164,6 +167,8 @@ func (m *DefaultImageManager) PreloadAdjacentImages(idx int) {
 	if _, exists := m.imageCache[nextIdx]; !exists {
 		if img, err := loadImage(m.paths[nextIdx]); err == nil {
 			m.imageCache[nextIdx] = img
+		} else {
+			log.Printf("Debug: Failed to preload next image %s: %v", m.paths[nextIdx].Path, err)
 		}
 	}
 }
@@ -339,7 +344,7 @@ func processArchive(archivePath string) ([]ImagePath, error) {
 	}
 
 	if err != nil {
-		log.Printf("Error reading archive %s: %v", archivePath, err)
+		log.Printf("Error: Failed to process archive %s: %v", archivePath, err)
 		return []ImagePath{}, err
 	}
 
@@ -371,6 +376,8 @@ func collectImages(args []string) ([]ImagePath, error) {
 					archiveImages, err := processArchive(path)
 					if err == nil {
 						list = append(list, archiveImages...)
+					} else {
+						log.Printf("Warning: Skipping problematic archive %s: %v", path, err)
 					}
 				}
 				return nil
@@ -389,6 +396,8 @@ func collectImages(args []string) ([]ImagePath, error) {
 				archiveImages, err := processArchive(p)
 				if err == nil {
 					list = append(list, archiveImages...)
+				} else {
+					log.Printf("Warning: Skipping problematic archive %s: %v", p, err)
 				}
 			}
 		}

@@ -307,7 +307,7 @@ func TestAspectRatioCompatibility(t *testing.T) {
 	}
 
 	tests := []struct {
-		name        string
+		name           string
 		leftW, leftH   int
 		rightW, rightH int
 		expected       bool

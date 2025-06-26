@@ -42,7 +42,6 @@ func isSupportedExt(path string) bool {
 	}
 }
 
-
 type Game struct {
 	imageManager ImageManager
 	idx          int
@@ -86,7 +85,6 @@ func (g *Game) shouldUseBookMode(leftImg, rightImg *ebiten.Image) bool {
 	// Use single page if aspect ratios are too different
 	return aspectRatio <= g.config.AspectRatioThreshold
 }
-
 
 func (g *Game) saveCurrentWindowSize() {
 	if g.fullscreen {
@@ -324,7 +322,6 @@ func (g *Game) calculateHorizontalPosition(x, maxW int, scaledW float64, align s
 func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {
 	return outsideWidth, outsideHeight
 }
-
 
 func main() {
 	flag.Parse()
