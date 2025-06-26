@@ -16,6 +16,7 @@ import (
 	"github.com/hajimehoshi/ebiten/v2/text/v2"
 	"github.com/hajimehoshi/ebiten/v2/vector"
 	"golang.org/x/image/font/gofont/goregular"
+	"time"
 )
 
 const (
@@ -25,6 +26,9 @@ const (
 	// Aspect ratio thresholds
 	minAspectRatio = 0.4 // Extremely tall images
 	maxAspectRatio = 2.5 // Extremely wide images
+
+	// Boundary message display duration
+	boundaryMessageDuration = 2 * time.Second
 )
 
 func isArchiveExt(path string) bool {
@@ -53,6 +57,10 @@ type Game struct {
 	fullscreen   bool
 	bookMode     bool // Book/spread view mode
 	showHelp     bool // Help overlay display
+
+	// Boundary message state
+	boundaryMessage string
+	boundaryMessageTime time.Time
 
 	savedWinW int
 	savedWinH int
@@ -90,6 +98,11 @@ func (g *Game) shouldUseBookMode(leftImg, rightImg *ebiten.Image) bool {
 
 	// Use single page if aspect ratios are too different
 	return aspectRatio <= g.config.AspectRatioThreshold
+}
+
+func (g *Game) showBoundaryMessage(message string) {
+	g.boundaryMessage = message
+	g.boundaryMessageTime = time.Now()
 }
 
 func (g *Game) saveCurrentWindowSize() {
@@ -175,46 +188,58 @@ func (g *Game) navigateNext() {
 		leftImg, rightImg := g.imageManager.GetBookModeImages(g.idx, g.config.RightToLeft)
 		if g.shouldUseBookMode(leftImg, rightImg) {
 			// Move by 2 in book mode (normal spread navigation)
-			g.idx = (g.idx + 2) % pathsCount
+			newIdx := g.idx + 2
+			if newIdx >= pathsCount {
+				g.showBoundaryMessage("Last page")
+				return
+			}
+			g.idx = newIdx
 		} else {
 			// Fall back to single page navigation
-			g.idx = (g.idx + 1) % pathsCount
+			newIdx := g.idx + 1
+			if newIdx >= pathsCount {
+				g.showBoundaryMessage("Last page")
+				return
+			}
+			g.idx = newIdx
 		}
 	} else {
 		// Move by 1 (single page mode or SHIFT+key for fine adjustment)
-		g.idx = (g.idx + 1) % pathsCount
+		newIdx := g.idx + 1
+		if newIdx >= pathsCount {
+			g.showBoundaryMessage("Last page")
+			return
+		}
+		g.idx = newIdx
 	}
 }
 
 func (g *Game) navigatePrevious() {
-	pathsCount := g.imageManager.GetPathsCount()
 	if g.bookMode && !ebiten.IsKeyPressed(ebiten.KeyShift) {
 		// Check if we can actually display in book mode
 		leftImg, rightImg := g.imageManager.GetBookModeImages(g.idx, g.config.RightToLeft)
 		if g.shouldUseBookMode(leftImg, rightImg) {
 			// Move by 2 in book mode (normal spread navigation)
-			g.idx -= 2
-			if g.idx < 0 {
-				// Find the last even index
-				lastEvenIdx := pathsCount - 1
-				if lastEvenIdx%2 != 0 {
-					lastEvenIdx--
-				}
-				g.idx = lastEvenIdx
+			if g.idx < 2 {
+				g.showBoundaryMessage("First page")
+				return
 			}
+			g.idx -= 2
 		} else {
 			// Fall back to single page navigation
-			g.idx--
-			if g.idx < 0 {
-				g.idx = pathsCount - 1
+			if g.idx == 0 {
+				g.showBoundaryMessage("First page")
+				return
 			}
+			g.idx--
 		}
 	} else {
 		// Move by 1 (single page mode or SHIFT+key for fine adjustment)
-		g.idx--
-		if g.idx < 0 {
-			g.idx = pathsCount - 1
+		if g.idx == 0 {
+			g.showBoundaryMessage("First page")
+			return
 		}
+		g.idx--
 	}
 }
 
@@ -243,6 +268,11 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	// Draw help overlay if enabled
 	if g.showHelp {
 		g.drawHelpOverlay(screen)
+	}
+
+	// Draw boundary message overlay if active
+	if g.boundaryMessage != "" && time.Since(g.boundaryMessageTime) < boundaryMessageDuration {
+		g.drawBoundaryMessageOverlay(screen)
 	}
 }
 
@@ -481,6 +511,35 @@ func (g *Game) drawHelpOverlay(screen *ebiten.Image) {
 		// Add extra space between sections
 		currentY += lineHeight * 0.5
 	}
+}
+
+func (g *Game) drawBoundaryMessageOverlay(screen *ebiten.Image) {
+	w, h := screen.Bounds().Dx(), screen.Bounds().Dy()
+
+	// Create font for boundary message
+	messageFont := &text.GoTextFace{
+		Source: helpFontSource,
+		Size:   g.config.HelpFontSize,
+	}
+
+	// Measure text dimensions
+	textWidth, textHeight := text.Measure(g.boundaryMessage, messageFont, 0)
+
+	// Calculate position (center of screen)
+	padding := 20
+	boxWidth := textWidth + float64(padding*2)
+	boxHeight := textHeight + float64(padding*2)
+	boxX := (float64(w) - boxWidth) / 2
+	boxY := (float64(h) - boxHeight) / 2
+
+	// Semi-transparent black background
+	vector.DrawFilledRect(screen, float32(boxX), float32(boxY), float32(boxWidth), float32(boxHeight), color.RGBA{0, 0, 0, 200}, false)
+
+	// Draw text
+	textOp := &text.DrawOptions{}
+	textOp.GeoM.Translate(boxX+float64(padding), boxY+float64(padding))
+	textOp.ColorScale.ScaleWithColor(color.RGBA{255, 255, 255, 255})
+	text.Draw(screen, g.boundaryMessage, messageFont, textOp)
 }
 
 func main() {
