@@ -171,8 +171,15 @@ func (g *Game) handleNavigationKeys() {
 func (g *Game) navigateNext() {
 	pathsCount := g.imageManager.GetPathsCount()
 	if g.bookMode && !ebiten.IsKeyPressed(ebiten.KeyShift) {
-		// Move by 2 in book mode (normal spread navigation)
-		g.idx = (g.idx + 2) % pathsCount
+		// Check if we can actually display in book mode
+		leftImg, rightImg := g.imageManager.GetBookModeImages(g.idx, g.config.RightToLeft)
+		if g.shouldUseBookMode(leftImg, rightImg) {
+			// Move by 2 in book mode (normal spread navigation)
+			g.idx = (g.idx + 2) % pathsCount
+		} else {
+			// Fall back to single page navigation
+			g.idx = (g.idx + 1) % pathsCount
+		}
 	} else {
 		// Move by 1 (single page mode or SHIFT+key for fine adjustment)
 		g.idx = (g.idx + 1) % pathsCount
@@ -182,15 +189,25 @@ func (g *Game) navigateNext() {
 func (g *Game) navigatePrevious() {
 	pathsCount := g.imageManager.GetPathsCount()
 	if g.bookMode && !ebiten.IsKeyPressed(ebiten.KeyShift) {
-		// Move by 2 in book mode (normal spread navigation)
-		g.idx -= 2
-		if g.idx < 0 {
-			// Find the last even index
-			lastEvenIdx := pathsCount - 1
-			if lastEvenIdx%2 != 0 {
-				lastEvenIdx--
+		// Check if we can actually display in book mode
+		leftImg, rightImg := g.imageManager.GetBookModeImages(g.idx, g.config.RightToLeft)
+		if g.shouldUseBookMode(leftImg, rightImg) {
+			// Move by 2 in book mode (normal spread navigation)
+			g.idx -= 2
+			if g.idx < 0 {
+				// Find the last even index
+				lastEvenIdx := pathsCount - 1
+				if lastEvenIdx%2 != 0 {
+					lastEvenIdx--
+				}
+				g.idx = lastEvenIdx
 			}
-			g.idx = lastEvenIdx
+		} else {
+			// Fall back to single page navigation
+			g.idx--
+			if g.idx < 0 {
+				g.idx = pathsCount - 1
+			}
 		}
 	} else {
 		// Move by 1 (single page mode or SHIFT+key for fine adjustment)
