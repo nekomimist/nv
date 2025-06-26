@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/bodgit/sevenzip"
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/nwaples/rardecode"
 	_ "golang.org/x/image/bmp"
@@ -242,6 +243,32 @@ func loadImageFromRar(archivePath, entryPath string) (*ebiten.Image, error) {
 	return nil, fmt.Errorf("entry %s not found in %s", entryPath, archivePath)
 }
 
+func loadImageFrom7z(archivePath, entryPath string) (*ebiten.Image, error) {
+	r, err := sevenzip.OpenReader(archivePath)
+	if err != nil {
+		return nil, err
+	}
+	defer r.Close()
+
+	for _, f := range r.File {
+		if f.Name == entryPath {
+			rc, err := f.Open()
+			if err != nil {
+				return nil, err
+			}
+			defer rc.Close()
+
+			data, err := io.ReadAll(rc)
+			if err != nil {
+				return nil, err
+			}
+
+			return loadImageFromBytes(data, entryPath)
+		}
+	}
+	return nil, fmt.Errorf("entry %s not found in %s", entryPath, archivePath)
+}
+
 func loadImage(imagePath ImagePath) (*ebiten.Image, error) {
 	if imagePath.ArchivePath == "" {
 		// Regular file
@@ -264,6 +291,8 @@ func loadImage(imagePath ImagePath) (*ebiten.Image, error) {
 			return loadImageFromZip(imagePath.ArchivePath, imagePath.EntryPath)
 		case ".rar":
 			return loadImageFromRar(imagePath.ArchivePath, imagePath.EntryPath)
+		case ".7z":
+			return loadImageFrom7z(imagePath.ArchivePath, imagePath.EntryPath)
 		default:
 			return nil, fmt.Errorf("unsupported archive format: %s", ext)
 		}
@@ -325,6 +354,26 @@ func extractImagesFromRar(archivePath string) ([]ImagePath, error) {
 	return images, nil
 }
 
+func extractImagesFrom7z(archivePath string) ([]ImagePath, error) {
+	r, err := sevenzip.OpenReader(archivePath)
+	if err != nil {
+		return nil, err
+	}
+	defer r.Close()
+
+	var images []ImagePath
+	for _, f := range r.File {
+		if !f.FileInfo().IsDir() && isSupportedExt(f.Name) {
+			images = append(images, ImagePath{
+				Path:        archivePath + ":" + f.Name,
+				ArchivePath: archivePath,
+				EntryPath:   f.Name,
+			})
+		}
+	}
+	return images, nil
+}
+
 func processArchive(archivePath string) ([]ImagePath, error) {
 	if !isArchiveExt(archivePath) {
 		return []ImagePath{}, nil
@@ -339,6 +388,8 @@ func processArchive(archivePath string) ([]ImagePath, error) {
 		archiveImages, err = extractImagesFromZip(archivePath)
 	case ".rar":
 		archiveImages, err = extractImagesFromRar(archivePath)
+	case ".7z":
+		archiveImages, err = extractImagesFrom7z(archivePath)
 	default:
 		return []ImagePath{}, fmt.Errorf("unsupported archive format: %s", ext)
 	}

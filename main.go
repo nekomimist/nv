@@ -30,7 +30,7 @@ const (
 func isArchiveExt(path string) bool {
 	ext := strings.ToLower(filepath.Ext(path))
 	switch ext {
-	case ".zip", ".rar":
+	case ".zip", ".rar", ".7z":
 		return true
 	default:
 		return false
