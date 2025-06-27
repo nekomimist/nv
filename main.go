@@ -238,47 +238,56 @@ func (g *Game) handleHelpToggle() {
 }
 
 func (g *Game) handlePageInputMode() {
-	if g.pageInputMode {
-		// Handle page input mode
-		if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
-			// Cancel page input
-			g.pageInputMode = false
-			g.pageInputBuffer = ""
-		} else if inpututil.IsKeyJustPressed(ebiten.KeyEnter) || inpututil.IsKeyJustPressed(ebiten.KeyNumpadEnter) {
-			// Confirm page input
-			g.processPageInput()
-			g.pageInputMode = false
-			g.pageInputBuffer = ""
-		} else if inpututil.IsKeyJustPressed(ebiten.KeyBackspace) {
-			// Delete last character
-			if len(g.pageInputBuffer) > 0 {
-				g.pageInputBuffer = g.pageInputBuffer[:len(g.pageInputBuffer)-1]
-			}
-		} else {
-			// Handle digit input
-			for key := ebiten.Key0; key <= ebiten.Key9; key++ {
-				if inpututil.IsKeyJustPressed(key) {
-					digit := string(rune('0' + int(key-ebiten.Key0)))
-					g.pageInputBuffer += digit
-					break
-				}
-			}
-			// Handle numpad digits
-			for key := ebiten.KeyNumpad0; key <= ebiten.KeyNumpad9; key++ {
-				if inpututil.IsKeyJustPressed(key) {
-					digit := string(rune('0' + int(key-ebiten.KeyNumpad0)))
-					g.pageInputBuffer += digit
-					break
-				}
-			}
-		}
-	} else {
-		// Check for G key to enter page input mode
+	// Check for G key to enter page input mode
+	if !g.pageInputMode {
 		if inpututil.IsKeyJustPressed(ebiten.KeyG) {
 			g.pageInputMode = true
 			g.pageInputBuffer = ""
 		}
+		return
 	}
+
+	// Handle page input mode
+	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
+		// Cancel page input
+		g.pageInputMode = false
+		g.pageInputBuffer = ""
+		return
+	}
+	
+	if inpututil.IsKeyJustPressed(ebiten.KeyEnter) || inpututil.IsKeyJustPressed(ebiten.KeyNumpadEnter) {
+		// Confirm page input
+		g.processPageInput()
+		g.pageInputMode = false
+		g.pageInputBuffer = ""
+		return
+	}
+	
+	if inpututil.IsKeyJustPressed(ebiten.KeyBackspace) {
+		// Delete last character
+		if len(g.pageInputBuffer) > 0 {
+			g.pageInputBuffer = g.pageInputBuffer[:len(g.pageInputBuffer)-1]
+		}
+		return
+	}
+	
+	// Handle digit input (both regular and numpad)
+	var digit string
+	if digit = checkDigitKeys(ebiten.Key0, ebiten.Key9, '0'); digit == "" {
+		digit = checkDigitKeys(ebiten.KeyNumpad0, ebiten.KeyNumpad9, '0')
+	}
+	if digit != "" {
+		g.pageInputBuffer += digit
+	}
+}
+
+func checkDigitKeys(startKey, endKey ebiten.Key, baseChar rune) string {
+	for key := startKey; key <= endKey; key++ {
+		if inpututil.IsKeyJustPressed(key) {
+			return string(baseChar + rune(key-startKey))
+		}
+	}
+	return ""
 }
 
 func (g *Game) handleModeToggleKeys() {
