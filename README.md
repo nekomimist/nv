@@ -1,0 +1,127 @@
+# NV - Image Viewer
+
+A simple image viewer built with Go and Ebiten, featuring seamless archive support and intelligent book mode for manga reading.
+
+## Features
+
+- **Multiple Format Support**: PNG, JPEG, WebP, BMP, GIF
+- **Archive Integration**: Direct ZIP, RAR, and 7Z file viewing
+- **Book Mode**: Side-by-side image display with configurable reading direction
+- **Intelligent Caching**: LRU-style cache with preloading for smooth navigation
+- **Fullscreen Support**: Toggle between windowed and fullscreen modes
+- **Page Jump**: Direct navigation to specific pages
+- **Interactive Help**: Built-in help overlay with all controls
+
+## Installation
+
+```bash
+# Clone the repository
+git clone https://github.com/nekomimist/nv.git
+cd nv
+
+# Build the application
+go build
+
+# Or run directly
+go run main.go [image_files_or_directories...]
+```
+
+## Usage
+
+```bash
+# View images in current directory
+./nv .
+
+# View specific images
+./nv image1.png image2.jpg
+
+# View images from archive
+./nv manga.zip photos.rar collection.7z
+
+# View images from multiple sources
+./nv ./photos/ manga.zip single_image.png
+```
+
+## Controls
+
+### Navigation
+- `Space` / `N` - Next image (2 pages in book mode)
+- `Backspace` / `P` - Previous image (2 pages in book mode)
+- `Shift+Space` / `Shift+N` - Single page forward
+- `Shift+Backspace` / `Shift+P` - Single page backward
+- `G` - Jump to specific page
+- `Home` / `<` - First page
+- `End` / `>` - Last page
+
+### Display Modes
+- `B` - Toggle book mode (side-by-side view)
+- `Shift+B` - Toggle reading direction (LTR ↔ RTL)
+- `Z` - Toggle fullscreen
+
+### Other
+- `H` - Show/hide help overlay
+- `Escape` / `Q` - Quit
+
+## Book Mode
+
+Book mode displays two images side-by-side, perfect for reading manga or viewing photo spreads:
+
+- **Flexible Start**: Can be enabled from any page
+- **Smart Pairing**: Automatically handles aspect ratio compatibility
+- **Reading Direction**: Supports both left-to-right and right-to-left modes
+- **Automatic Fallback**: Falls back to single page when needed
+
+## Configuration
+
+Settings are automatically saved to `~/.nv.json`:
+
+```json
+{
+  "window_width": 800,
+  "window_height": 600,
+  "aspect_ratio_threshold": 1.5,
+  "right_to_left": false,
+  "help_font_size": 24.0
+}
+```
+
+- `aspect_ratio_threshold` - Controls book mode compatibility (default: 1.5)
+- `right_to_left` - Reading direction for book mode (default: false)
+- `help_font_size` - Font size for help overlay (default: 24.0)
+
+## Requirements
+
+- Go 1.19 or later
+- Platform support: Windows, Linux (macOS untested)
+
+## Development
+
+```bash
+# Run tests
+go test ./...
+
+# Format code
+go fmt
+
+# Check for issues
+go vet
+
+# Update dependencies
+go mod tidy
+```
+
+## Architecture
+
+The application is built with a clean, modular architecture:
+
+- `main.go` - Game loop, UI, and navigation logic
+- `image.go` - Image management, caching, and archive support
+- `config.go` - Configuration management and persistence
+
+## License
+
+MIT License - see LICENSE file for details
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit issues and pull requests.
