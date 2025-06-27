@@ -10,10 +10,10 @@ This is an image viewer application built using Go and the Ebiten game engine. T
 
 The application is organized into three main modules for maintainability:
 
-### `main.go` (470+ lines)
+### `main.go` (730+ lines)
 - **Game Loop**: Implements Ebiten's game interface (`Update()`, `Draw()`, `Layout()`)
 - **User Interface**: Handles keyboard input and window management
-- **Navigation Logic**: Image index management and book mode navigation
+- **Navigation Logic**: Image index management, book mode navigation, and page jump functionality
 - **Rendering**: Single image and book mode drawing functions
 - **Help System**: Interactive help overlay with configurable font rendering
 - **Application Entry Point**: Command-line argument processing and initialization
@@ -98,6 +98,9 @@ This codebase has been extensively refactored for maintainability:
 - **Backspace/P**: Previous image (2 images in book mode)
 - **Shift+Space/Shift+N**: Single page forward (for fine adjustment in book mode)
 - **Shift+Backspace/Shift+P**: Single page backward (for fine adjustment in book mode)
+- **G**: Direct page jump with number input
+- **Home/<**: Jump to first page
+- **End/>**: Jump to last page
 
 ### Display Modes
 - **B**: Toggle book mode (spread view - displays 2 images side by side)
