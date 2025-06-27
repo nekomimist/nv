@@ -77,6 +77,9 @@ go test -run TestGameNavigation  # Test navigation logic
 
 ## Development Notes
 
+### Code Style
+- **Comments**: All code comments should be written in English for maintainability and accessibility
+
 ### Code Organization
 This codebase has been extensively refactored for maintainability:
 - **Started**: 764 lines in a single `main.go` file

@@ -331,13 +331,13 @@ func (g *Game) handleNavigationKeys() {
 func (g *Game) navigateNext() {
 	pathsCount := g.imageManager.GetPathsCount()
 
-	// 共通の境界チェック - 次に進めない場合
+	// Common boundary check - cannot proceed to next
 	if g.idx+1 >= pathsCount {
 		g.showBoundaryMessage("Last page")
 		return
 	}
 
-	// ここから先は必ずg.idx + 1 < pathsCountなので、g.idx++は安全)
+	// From here on, g.idx + 1 < pathsCount is guaranteed, so g.idx++ is safe
 	if g.tempSingleMode {
 		g.idx++
 		g.tempSingleMode = false
@@ -350,36 +350,36 @@ func (g *Game) navigateNext() {
 		leftImg, rightImg := g.imageManager.GetBookModeImages(g.idx, g.config.RightToLeft)
 		if g.shouldUseBookMode(leftImg, rightImg) {
 			if g.idx+2 >= pathsCount {
-				// 2ページは進めない = 現在のペアで全て表示済み
+				// Cannot advance 2 pages = all displayed with current pair
 				g.showBoundaryMessage("Last page")
 			} else if g.idx+2+1 >= pathsCount {
-				// 2ページ進むと次のペアは作れない(=最後の1ページになる)
+				// Advancing 2 pages would make next pair impossible (=becomes last single page)
 				g.idx += 2
 				g.bookMode = false
 				g.tempSingleMode = true
 			} else {
-				// 通常の2ページ移動
+				// Normal 2-page movement
 				g.idx += 2
 			}
 			return
 		}
-		// shouldUseBookMode = falseは単一ページ移動
+		// shouldUseBookMode = false means single page movement
 	}
-	// 単一ページモードまたはShift+キー
+	// Single page mode or Shift+key
 	g.idx++
 }
 
 func (g *Game) navigatePrevious() {
-	// 共通の境界チェック - 前に戻れない場合
+	// Common boundary check - cannot go back
 	if g.idx <= 0 {
 		g.showBoundaryMessage("First page")
 		return
 	}
 
-	// ここから先は必ず g.idx > 0 なので、何らかの戻り処理が可能
+	// From here on, g.idx > 0 is guaranteed, so some backward processing is possible
 	if g.tempSingleMode {
 		if g.idx < 2 {
-			// g.idx > 0 が保証されているので、必ず g.idx = 0 への移動
+			// g.idx > 0 is guaranteed, so always move to g.idx = 0
 			g.idx = 0
 			g.tempSingleMode = false
 			g.bookMode = true
@@ -395,7 +395,7 @@ func (g *Game) navigatePrevious() {
 		leftImg, rightImg := g.imageManager.GetBookModeImages(g.idx, g.config.RightToLeft)
 		if g.shouldUseBookMode(leftImg, rightImg) {
 			if g.idx < 2 {
-				// g.idx > 0 が保証されているので、必ず g.idx = 0 への移動
+				// g.idx > 0 is guaranteed, so always move to g.idx = 0
 				g.idx = 0
 				g.bookMode = false
 				g.tempSingleMode = true
@@ -404,9 +404,9 @@ func (g *Game) navigatePrevious() {
 			}
 			return
 		}
-		// shouldUseBookMode = false は単一ページ移動
+		// shouldUseBookMode = false means single page movement
 	}
-	// 単一ページモードまたはShift+キー
+	// Single page mode or Shift+key
 	g.idx--
 }
 
