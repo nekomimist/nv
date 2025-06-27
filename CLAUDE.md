@@ -10,7 +10,7 @@ This is an image viewer application built using Go and the Ebiten game engine. T
 
 The application is organized into three main modules for maintainability:
 
-### `main.go` (730+ lines)
+### `main.go` (856 lines)
 - **Game Loop**: Implements Ebiten's game interface (`Update()`, `Draw()`, `Layout()`)
 - **User Interface**: Handles keyboard input and window management
 - **Navigation Logic**: Image index management, book mode navigation, and page jump functionality
@@ -83,7 +83,7 @@ This codebase has been extensively refactored for maintainability:
 - **Phase 1**: Eliminated duplicate archive processing code
 - **Phase 2**: Extracted configuration management to `config.go`
 - **Phase 3**: Separated image management into `image.go` with proper interfaces
-- **Result**: Clean 3-file architecture with 52% reduction in main.go size
+- **Result**: Clean 3-file architecture with substantial improvement in maintainability
 
 ### Testing Strategy
 - **Unit Tests**: Each module can be tested independently
@@ -110,6 +110,35 @@ This codebase has been extensively refactored for maintainability:
 ### Other
 - **H**: Show/hide help overlay with all controls
 - **Escape/Q**: Quit application
+
+## Book Mode Behavior
+
+### Mode Switching
+- **Flexible Start**: Book mode can be enabled from any page (no forced even index alignment)
+- **Current Page Basis**: The current page becomes the left page of the spread
+- **Automatic Fallback**: Falls back to single page if images are incompatible
+
+### Navigation Logic
+- **Normal Navigation**: Moves by 2 pages in book mode, 1 page in single mode
+- **Temporary Single Mode**: Automatically switches to display single final page when needed
+- **Fine Adjustment**: Shift+keys override book mode for single-page movements
+- **Boundary Handling**: Displays appropriate messages at first/last page
+
+### Image Compatibility
+- **Aspect Ratio Threshold**: Uses `aspect_ratio_threshold` config (default 1.5)
+- **Extreme Ratios**: Automatically excludes very tall (<0.4) or wide (>2.5) images
+- **Reading Direction**: Respects `right_to_left` setting for image order
+- **Smart Pairing**: `shouldUseBookMode()` determines compatibility in real-time
+
+### Page Jump Behavior
+- **Final Page Logic**: Jumping to last page handles book mode pairing intelligently
+- **Mode Preservation**: Maintains current mode unless incompatible
+- **Boundary Detection**: Shows page range information during input
+
+### Temporary Single Mode
+- **Auto-Activation**: Triggered when book mode reaches incomplete pairs
+- **Return Logic**: Automatically returns to book mode when possible
+- **Visual Indication**: Page status shows current mode state
 
 ## Architecture Notes
 

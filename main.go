@@ -144,7 +144,7 @@ func (g *Game) jumpToPage(pageNum int) {
 			// Check if final page can be paired with previous page
 			prevImg := g.imageManager.GetCurrentImage(targetIdx - 1)
 			finalImg := g.imageManager.GetCurrentImage(targetIdx)
-			
+
 			if g.shouldUseBookMode(prevImg, finalImg) {
 				// Use book mode with previous page and final page
 				g.idx = targetIdx - 1
@@ -254,7 +254,7 @@ func (g *Game) handlePageInputMode() {
 		g.pageInputBuffer = ""
 		return
 	}
-	
+
 	if inpututil.IsKeyJustPressed(ebiten.KeyEnter) || inpututil.IsKeyJustPressed(ebiten.KeyNumpadEnter) {
 		// Confirm page input
 		g.processPageInput()
@@ -262,7 +262,7 @@ func (g *Game) handlePageInputMode() {
 		g.pageInputBuffer = ""
 		return
 	}
-	
+
 	if inpututil.IsKeyJustPressed(ebiten.KeyBackspace) {
 		// Delete last character
 		if len(g.pageInputBuffer) > 0 {
@@ -270,7 +270,7 @@ func (g *Game) handlePageInputMode() {
 		}
 		return
 	}
-	
+
 	// Handle digit input (both regular and numpad)
 	var digit string
 	if digit = checkDigitKeys(ebiten.Key0, ebiten.Key9, '0'); digit == "" {
@@ -299,12 +299,6 @@ func (g *Game) handleModeToggleKeys() {
 		} else {
 			// B: Toggle book mode
 			g.bookMode = !g.bookMode
-			// Ensure even index in book mode for proper pairing
-			if g.bookMode && g.idx%2 != 0 {
-				if g.idx > 0 {
-					g.idx--
-				}
-			}
 			g.imageManager.PreloadAdjacentImages(g.idx)
 		}
 	}
@@ -337,15 +331,15 @@ func (g *Game) handleNavigationKeys() {
 func (g *Game) navigateNext() {
 	pathsCount := g.imageManager.GetPathsCount()
 
-	// Handle temporary single mode navigation
+	// 共通の境界チェック - 次に進めない場合
+	if g.idx+1 >= pathsCount {
+		g.showBoundaryMessage("Last page")
+		return
+	}
+
+	// ここから先は必ずg.idx + 1 < pathsCountなので、g.idx++は安全)
 	if g.tempSingleMode {
-		// From temp single mode, try to go to next pair
-		newIdx := g.idx + 1
-		if newIdx >= pathsCount {
-			g.showBoundaryMessage("Last page")
-			return
-		}
-		g.idx = newIdx
+		g.idx++
 		g.tempSingleMode = false
 		g.bookMode = true
 		return
@@ -355,102 +349,65 @@ func (g *Game) navigateNext() {
 		// Check if we can actually display in book mode
 		leftImg, rightImg := g.imageManager.GetBookModeImages(g.idx, g.config.RightToLeft)
 		if g.shouldUseBookMode(leftImg, rightImg) {
-			// Move by 2 in book mode (normal spread navigation)
-			newIdx := g.idx + 2
-			if newIdx >= pathsCount {
-				// Check if there's one page left to display in temp single mode
-				if g.idx+1 < pathsCount {
-					g.idx = g.idx + 1
-					g.bookMode = false
-					g.tempSingleMode = true
-				} else {
-					g.showBoundaryMessage("Last page")
-				}
-				return
-			}
-			// Check if next pair would be incomplete (only one page left after this pair)
-			if newIdx+1 >= pathsCount {
-				// Move to the last single page in temp single mode
-				g.idx = newIdx
+			if g.idx+2 >= pathsCount {
+				// 2ページは進めない = 現在のペアで全て表示済み
+				g.showBoundaryMessage("Last page")
+			} else if g.idx+2+1 >= pathsCount {
+				// 2ページ進むと次のペアは作れない(=最後の1ページになる)
+				g.idx += 2
 				g.bookMode = false
 				g.tempSingleMode = true
-				return
+			} else {
+				// 通常の2ページ移動
+				g.idx += 2
 			}
-			g.idx = newIdx
-		} else {
-			// Fall back to single page navigation
-			newIdx := g.idx + 1
-			if newIdx >= pathsCount {
-				g.showBoundaryMessage("Last page")
-				return
-			}
-			g.idx = newIdx
-		}
-	} else {
-		// Move by 1 (single page mode or SHIFT+key for fine adjustment)
-		newIdx := g.idx + 1
-		if newIdx >= pathsCount {
-			g.showBoundaryMessage("Last page")
 			return
 		}
-		g.idx = newIdx
+		// shouldUseBookMode = falseは単一ページ移動
 	}
+	// 単一ページモードまたはShift+キー
+	g.idx++
 }
 
 func (g *Game) navigatePrevious() {
-	// Handle temporary single mode navigation
+	// 共通の境界チェック - 前に戻れない場合
+	if g.idx <= 0 {
+		g.showBoundaryMessage("First page")
+		return
+	}
+
+	// ここから先は必ず g.idx > 0 なので、何らかの戻り処理が可能
 	if g.tempSingleMode {
-		// From temp single mode, try to go to previous pair
 		if g.idx < 2 {
-			// Check if we can move to the first page
-			if g.idx > 0 {
-				g.idx = 0
-				g.tempSingleMode = false
-				g.bookMode = true
-			} else {
-				g.showBoundaryMessage("First page")
-			}
-			return
+			// g.idx > 0 が保証されているので、必ず g.idx = 0 への移動
+			g.idx = 0
+			g.tempSingleMode = false
+			g.bookMode = true
+		} else {
+			g.idx -= 2
+			g.tempSingleMode = false
+			g.bookMode = true
 		}
-		g.idx -= 2
-		g.tempSingleMode = false
-		g.bookMode = true
 		return
 	}
 
 	if g.bookMode && !ebiten.IsKeyPressed(ebiten.KeyShift) {
-		// Check if we can actually display in book mode
 		leftImg, rightImg := g.imageManager.GetBookModeImages(g.idx, g.config.RightToLeft)
 		if g.shouldUseBookMode(leftImg, rightImg) {
-			// Move by 2 in book mode (normal spread navigation)
 			if g.idx < 2 {
-				// Check if we can move to first page in temp single mode
-				if g.idx > 0 {
-					g.idx = 0
-					g.bookMode = false
-					g.tempSingleMode = true
-				} else {
-					g.showBoundaryMessage("First page")
-				}
-				return
+				// g.idx > 0 が保証されているので、必ず g.idx = 0 への移動
+				g.idx = 0
+				g.bookMode = false
+				g.tempSingleMode = true
+			} else {
+				g.idx -= 2
 			}
-			g.idx -= 2
-		} else {
-			// Fall back to single page navigation
-			if g.idx == 0 {
-				g.showBoundaryMessage("First page")
-				return
-			}
-			g.idx--
-		}
-	} else {
-		// Move by 1 (single page mode or SHIFT+key for fine adjustment)
-		if g.idx == 0 {
-			g.showBoundaryMessage("First page")
 			return
 		}
-		g.idx--
+		// shouldUseBookMode = false は単一ページ移動
 	}
+	// 単一ページモードまたはShift+キー
+	g.idx--
 }
 
 func (g *Game) handleFullscreenToggle() {
@@ -753,7 +710,7 @@ func (g *Game) drawPageInputOverlay(screen *ebiten.Image) {
 
 	// Get total pages for range display
 	totalPages := g.imageManager.GetPathsCount()
-	
+
 	// Create display texts
 	inputText := fmt.Sprintf("Go to page: %s_", g.pageInputBuffer)
 	rangeText := fmt.Sprintf("(1-%d)", totalPages)
@@ -761,11 +718,11 @@ func (g *Game) drawPageInputOverlay(screen *ebiten.Image) {
 	// Measure text dimensions
 	inputWidth, inputHeight := text.Measure(inputText, inputFont, 0)
 	rangeWidth, rangeHeight := text.Measure(rangeText, rangeFont, 0)
-	
+
 	// Calculate box dimensions (accommodate both lines)
 	maxWidth := math.Max(inputWidth, rangeWidth)
 	totalHeight := inputHeight + rangeHeight + 10 // 10px gap between lines
-	
+
 	padding := 20
 	boxWidth := maxWidth + float64(padding*2)
 	boxHeight := totalHeight + float64(padding*2)
@@ -781,7 +738,7 @@ func (g *Game) drawPageInputOverlay(screen *ebiten.Image) {
 	inputTextOp.GeoM.Translate(inputTextX, boxY+float64(padding))
 	inputTextOp.ColorScale.ScaleWithColor(color.RGBA{255, 255, 255, 255})
 	text.Draw(screen, inputText, inputFont, inputTextOp)
-	
+
 	// Draw range text (centered, below input text)
 	rangeTextOp := &text.DrawOptions{}
 	rangeTextX := boxX + (boxWidth-rangeWidth)/2
