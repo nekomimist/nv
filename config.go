@@ -15,12 +15,20 @@ const (
 	minHeight     = 300
 )
 
+// Sort method constants
+const (
+	SortNatural    = 0 // Natural sort order (e.g., file1, file2, file10)
+	SortSimple     = 1 // Simple string sort (lexicographical)
+	SortEntryOrder = 2 // Maintain original order (no sort)
+)
+
 type Config struct {
 	WindowWidth          int     `json:"window_width"`
 	WindowHeight         int     `json:"window_height"`
 	AspectRatioThreshold float64 `json:"aspect_ratio_threshold"`
 	RightToLeft          bool    `json:"right_to_left"`
 	HelpFontSize         float64 `json:"help_font_size"`
+	SortMethod           int     `json:"sort_method"`
 }
 
 func getConfigPath() string {
@@ -39,9 +47,10 @@ func loadConfigFromPath(configPath string) Config {
 	config := Config{
 		WindowWidth:          defaultWidth,
 		WindowHeight:         defaultHeight,
-		AspectRatioThreshold: 1.5,   // Default threshold for aspect ratio compatibility
-		RightToLeft:          false, // Default to left-to-right reading (Western style)
-		HelpFontSize:         24.0,  // Default help font size
+		AspectRatioThreshold: 1.5,         // Default threshold for aspect ratio compatibility
+		RightToLeft:          false,       // Default to left-to-right reading (Western style)
+		HelpFontSize:         24.0,        // Default help font size
+		SortMethod:           SortNatural, // Default to natural sort
 	}
 
 	data, err := os.ReadFile(configPath)
@@ -59,6 +68,7 @@ func loadConfigFromPath(configPath string) Config {
 			AspectRatioThreshold: 1.5,
 			RightToLeft:          false,
 			HelpFontSize:         24.0,
+			SortMethod:           SortNatural,
 		}
 	}
 
@@ -80,7 +90,26 @@ func loadConfigFromPath(configPath string) Config {
 		config.HelpFontSize = 24.0
 	}
 
+	// Validate sort method
+	if config.SortMethod < SortNatural || config.SortMethod > SortEntryOrder {
+		config.SortMethod = SortNatural
+	}
+
 	return config
+}
+
+// getSortMethodName returns the human-readable name of a sort method
+func getSortMethodName(sortMethod int) string {
+	switch sortMethod {
+	case SortNatural:
+		return "Natural"
+	case SortSimple:
+		return "Simple"
+	case SortEntryOrder:
+		return "Entry Order"
+	default:
+		return "Natural"
+	}
 }
 
 func saveConfig(config Config) {

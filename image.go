@@ -12,10 +12,12 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/bodgit/sevenzip"
 	"github.com/hajimehoshi/ebiten/v2"
+	"github.com/maruel/natural"
 	"github.com/nwaples/rardecode"
 	_ "golang.org/x/image/bmp"
 	_ "golang.org/x/image/webp"
@@ -402,7 +404,23 @@ func processArchive(archivePath string) ([]ImagePath, error) {
 	return archiveImages, nil
 }
 
-func collectImages(args []string) ([]ImagePath, error) {
+// sortImagePaths sorts the given image paths based on the specified sort method
+func sortImagePaths(images []ImagePath, sortMethod int) {
+	switch sortMethod {
+	case SortNatural:
+		sort.Slice(images, func(i, j int) bool {
+			return natural.Less(images[i].Path, images[j].Path)
+		})
+	case SortSimple:
+		sort.Slice(images, func(i, j int) bool {
+			return images[i].Path < images[j].Path
+		})
+	case SortEntryOrder:
+		// Keep original order - do nothing
+	}
+}
+
+func collectImages(args []string, sortMethod int) ([]ImagePath, error) {
 	var list []ImagePath
 	for _, p := range args {
 		info, err := os.Stat(p)
@@ -410,6 +428,7 @@ func collectImages(args []string) ([]ImagePath, error) {
 			return nil, err
 		}
 		if info.IsDir() {
+			var dirImages []ImagePath
 			err := filepath.Walk(p, func(path string, fi os.FileInfo, err error) error {
 				if err != nil {
 					return err
@@ -418,7 +437,7 @@ func collectImages(args []string) ([]ImagePath, error) {
 					return nil
 				}
 				if isSupportedExt(path) {
-					list = append(list, ImagePath{
+					dirImages = append(dirImages, ImagePath{
 						Path:        path,
 						ArchivePath: "",
 						EntryPath:   "",
@@ -426,7 +445,8 @@ func collectImages(args []string) ([]ImagePath, error) {
 				} else if isArchiveExt(path) {
 					archiveImages, err := processArchive(path)
 					if err == nil {
-						list = append(list, archiveImages...)
+						sortImagePaths(archiveImages, sortMethod)
+						dirImages = append(dirImages, archiveImages...)
 					} else {
 						log.Printf("Warning: Skipping problematic archive %s: %v", path, err)
 					}
@@ -436,6 +456,8 @@ func collectImages(args []string) ([]ImagePath, error) {
 			if err != nil {
 				return nil, err
 			}
+			sortImagePaths(dirImages, sortMethod)
+			list = append(list, dirImages...)
 		} else {
 			if isSupportedExt(p) {
 				list = append(list, ImagePath{
@@ -446,6 +468,7 @@ func collectImages(args []string) ([]ImagePath, error) {
 			} else if isArchiveExt(p) {
 				archiveImages, err := processArchive(p)
 				if err == nil {
+					sortImagePaths(archiveImages, sortMethod)
 					list = append(list, archiveImages...)
 				} else {
 					log.Printf("Warning: Skipping problematic archive %s: %v", p, err)

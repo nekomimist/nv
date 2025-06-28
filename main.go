@@ -9,7 +9,6 @@ import (
 	"math"
 	"os"
 	"path/filepath"
-	"slices"
 	"strconv"
 	"strings"
 
@@ -69,6 +68,10 @@ type Game struct {
 	boundaryMessage     string
 	boundaryMessageTime time.Time
 
+	// Sort method message state
+	sortMessage     string
+	sortMessageTime time.Time
+
 	savedWinW int
 	savedWinH int
 	config    Config
@@ -80,6 +83,30 @@ func (g *Game) getCurrentImage() *ebiten.Image {
 
 func (g *Game) getBookModeImages() (*ebiten.Image, *ebiten.Image) {
 	return g.imageManager.GetBookModeImages(g.idx, g.config.RightToLeft)
+}
+
+func (g *Game) cycleSortMethod() {
+	// Cycle through sort methods
+	g.config.SortMethod = (g.config.SortMethod + 1) % 3
+
+	// Save config
+	saveConfig(g.config)
+
+	// Show message
+	g.sortMessage = "Sort: " + getSortMethodName(g.config.SortMethod)
+	g.sortMessageTime = time.Now()
+
+	// Re-collect and sort images
+	args := flag.Args()
+	if len(args) > 0 {
+		paths, err := collectImages(args, g.config.SortMethod)
+		if err == nil && len(paths) > 0 {
+			g.imageManager.SetPaths(paths)
+			// Reset to first image
+			g.idx = 0
+			g.imageManager.PreloadAdjacentImages(0)
+		}
+	}
 }
 
 func (g *Game) shouldUseBookMode(leftImg, rightImg *ebiten.Image) bool {
@@ -302,6 +329,13 @@ func (g *Game) handleModeToggleKeys() {
 			g.imageManager.PreloadAdjacentImages(g.idx)
 		}
 	}
+
+	if inpututil.IsKeyJustPressed(ebiten.KeyS) {
+		if ebiten.IsKeyPressed(ebiten.KeyShift) {
+			// SHIFT+S: Cycle sort method
+			g.cycleSortMethod()
+		}
+	}
 }
 
 func (g *Game) handleNavigationKeys() {
@@ -451,6 +485,11 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	if g.boundaryMessage != "" && time.Since(g.boundaryMessageTime) < boundaryMessageDuration {
 		g.drawBoundaryMessageOverlay(screen)
 	}
+
+	// Draw sort method message overlay if active
+	if g.sortMessage != "" && time.Since(g.sortMessageTime) < boundaryMessageDuration {
+		g.drawSortMessageOverlay(screen)
+	}
 }
 
 func (g *Game) drawSingleImage(screen *ebiten.Image) {
@@ -595,6 +634,7 @@ var helpSections = []struct {
 		}{
 			{"B", "Toggle book mode (dual image view)"},
 			{"Shift+B", "Toggle reading direction (LTR ↔ RTL)"},
+			{"Shift+S", "Cycle sort method (Natural/Simple/Entry)"},
 			{"Z", "Toggle fullscreen"},
 		},
 	},
@@ -812,27 +852,45 @@ func (g *Game) drawBoundaryMessageOverlay(screen *ebiten.Image) {
 	text.Draw(screen, g.boundaryMessage, messageFont, textOp)
 }
 
+func (g *Game) drawSortMessageOverlay(screen *ebiten.Image) {
+	w, h := screen.Bounds().Dx(), screen.Bounds().Dy()
+
+	// Create font for sort message
+	messageFont := &text.GoTextFace{
+		Source: helpFontSource,
+		Size:   g.config.HelpFontSize,
+	}
+
+	// Measure text dimensions
+	textWidth, textHeight := text.Measure(g.sortMessage, messageFont, 0)
+
+	// Calculate position (center of screen)
+	padding := 20
+	boxWidth := textWidth + float64(padding*2)
+	boxHeight := textHeight + float64(padding*2)
+	boxX := (float64(w) - boxWidth) / 2
+	boxY := (float64(h) - boxHeight) / 2
+
+	// Semi-transparent black background
+	vector.DrawFilledRect(screen, float32(boxX), float32(boxY), float32(boxWidth), float32(boxHeight), color.RGBA{0, 0, 0, 200}, false)
+
+	// Draw text
+	textOp := &text.DrawOptions{}
+	textOp.GeoM.Translate(boxX+float64(padding), boxY+float64(padding))
+	textOp.ColorScale.ScaleWithColor(color.RGBA{255, 255, 255, 255})
+	text.Draw(screen, g.sortMessage, messageFont, textOp)
+}
+
 func main() {
 	flag.Parse()
-	paths, err := collectImages(flag.Args())
+	config := loadConfig()
+	paths, err := collectImages(flag.Args(), config.SortMethod)
 	if err != nil {
 		log.Fatal(err)
 	}
 	if len(paths) == 0 {
 		log.Fatal("no image files specified")
 	}
-
-	// Sort by path for consistent ordering
-	slices.SortFunc(paths, func(a, b ImagePath) int {
-		if a.Path < b.Path {
-			return -1
-		} else if a.Path > b.Path {
-			return 1
-		}
-		return 0
-	})
-
-	config := loadConfig()
 
 	imageManager := NewImageManager()
 	imageManager.SetPaths(paths)

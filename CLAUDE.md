@@ -177,13 +177,46 @@ The application saves settings to `~/.nv.json`:
   "window_height": 600,
   "aspect_ratio_threshold": 1.5,
   "right_to_left": false,
-  "help_font_size": 24.0
+  "help_font_size": 24.0,
+  "sort_method": 0
 }
 ```
 
 - **aspect_ratio_threshold**: Controls when to use single page mode in book mode. Higher values allow more different aspect ratios to be displayed side-by-side. Default: 1.5
 - **right_to_left**: Reading direction for book mode. `false` for left-to-right (Western style), `true` for right-to-left (Japanese manga style). Default: false
 - **help_font_size**: Font size for help overlay text. Must be > 12px for readability. Default: 24.0
+- **sort_method**: File sorting method for directories and archives. `0` = Natural, `1` = Simple, `2` = Entry Order. Default: 0 (Natural)
+
+## File Sorting Strategy
+
+The application implements intelligent file ordering that respects user intent while providing flexible sorting options:
+
+### Argument Order Preservation
+- **Command-line arguments maintain their specified order**: `nv file3.jpg file1.jpg file2.jpg` displays files in exactly that sequence
+- **User intent respected**: When users specify explicit file order, that order is preserved regardless of sort settings
+
+### Directory and Archive Sorting
+- **Sort settings apply only to directory and archive contents**: Files discovered through directory traversal or archive extraction are sorted according to the current sort method
+- **SHIFT+S hotkey**: Cycles through sort methods with 2-second overlay display showing current method
+
+### Sort Methods
+1. **Natural Sort (Default)**: Uses `github.com/maruel/natural` for intuitive filename ordering
+   - `01.png, 2.png, 04.png, 10.png` (numeric sequences sorted naturally)
+   - Handles mixed text and numbers correctly
+   - Works well with zero-padded and non-padded filenames
+   
+2. **Simple Sort**: Standard lexicographical string comparison
+   - `01.png, 04.png, 10.png, 2.png` (strict alphabetical order)
+   - Predictable ASCII-based sorting
+   
+3. **Entry Order**: Preserves original file system or archive order
+   - No sorting applied - maintains discovery order
+   - Useful when directory or archive already has intentional ordering
+
+### Implementation Details
+- **Mixed sources**: `nv file1.jpg dir1/ archive.zip file2.jpg` results in: file1.jpg → sorted dir1/ contents → sorted archive.zip contents → file2.jpg
+- **Per-container sorting**: Each directory and archive is sorted independently according to the current method
+- **Real-time switching**: Sort method can be changed during runtime, immediately re-sorting and returning to first page
 
 ## Help System
 

@@ -3,7 +3,9 @@ module nv
 go 1.24.3
 
 require (
+	github.com/bodgit/sevenzip v1.6.1
 	github.com/hajimehoshi/ebiten/v2 v2.8.8
+	github.com/maruel/natural v1.1.1
 	github.com/nwaples/rardecode v1.1.3
 	golang.org/x/image v0.28.0
 )
@@ -11,7 +13,6 @@ require (
 require (
 	github.com/andybalholm/brotli v1.1.1 // indirect
 	github.com/bodgit/plumbing v1.3.0 // indirect
-	github.com/bodgit/sevenzip v1.6.1 // indirect
 	github.com/bodgit/windows v1.0.1 // indirect
 	github.com/ebitengine/gomobile v0.0.0-20240911145611-4856209ac325 // indirect
 	github.com/ebitengine/hideconsole v1.0.0 // indirect
