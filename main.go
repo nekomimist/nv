@@ -28,8 +28,8 @@ const (
 	minAspectRatio = 0.4 // Extremely tall images
 	maxAspectRatio = 2.5 // Extremely wide images
 
-	// Boundary message display duration
-	boundaryMessageDuration = 2 * time.Second
+	// Overlay message display duration
+	overlayMessageDuration = 2 * time.Second
 )
 
 func isArchiveExt(path string) bool {
@@ -59,18 +59,15 @@ type Game struct {
 	bookMode       bool // Book/spread view mode
 	tempSingleMode bool // Temporary single page mode (return to book mode after navigation)
 	showHelp       bool // Help overlay display
+	showInfo       bool // Info display (page numbers, metadata, etc.)
 
 	// Page input mode state
 	pageInputMode   bool
 	pageInputBuffer string
 
-	// Boundary message state
-	boundaryMessage     string
-	boundaryMessageTime time.Time
-
-	// Sort method message state
-	sortMessage     string
-	sortMessageTime time.Time
+	// Overlay message state (unified system for boundary, sort, direction messages)
+	overlayMessage     string
+	overlayMessageTime time.Time
 
 	savedWinW  int
 	savedWinH  int
@@ -102,8 +99,7 @@ func (g *Game) cycleSortMethod() {
 	g.saveCurrentConfig()
 
 	// Show message
-	g.sortMessage = "Sort: " + getSortMethodName(g.config.SortMethod)
-	g.sortMessageTime = time.Now()
+	g.showOverlayMessage("Sort: " + getSortMethodName(g.config.SortMethod))
 
 	// Re-collect and sort images
 	args := flag.Args()
@@ -143,9 +139,9 @@ func (g *Game) shouldUseBookMode(leftImg, rightImg *ebiten.Image) bool {
 	return aspectRatio <= g.config.AspectRatioThreshold
 }
 
-func (g *Game) showBoundaryMessage(message string) {
-	g.boundaryMessage = message
-	g.boundaryMessageTime = time.Now()
+func (g *Game) showOverlayMessage(message string) {
+	g.overlayMessage = message
+	g.overlayMessageTime = time.Now()
 }
 
 func (g *Game) processPageInput() {
@@ -155,7 +151,7 @@ func (g *Game) processPageInput() {
 
 	pageNum, err := strconv.Atoi(g.pageInputBuffer)
 	if err != nil {
-		g.showBoundaryMessage("Invalid page number")
+		g.showOverlayMessage("Invalid page number")
 		return
 	}
 
@@ -170,7 +166,7 @@ func (g *Game) jumpToPage(pageNum int) {
 
 	// Range check
 	if targetIdx < 0 || targetIdx >= pathsCount {
-		g.showBoundaryMessage(fmt.Sprintf("Page %d not found (1-%d)", pageNum, pathsCount))
+		g.showOverlayMessage(fmt.Sprintf("Page %d not found (1-%d)", pageNum, pathsCount))
 		return
 	}
 
@@ -252,6 +248,7 @@ func (g *Game) Update() error {
 
 	g.handleExitKeys()
 	g.handleHelpToggle()
+	g.handleInfoToggle()
 	g.handlePageInputMode()
 	g.handleModeToggleKeys()
 	g.handleNavigationKeys()
@@ -270,6 +267,12 @@ func (g *Game) handleExitKeys() {
 func (g *Game) handleHelpToggle() {
 	if inpututil.IsKeyJustPressed(ebiten.KeyH) {
 		g.showHelp = !g.showHelp
+	}
+}
+
+func (g *Game) handleInfoToggle() {
+	if inpututil.IsKeyJustPressed(ebiten.KeyI) {
+		g.showInfo = !g.showInfo
 	}
 }
 
@@ -332,6 +335,13 @@ func (g *Game) handleModeToggleKeys() {
 			// SHIFT+B: Toggle reading direction
 			g.config.RightToLeft = !g.config.RightToLeft
 			g.saveCurrentConfig()
+
+			// Show direction change message
+			direction := "Left-to-Right"
+			if g.config.RightToLeft {
+				direction = "Right-to-Left"
+			}
+			g.showOverlayMessage("Reading Direction: " + direction)
 		} else {
 			// B: Toggle book mode
 			g.bookMode = !g.bookMode
@@ -376,7 +386,7 @@ func (g *Game) navigateNext() {
 
 	// Common boundary check - cannot proceed to next
 	if g.idx+1 >= pathsCount {
-		g.showBoundaryMessage("Last page")
+		g.showOverlayMessage("Last page")
 		return
 	}
 
@@ -394,7 +404,7 @@ func (g *Game) navigateNext() {
 		if g.shouldUseBookMode(leftImg, rightImg) {
 			if g.idx+2 >= pathsCount {
 				// Cannot advance 2 pages = all displayed with current pair
-				g.showBoundaryMessage("Last page")
+				g.showOverlayMessage("Last page")
 			} else if g.idx+2+1 >= pathsCount {
 				// Advancing 2 pages would make next pair impossible (=becomes last single page)
 				g.idx += 2
@@ -415,7 +425,7 @@ func (g *Game) navigateNext() {
 func (g *Game) navigatePrevious() {
 	// Common boundary check - cannot go back
 	if g.idx <= 0 {
-		g.showBoundaryMessage("First page")
+		g.showOverlayMessage("First page")
 		return
 	}
 
@@ -477,8 +487,10 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		g.drawBookMode(screen)
 	}
 
-	// Draw page status at bottom of screen
-	g.drawPageStatus(screen)
+	// Draw info display (page status, etc.) at bottom of screen if enabled
+	if g.showInfo {
+		g.drawInfoDisplay(screen)
+	}
 
 	// Draw help overlay if enabled
 	if g.showHelp {
@@ -490,14 +502,9 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		g.drawPageInputOverlay(screen)
 	}
 
-	// Draw boundary message overlay if active
-	if g.boundaryMessage != "" && time.Since(g.boundaryMessageTime) < boundaryMessageDuration {
-		g.drawBoundaryMessageOverlay(screen)
-	}
-
-	// Draw sort method message overlay if active
-	if g.sortMessage != "" && time.Since(g.sortMessageTime) < boundaryMessageDuration {
-		g.drawSortMessageOverlay(screen)
+	// Draw overlay message if active
+	if g.overlayMessage != "" && time.Since(g.overlayMessageTime) < overlayMessageDuration {
+		g.drawOverlayMessage(screen)
 	}
 }
 
@@ -655,6 +662,7 @@ var helpSections = []struct {
 		}{
 			{"G", "Go to page (enter page number)"},
 			{"H", "Show/hide this help"},
+			{"I", "Show/hide info display (page numbers)"},
 			{"Escape/Q", "Quit application"},
 		},
 	},
@@ -796,25 +804,25 @@ func (g *Game) drawPageInputOverlay(screen *ebiten.Image) {
 	text.Draw(screen, rangeText, rangeFont, rangeTextOp)
 }
 
-func (g *Game) drawPageStatus(screen *ebiten.Image) {
+func (g *Game) drawInfoDisplay(screen *ebiten.Image) {
 	w, h := screen.Bounds().Dx(), screen.Bounds().Dy()
 
-	// Create smaller font for page status
-	statusFont := &text.GoTextFace{
+	// Create font for info display (same size as help text)
+	infoFont := &text.GoTextFace{
 		Source: helpFontSource,
-		Size:   g.config.HelpFontSize * 0.7, // Smaller than help text
+		Size:   g.config.HelpFontSize,
 	}
 
 	// Get page status text
-	statusText := g.getCurrentPageNumber()
+	infoText := g.getCurrentPageNumber()
 
 	// Measure text dimensions
-	textWidth, textHeight := text.Measure(statusText, statusFont, 0)
+	textWidth, textHeight := text.Measure(infoText, infoFont, 0)
 
 	// Position at bottom right corner
 	padding := 10
 	textX := float64(w) - textWidth - float64(padding)
-	textY := float64(h) - float64(padding)
+	textY := float64(h) - textHeight - float64(padding)
 
 	// Semi-transparent background
 	bgPadding := 5
@@ -829,20 +837,20 @@ func (g *Game) drawPageStatus(screen *ebiten.Image) {
 	textOp := &text.DrawOptions{}
 	textOp.GeoM.Translate(textX, textY)
 	textOp.ColorScale.ScaleWithColor(color.RGBA{255, 255, 255, 255})
-	text.Draw(screen, statusText, statusFont, textOp)
+	text.Draw(screen, infoText, infoFont, textOp)
 }
 
-func (g *Game) drawBoundaryMessageOverlay(screen *ebiten.Image) {
+func (g *Game) drawOverlayMessage(screen *ebiten.Image) {
 	w, h := screen.Bounds().Dx(), screen.Bounds().Dy()
 
-	// Create font for boundary message
+	// Create font for overlay message
 	messageFont := &text.GoTextFace{
 		Source: helpFontSource,
 		Size:   g.config.HelpFontSize,
 	}
 
 	// Measure text dimensions
-	textWidth, textHeight := text.Measure(g.boundaryMessage, messageFont, 0)
+	textWidth, textHeight := text.Measure(g.overlayMessage, messageFont, 0)
 
 	// Calculate position (center of screen)
 	padding := 20
@@ -858,36 +866,7 @@ func (g *Game) drawBoundaryMessageOverlay(screen *ebiten.Image) {
 	textOp := &text.DrawOptions{}
 	textOp.GeoM.Translate(boxX+float64(padding), boxY+float64(padding))
 	textOp.ColorScale.ScaleWithColor(color.RGBA{255, 255, 255, 255})
-	text.Draw(screen, g.boundaryMessage, messageFont, textOp)
-}
-
-func (g *Game) drawSortMessageOverlay(screen *ebiten.Image) {
-	w, h := screen.Bounds().Dx(), screen.Bounds().Dy()
-
-	// Create font for sort message
-	messageFont := &text.GoTextFace{
-		Source: helpFontSource,
-		Size:   g.config.HelpFontSize,
-	}
-
-	// Measure text dimensions
-	textWidth, textHeight := text.Measure(g.sortMessage, messageFont, 0)
-
-	// Calculate position (center of screen)
-	padding := 20
-	boxWidth := textWidth + float64(padding*2)
-	boxHeight := textHeight + float64(padding*2)
-	boxX := (float64(w) - boxWidth) / 2
-	boxY := (float64(h) - boxHeight) / 2
-
-	// Semi-transparent black background
-	vector.DrawFilledRect(screen, float32(boxX), float32(boxY), float32(boxWidth), float32(boxHeight), color.RGBA{0, 0, 0, 200}, false)
-
-	// Draw text
-	textOp := &text.DrawOptions{}
-	textOp.GeoM.Translate(boxX+float64(padding), boxY+float64(padding))
-	textOp.ColorScale.ScaleWithColor(color.RGBA{255, 255, 255, 255})
-	text.Draw(screen, g.sortMessage, messageFont, textOp)
+	text.Draw(screen, g.overlayMessage, messageFont, textOp)
 }
 
 func main() {
@@ -916,6 +895,7 @@ func main() {
 		idx:          0,
 		config:       config,
 		configPath:   *configFile,
+		showInfo:     true, // Show info display by default
 	}
 
 	// Preload the first image and adjacent ones for faster startup
