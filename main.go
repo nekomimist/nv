@@ -72,9 +72,10 @@ type Game struct {
 	sortMessage     string
 	sortMessageTime time.Time
 
-	savedWinW int
-	savedWinH int
-	config    Config
+	savedWinW  int
+	savedWinH  int
+	config     Config
+	configPath string // Custom config file path, empty for default
 }
 
 func (g *Game) getCurrentImage() *ebiten.Image {
@@ -85,12 +86,20 @@ func (g *Game) getBookModeImages() (*ebiten.Image, *ebiten.Image) {
 	return g.imageManager.GetBookModeImages(g.idx, g.config.RightToLeft)
 }
 
+func (g *Game) saveCurrentConfig() {
+	if g.configPath != "" {
+		saveConfigToPath(g.config, g.configPath)
+	} else {
+		saveConfig(g.config)
+	}
+}
+
 func (g *Game) cycleSortMethod() {
 	// Cycle through sort methods
 	g.config.SortMethod = (g.config.SortMethod + 1) % 3
 
 	// Save config
-	saveConfig(g.config)
+	g.saveCurrentConfig()
 
 	// Show message
 	g.sortMessage = "Sort: " + getSortMethodName(g.config.SortMethod)
@@ -233,7 +242,7 @@ func (g *Game) saveCurrentWindowSize() {
 		g.config.WindowWidth = w
 		g.config.WindowHeight = h
 	}
-	saveConfig(g.config)
+	g.saveCurrentConfig()
 }
 
 func (g *Game) Update() error {
@@ -322,7 +331,7 @@ func (g *Game) handleModeToggleKeys() {
 		if ebiten.IsKeyPressed(ebiten.KeyShift) {
 			// SHIFT+B: Toggle reading direction
 			g.config.RightToLeft = !g.config.RightToLeft
-			saveConfig(g.config)
+			g.saveCurrentConfig()
 		} else {
 			// B: Toggle book mode
 			g.bookMode = !g.bookMode
@@ -882,8 +891,15 @@ func (g *Game) drawSortMessageOverlay(screen *ebiten.Image) {
 }
 
 func main() {
+	var configFile = flag.String("c", "", "config file path (default: ~/.nv.json)")
 	flag.Parse()
-	config := loadConfig()
+
+	var config Config
+	if *configFile != "" {
+		config = loadConfigFromPath(*configFile)
+	} else {
+		config = loadConfig()
+	}
 	paths, err := collectImages(flag.Args(), config.SortMethod)
 	if err != nil {
 		log.Fatal(err)
@@ -899,6 +915,7 @@ func main() {
 		imageManager: imageManager,
 		idx:          0,
 		config:       config,
+		configPath:   *configFile,
 	}
 
 	// Preload the first image and adjacent ones for faster startup

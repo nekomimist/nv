@@ -100,19 +100,15 @@ func loadConfigFromPath(configPath string) Config {
 
 // getSortMethodName returns the human-readable name of a sort method
 func getSortMethodName(sortMethod int) string {
-	switch sortMethod {
-	case SortNatural:
-		return "Natural"
-	case SortSimple:
-		return "Simple"
-	case SortEntryOrder:
-		return "Entry Order"
-	default:
-		return "Natural"
-	}
+	strategy := GetSortStrategy(sortMethod)
+	return strategy.Name()
 }
 
 func saveConfig(config Config) {
+	saveConfigToPath(config, getConfigPath())
+}
+
+func saveConfigToPath(config Config, configPath string) {
 	// Don't save if size is too small
 	if config.WindowWidth < minWidth || config.WindowHeight < minHeight {
 		log.Printf("Warning: Not saving config with invalid window size: %dx%d",
@@ -126,7 +122,6 @@ func saveConfig(config Config) {
 		return
 	}
 
-	configPath := getConfigPath()
 	if err := os.WriteFile(configPath, data, 0644); err != nil {
 		log.Printf("Error: Failed to save config to %s: %v", configPath, err)
 	}

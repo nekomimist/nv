@@ -269,7 +269,7 @@ func TestCollectImages(t *testing.T) {
 	}
 
 	// Test directory collection
-	result, err := collectImages([]string{tempDir})
+	result, err := collectImages([]string{tempDir}, SortNatural)
 	if err != nil {
 		t.Fatalf("collectImages failed: %v", err)
 	}
@@ -286,7 +286,7 @@ func TestCollectImages(t *testing.T) {
 
 	// Test individual file collection
 	singleFile := filepath.Join(tempDir, "image1.jpg")
-	result, err = collectImages([]string{singleFile})
+	result, err = collectImages([]string{singleFile}, SortNatural)
 	if err != nil {
 		t.Fatalf("collectImages with single file failed: %v", err)
 	}
