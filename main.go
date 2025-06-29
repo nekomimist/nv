@@ -144,6 +144,39 @@ func (g *Game) showOverlayMessage(message string) {
 	g.overlayMessageTime = time.Now()
 }
 
+func (g *Game) toggleBookMode() {
+	if g.tempSingleMode || g.bookMode {
+		// Currently in temp single mode or book mode, switch to single mode
+		g.bookMode = false
+		g.tempSingleMode = false
+	} else {
+		// Currently in single mode, switch to book mode
+		pathsCount := g.imageManager.GetPathsCount()
+		if pathsCount == 1 {
+			// Only one page, use temp single mode
+			g.bookMode = true
+			g.tempSingleMode = true
+		} else if g.idx == pathsCount-1 {
+			// On final page, check if it can be paired with previous page
+			prevImg, finalImg := g.imageManager.GetBookModeImages(g.idx-1, g.config.RightToLeft)
+
+			if g.shouldUseBookMode(prevImg, finalImg) {
+				// Move to previous page to display final page in book mode
+				g.idx--
+				g.tempSingleMode = false
+			} else {
+				// Keep current position but use temp single mode
+				g.tempSingleMode = true
+			}
+			g.bookMode = true
+		} else {
+			// Not on final page, normal book mode
+			g.bookMode = true
+			g.tempSingleMode = false
+		}
+	}
+}
+
 func (g *Game) processPageInput() {
 	if g.pageInputBuffer == "" {
 		return
@@ -174,8 +207,7 @@ func (g *Game) jumpToPage(pageNum int) {
 		// Special handling for jumping to the final page in book mode
 		if targetIdx > 0 {
 			// Check if final page can be paired with previous page
-			prevImg := g.imageManager.GetCurrentImage(targetIdx - 1)
-			finalImg := g.imageManager.GetCurrentImage(targetIdx)
+			prevImg, finalImg := g.imageManager.GetBookModeImages(targetIdx-1, g.config.RightToLeft)
 
 			if g.shouldUseBookMode(prevImg, finalImg) {
 				// Use book mode with previous page and final page
@@ -344,7 +376,7 @@ func (g *Game) handleModeToggleKeys() {
 			g.showOverlayMessage("Reading Direction: " + direction)
 		} else {
 			// B: Toggle book mode
-			g.bookMode = !g.bookMode
+			g.toggleBookMode()
 			g.imageManager.PreloadAdjacentImages(g.idx)
 		}
 	}
@@ -895,7 +927,7 @@ func main() {
 		idx:          0,
 		config:       config,
 		configPath:   *configFile,
-		showInfo:     true, // Show info display by default
+		showInfo:     false, // Hide info display by default
 	}
 
 	// Preload the first image and adjacent ones for faster startup
