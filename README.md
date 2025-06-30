@@ -4,27 +4,11 @@ A simple image viewer built with Go and Ebiten, featuring seamless archive suppo
 
 ## Features
 
-- **Multiple Format Support**: PNG, JPEG, WebP, BMP, GIF
-- **Archive Integration**: Direct ZIP, RAR, and 7Z file viewing
-- **Book Mode**: Side-by-side image display with configurable reading direction
-- **Intelligent Caching**: LRU-style cache with preloading for smooth navigation
-- **Fullscreen Support**: Toggle between windowed and fullscreen modes
-- **Page Jump**: Direct navigation to specific pages
-- **Interactive Help**: Built-in help overlay with all controls
-
-## Installation
-
-```bash
-# Clone the repository
-git clone https://github.com/nekomimist/nv.git
-cd nv
-
-# Build the application
-go build
-
-# Or run directly
-go run main.go [image_files_or_directories...]
-```
+- Multiple Format Support: PNG, JPEG, WebP, BMP, GIF
+- Archive Integration: Direct ZIP, RAR, and 7Z file viewing
+- Book Mode: Side-by-side image display with configurable reading direction
+- Fullscreen Support: Toggle between windowed and fullscreen modes
+- Page Jump: Direct navigation to specific pages
 
 ## Usage
 
@@ -66,10 +50,29 @@ go run main.go [image_files_or_directories...]
 
 Book mode displays two images side-by-side, perfect for reading manga or viewing photo spreads:
 
-- **Flexible Start**: Can be enabled from any page
-- **Smart Pairing**: Automatically handles aspect ratio compatibility
-- **Reading Direction**: Supports both left-to-right and right-to-left modes
-- **Automatic Fallback**: Falls back to single page when needed
+- Flexible Start: Can be enabled from any page
+- Smart Pairing: Automatically handles aspect ratio compatibility
+- Reading Direction: Supports both left-to-right and right-to-left modes
+- Automatic Fallback: Falls back to single page when needed
+
+## Installation
+
+```bash
+# Clone the repository
+git clone https://github.com/nekomimist/nv.git
+cd nv
+
+# Build the application
+go build
+
+# Or run directly
+go run main.go [image_files_or_directories...]
+```
+
+## Requirements
+
+- Go 1.19 or later
+- Platform support: Windows, Linux (macOS untested)
 
 ## Configuration
 
@@ -89,39 +92,6 @@ Settings are automatically saved to `~/.nv.json`:
 - `right_to_left` - Reading direction for book mode (default: false)
 - `help_font_size` - Font size for help overlay (default: 24.0)
 
-## Requirements
-
-- Go 1.19 or later
-- Platform support: Windows, Linux (macOS untested)
-
-## Development
-
-```bash
-# Run tests
-go test ./...
-
-# Format code
-go fmt
-
-# Check for issues
-go vet
-
-# Update dependencies
-go mod tidy
-```
-
-## Architecture
-
-The application is built with a clean, modular architecture:
-
-- `main.go` - Game loop, UI, and navigation logic
-- `image.go` - Image management, caching, and archive support
-- `config.go` - Configuration management and persistence
-
 ## License
 
 MIT License - see LICENSE file for details
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit issues and pull requests.
