@@ -618,6 +618,7 @@ func (g *Game) drawSingleImage(screen *ebiten.Image) {
 	}
 
 	op := &ebiten.DrawImageOptions{}
+	op.Filter = ebiten.FilterLinear
 	op.GeoM.Scale(scale, scale)
 	sw, sh := float64(iw)*scale, float64(ih)*scale
 	op.GeoM.Translate(float64(w)/2-sw/2, float64(h)/2-sh/2)
@@ -667,6 +668,7 @@ func (g *Game) drawImageInRegionWithAlign(screen *ebiten.Image, img *ebiten.Imag
 
 	// Create draw options
 	op := &ebiten.DrawImageOptions{}
+	op.Filter = ebiten.FilterLinear
 	op.GeoM.Scale(scale, scale)
 
 	// Calculate position based on alignment
