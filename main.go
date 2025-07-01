@@ -73,6 +73,11 @@ type Game struct {
 	savedWinH  int
 	config     Config
 	configPath string // Custom config file path, empty for default
+
+	// Single file expansion mode state
+	originalArgs       []string // Original command line arguments
+	expandedFromSingle bool     // Whether the current file list was expanded from a single file
+	originalFileIndex  int      // Index of the original file in the expanded list
 }
 
 func (g *Game) getCurrentImage() *ebiten.Image {
@@ -232,6 +237,54 @@ func (g *Game) jumpToPage(pageNum int) {
 	}
 
 	g.imageManager.PreloadAdjacentImages(g.idx)
+}
+
+func (g *Game) expandToDirectoryAndJump() {
+	// Only work if not already expanded and original file index is valid
+	if g.expandedFromSingle || g.originalFileIndex < 0 || len(g.originalArgs) != 1 {
+		return
+	}
+
+	originalFilePath := g.originalArgs[0]
+
+	// Collect images from the same directory
+	newPaths, err := collectImagesFromSameDirectory(originalFilePath, g.config.SortMethod)
+	if err != nil {
+		g.showOverlayMessage(fmt.Sprintf("Failed to scan directory: %v", err))
+		return
+	}
+
+	if len(newPaths) == 0 {
+		g.showOverlayMessage("No images found in directory")
+		return
+	}
+
+	// Find the original file in the new list
+	originalFileIndex := -1
+	for i, imagePath := range newPaths {
+		if imagePath.Path == originalFilePath {
+			originalFileIndex = i
+			break
+		}
+	}
+
+	if originalFileIndex == -1 {
+		g.showOverlayMessage("Original file not found in directory")
+		return
+	}
+
+	// Update the image manager with new paths
+	g.imageManager.SetPaths(newPaths)
+
+	// Jump to the original file
+	g.idx = originalFileIndex
+	g.expandedFromSingle = true
+
+	// Preload adjacent images
+	g.imageManager.PreloadAdjacentImages(g.idx)
+
+	// Show success message
+	g.showOverlayMessage(fmt.Sprintf("Loaded %d images from directory", len(newPaths)))
 }
 
 func (g *Game) getCurrentPageNumber() string {
@@ -410,6 +463,10 @@ func (g *Game) handleNavigationKeys() {
 		if totalPages > 0 {
 			g.jumpToPage(totalPages)
 		}
+	}
+	// Load directory images (L key) - only works for single file launch
+	if inpututil.IsKeyJustPressed(ebiten.KeyL) {
+		g.expandToDirectoryAndJump()
 	}
 }
 
@@ -672,6 +729,7 @@ var helpSections = []struct {
 			{"Shift+Backspace/P", "Single page backward (fine adjustment)"},
 			{"Home/<", "Jump to first page"},
 			{"End/>", "Jump to last page"},
+			{"L", "Load all images from directory (single file mode only)"},
 		},
 	},
 	{
@@ -905,13 +963,19 @@ func main() {
 	var configFile = flag.String("c", "", "config file path (default: ~/.nv.json)")
 	flag.Parse()
 
+	args := flag.Args()
+
 	var config Config
 	if *configFile != "" {
 		config = loadConfigFromPath(*configFile)
 	} else {
 		config = loadConfig()
 	}
-	paths, err := collectImages(flag.Args(), config.SortMethod)
+
+	// Check if launched with single image file
+	isSingleImageFile := len(args) == 1 && isSupportedExt(args[0]) && !isArchiveExt(args[0])
+
+	paths, err := collectImages(args, config.SortMethod)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -923,11 +987,19 @@ func main() {
 	imageManager.SetPaths(paths)
 
 	g := &Game{
-		imageManager: imageManager,
-		idx:          0,
-		config:       config,
-		configPath:   *configFile,
-		showInfo:     false, // Hide info display by default
+		imageManager:       imageManager,
+		idx:                0,
+		config:             config,
+		configPath:         *configFile,
+		showInfo:           false, // Hide info display by default
+		originalArgs:       args,
+		expandedFromSingle: false,
+		originalFileIndex:  -1,
+	}
+
+	// Set up single file expansion mode if applicable
+	if isSingleImageFile {
+		g.originalFileIndex = 0 // The single file is at index 0
 	}
 
 	// Preload the first image and adjacent ones for faster startup

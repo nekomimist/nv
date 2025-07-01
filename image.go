@@ -409,6 +409,41 @@ func sortImagePaths(images []ImagePath, sortMethod int) []ImagePath {
 	return strategy.Sort(images)
 }
 
+// collectImagesFromSameDirectory collects image files from the same directory as the given file
+// Does not include archives or subdirectories - only image files in the same directory
+func collectImagesFromSameDirectory(filePath string, sortMethod int) ([]ImagePath, error) {
+	// Get the directory of the file
+	dir := filepath.Dir(filePath)
+
+	// Read directory contents
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read directory %s: %v", dir, err)
+	}
+
+	var images []ImagePath
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue // Skip directories
+		}
+
+		fullPath := filepath.Join(dir, entry.Name())
+
+		// Only collect image files, not archives
+		if isSupportedExt(fullPath) {
+			images = append(images, ImagePath{
+				Path:        fullPath,
+				ArchivePath: "",
+				EntryPath:   "",
+			})
+		}
+	}
+
+	// Sort the images
+	sortedImages := sortImagePaths(images, sortMethod)
+	return sortedImages, nil
+}
+
 func collectImages(args []string, sortMethod int) ([]ImagePath, error) {
 	var list []ImagePath
 	for _, p := range args {
