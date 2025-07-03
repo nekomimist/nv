@@ -29,6 +29,7 @@ type Config struct {
 	RightToLeft          bool    `json:"right_to_left"`
 	HelpFontSize         float64 `json:"help_font_size"`
 	SortMethod           int     `json:"sort_method"`
+	BookMode             bool    `json:"book_mode"`
 }
 
 func getConfigPath() string {
@@ -51,6 +52,7 @@ func loadConfigFromPath(configPath string) Config {
 		RightToLeft:          false,       // Default to left-to-right reading (Western style)
 		HelpFontSize:         24.0,        // Default help font size
 		SortMethod:           SortNatural, // Default to natural sort
+		BookMode:             false,       // Default to single page mode
 	}
 
 	data, err := os.ReadFile(configPath)
@@ -69,6 +71,7 @@ func loadConfigFromPath(configPath string) Config {
 			RightToLeft:          false,
 			HelpFontSize:         24.0,
 			SortMethod:           SortNatural,
+			BookMode:             false,
 		}
 	}
 

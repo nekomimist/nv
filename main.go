@@ -175,6 +175,10 @@ func (g *Game) toggleBookMode() {
 			g.tempSingleMode = false
 		}
 	}
+
+	// Save the book mode preference (true even if in temp single mode)
+	g.config.BookMode = g.bookMode
+	g.saveCurrentConfig()
 }
 
 func (g *Game) processPageInput() {
@@ -463,6 +467,7 @@ func main() {
 	g := &Game{
 		imageManager:       imageManager,
 		idx:                0,
+		bookMode:           config.BookMode,
 		config:             config,
 		configPath:         *configFile,
 		showInfo:           false, // Hide info display by default
@@ -478,6 +483,21 @@ func main() {
 	// Set up single file expansion mode if applicable
 	if isSingleImageFile {
 		g.originalFileIndex = 0 // The single file is at index 0
+	}
+
+	// Handle book mode initialization for single image or incompatible images
+	if config.BookMode && len(paths) > 0 {
+		pathsCount := len(paths)
+		if pathsCount == 1 {
+			// Only one image, use temp single mode
+			g.tempSingleMode = true
+		} else {
+			// Check if current images are compatible for book mode
+			leftImg, rightImg := g.imageManager.GetBookModeImages(0, g.config.RightToLeft)
+			if !g.shouldUseBookMode(leftImg, rightImg) {
+				g.tempSingleMode = true
+			}
+		}
 	}
 
 	// Preload the first image and adjacent ones for faster startup
