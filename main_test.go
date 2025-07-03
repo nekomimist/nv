@@ -368,6 +368,7 @@ func TestImageManager(t *testing.T) {
 
 func TestCalculateHorizontalPosition(t *testing.T) {
 	g := &Game{}
+	r := NewRenderer(g)
 
 	tests := []struct {
 		name     string
@@ -385,7 +386,7 @@ func TestCalculateHorizontalPosition(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := g.calculateHorizontalPosition(tt.x, tt.maxW, tt.scaledW, tt.align)
+			result := r.CalculateHorizontalPosition(tt.x, tt.maxW, tt.scaledW, tt.align)
 			if result != tt.expected {
 				t.Errorf("Expected %.1f, got %.1f", tt.expected, result)
 			}
