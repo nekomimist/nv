@@ -8,33 +8,51 @@ This is an image viewer application built using Go and the Ebiten game engine. T
 
 ## File Structure
 
-The application is organized into three main modules for maintainability:
+The application is organized into six main modules for maintainability:
 
-### `main.go` (856 lines)
+### `main.go`
 - **Game Loop**: Implements Ebiten's game interface (`Update()`, `Draw()`, `Layout()`)
-- **User Interface**: Handles keyboard input and window management
 - **Navigation Logic**: Image index management, book mode navigation, and page jump functionality
-- **Rendering**: Single image and book mode drawing functions
-- **Help System**: Interactive help overlay with configurable font rendering
 - **Application Entry Point**: Command-line argument processing and initialization
+- **Game State Management**: Handles fullscreen, overlay messages, and single file expansion
 
-### `image.go` (397 lines)
+### `input.go`
+- **InputHandler**: Centralized keyboard input processing
+- **Key Mapping**: Maps keyboard events to game actions
+- **Page Input Mode**: Handles direct page number input (G key)
+- **Mode Toggle Keys**: Book mode, reading direction, and sort method switching
+
+### `renderer.go`
+- **Rendering Engine**: All drawing operations and visual output
+- **Help System**: Interactive help overlay with configurable font rendering
+- **Image Display**: Single image and book mode drawing functions
+- **UI Elements**: Page numbers, overlay messages, and status indicators
+
+### `image.go`
 - **ImageManager Interface**: Abstraction for image loading and caching
 - **Image Loading**: Supports PNG, JPEG, WebP, BMP, and GIF formats
 - **Archive Support**: Complete ZIP and RAR archive processing
 - **Intelligent Caching**: LRU-style cache with preloading for performance
 - **File Collection**: Recursive directory scanning and archive detection
 
-### `config.go` (96+ lines)
+### `config.go`
 - **Configuration Management**: JSON-based settings persistence
 - **Validation**: Input validation and default value handling
 - **Window State**: Size and aspect ratio threshold management
 - **Reading Direction**: Book mode orientation settings
 - **Font Configuration**: Help overlay font size settings with validation
+- **Book Mode Persistence**: Saves book mode preference across sessions
+
+### `sort_strategy.go`
+- **SortStrategy Interface**: Abstraction for different file sorting methods
+- **Natural Sort**: Intelligent numeric sequence sorting using maruel/natural
+- **Simple Sort**: Standard lexicographical string comparison
+- **Entry Order**: Preserves original file system or archive order
+- **Strategy Pattern**: Pluggable sorting algorithms for flexible file ordering
 
 ## Key Components
 
-- **Modular Architecture**: Clear separation of concerns across three files
+- **Modular Architecture**: Clear separation of concerns across six files
 - **Interface-Based Design**: ImageManager enables dependency injection and testing
 - **Archive Integration**: Seamless ZIP/RAR support with automatic image detection
 - **Performance Optimization**: Intelligent caching and preloading strategies
@@ -73,6 +91,10 @@ go mod tidy
 go test -run TestImageManager     # Test image management
 go test -run TestConfig          # Test configuration
 go test -run TestGameNavigation  # Test navigation logic
+
+# Cross-platform builds
+GOOS=windows GOARCH=amd64 go build -ldflags "-H windowsgui" -o nv.exe  # Windows GUI version (recommended)
+GOOS=windows GOARCH=amd64 go build -o nv-debug.exe                     # Windows console version (for debugging)
 ```
 
 ## Development Notes
@@ -159,7 +181,7 @@ This codebase has been extensively refactored for maintainability:
 - **Book Mode**: Dual image display with configurable reading direction
 - **Aspect Ratio Intelligence**: Automatic fallback to single page for mismatched ratios
 - **Help System**: Interactive H key overlay with column-aligned controls display
-- **Configuration Persistence**: JSON-based settings with validation including font preferences
+- **Configuration Persistence**: JSON-based settings with validation including font preferences and book mode state
 
 ### Performance Optimizations
 - **Lazy Loading**: Images loaded on-demand with intelligent preloading
@@ -178,7 +200,8 @@ The application saves settings to `~/.nv.json`:
   "aspect_ratio_threshold": 1.5,
   "right_to_left": false,
   "help_font_size": 24.0,
-  "sort_method": 0
+  "sort_method": 0,
+  "book_mode": false
 }
 ```
 
@@ -186,6 +209,7 @@ The application saves settings to `~/.nv.json`:
 - **right_to_left**: Reading direction for book mode. `false` for left-to-right (Western style), `true` for right-to-left (Japanese manga style). Default: false
 - **help_font_size**: Font size for help overlay text. Must be > 12px for readability. Default: 24.0
 - **sort_method**: File sorting method for directories and archives. `0` = Natural, `1` = Simple, `2` = Entry Order. Default: 0 (Natural)
+- **book_mode**: Whether to start in book mode (spread view) by default. `false` for single page mode, `true` for book mode. Default: false
 
 ## File Sorting Strategy
 
