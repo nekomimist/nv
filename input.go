@@ -28,6 +28,7 @@ func (h *InputHandler) HandleInput() {
 	h.handleInfoToggle()
 	h.handlePageInputMode()
 	h.handleModeToggleKeys()
+	h.handleTransformationKeys()
 	h.handleNavigationKeys()
 	h.handleFullscreenToggle()
 }
@@ -126,7 +127,29 @@ func (h *InputHandler) handleModeToggleKeys() {
 		if ebiten.IsKeyPressed(ebiten.KeyShift) {
 			// SHIFT+S: Cycle sort method
 			h.game.cycleSortMethod()
+		} else {
+			// S: Scan directory images - only works for single file launch
+			h.game.expandToDirectoryAndJump()
 		}
+	}
+}
+
+func (h *InputHandler) handleTransformationKeys() {
+	// L: Rotate left 90 degrees
+	if inpututil.IsKeyJustPressed(ebiten.KeyL) {
+		h.game.rotateLeft()
+	}
+	// R: Rotate right 90 degrees
+	if inpututil.IsKeyJustPressed(ebiten.KeyR) {
+		h.game.rotateRight()
+	}
+	// H: Flip horizontally
+	if inpututil.IsKeyJustPressed(ebiten.KeyH) {
+		h.game.flipHorizontal()
+	}
+	// V: Flip vertically
+	if inpututil.IsKeyJustPressed(ebiten.KeyV) {
+		h.game.flipVertical()
 	}
 }
 
@@ -151,10 +174,6 @@ func (h *InputHandler) handleNavigationKeys() {
 		if totalPages > 0 {
 			h.game.jumpToPage(totalPages)
 		}
-	}
-	// Load directory images (L key) - only works for single file launch
-	if inpututil.IsKeyJustPressed(ebiten.KeyL) {
-		h.game.expandToDirectoryAndJump()
 	}
 }
 

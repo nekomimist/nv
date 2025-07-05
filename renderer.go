@@ -49,7 +49,7 @@ func NewRenderer(game *Game) *Renderer {
 				{"Shift+Backspace/P", "Single page backward (fine adjustment)"},
 				{"Home/<", "Jump to first page"},
 				{"End/>", "Jump to last page"},
-				{"L", "Load all images from directory (single file mode only)"},
+				{"S", "Scan directory images (single file mode only)"},
 			},
 		},
 		{
@@ -59,6 +59,15 @@ func NewRenderer(game *Game) *Renderer {
 				{"Shift+B", "Toggle reading direction (LTR ↔ RTL)"},
 				{"Shift+S", "Cycle sort method (Natural/Simple/Entry)"},
 				{"Z", "Toggle fullscreen"},
+			},
+		},
+		{
+			title: "Transformations:",
+			items: []helpItem{
+				{"L", "Rotate left 90 degrees"},
+				{"R", "Rotate right 90 degrees"},
+				{"H", "Flip horizontally"},
+				{"V", "Flip vertically"},
 			},
 		},
 		{
@@ -116,7 +125,10 @@ func (r *Renderer) drawSingleImage(screen *ebiten.Image) {
 		return
 	}
 
-	iw, ih := img.Bounds().Dx(), img.Bounds().Dy()
+	// Apply transformations to the image
+	transformedImg := r.applyTransformations(img)
+
+	iw, ih := transformedImg.Bounds().Dx(), transformedImg.Bounds().Dy()
 	w, h := screen.Bounds().Dx(), screen.Bounds().Dy()
 
 	var scale float64
@@ -136,7 +148,7 @@ func (r *Renderer) drawSingleImage(screen *ebiten.Image) {
 	sw, sh := float64(iw)*scale, float64(ih)*scale
 	op.GeoM.Translate(float64(w)/2-sw/2, float64(h)/2-sh/2)
 
-	screen.DrawImage(img, op)
+	screen.DrawImage(transformedImg, op)
 }
 
 func (r *Renderer) drawBookMode(screen *ebiten.Image) {
@@ -152,19 +164,14 @@ func (r *Renderer) drawBookMode(screen *ebiten.Image) {
 		return
 	}
 
-	w, h := screen.Bounds().Dx(), screen.Bounds().Dy()
+	// Create a combined image for book mode
+	combinedImg := r.createBookModeImage(leftImg, rightImg)
 
-	// Calculate available width for each image
-	availableWidth := (w - imageGap) / 2
+	// Apply transformations to the combined image
+	transformedImg := r.applyTransformations(combinedImg)
 
-	// Draw left image (right-aligned within its region)
-	r.drawBookImageInRegion(screen, leftImg, 0, 0, availableWidth, h, "right")
-
-	// Draw right image if exists (left-aligned within its region)
-	if rightImg != nil {
-		rightX := availableWidth + imageGap
-		r.drawBookImageInRegion(screen, rightImg, rightX, 0, availableWidth, h, "left")
-	}
+	// Draw the transformed combined image
+	r.drawTransformedImageCentered(screen, transformedImg)
 }
 
 func (r *Renderer) drawImageInRegion(screen *ebiten.Image, img *ebiten.Image, x, y, maxW, maxH int) {
@@ -406,4 +413,105 @@ func (r *Renderer) drawOverlayMessage(screen *ebiten.Image) {
 	textOp.GeoM.Translate(boxX+float64(padding), boxY+float64(padding))
 	textOp.ColorScale.ScaleWithColor(color.RGBA{255, 255, 255, 255})
 	text.Draw(screen, r.game.overlayMessage, messageFont, textOp)
+}
+
+func (r *Renderer) applyTransformations(img *ebiten.Image) *ebiten.Image {
+	if r.game.rotationAngle == 0 && !r.game.flipH && !r.game.flipV {
+		return img
+	}
+
+	w, h := img.Bounds().Dx(), img.Bounds().Dy()
+
+	// Calculate final dimensions after rotation
+	var finalW, finalH int
+	if r.game.rotationAngle == 90 || r.game.rotationAngle == 270 {
+		finalW, finalH = h, w
+	} else {
+		finalW, finalH = w, h
+	}
+
+	// Create new image with final dimensions
+	transformedImg := ebiten.NewImage(finalW, finalH)
+
+	op := &ebiten.DrawImageOptions{}
+	op.Filter = ebiten.FilterLinear
+
+	// Apply transformations in order: flip, then rotate
+	centerX, centerY := float64(w)/2, float64(h)/2
+
+	// Reset to origin
+	op.GeoM.Translate(-centerX, -centerY)
+
+	// Apply flips
+	if r.game.flipH {
+		op.GeoM.Scale(-1, 1)
+	}
+	if r.game.flipV {
+		op.GeoM.Scale(1, -1)
+	}
+
+	// Apply rotation
+	if r.game.rotationAngle != 0 {
+		op.GeoM.Rotate(float64(r.game.rotationAngle) * math.Pi / 180)
+	}
+
+	// Move to center of new image
+	op.GeoM.Translate(float64(finalW)/2, float64(finalH)/2)
+
+	transformedImg.DrawImage(img, op)
+	return transformedImg
+}
+
+func (r *Renderer) createBookModeImage(leftImg, rightImg *ebiten.Image) *ebiten.Image {
+	if rightImg == nil {
+		return leftImg
+	}
+
+	leftW, leftH := leftImg.Bounds().Dx(), leftImg.Bounds().Dy()
+	rightW, rightH := rightImg.Bounds().Dx(), rightImg.Bounds().Dy()
+
+	// Calculate combined dimensions
+	combinedW := leftW + rightW + imageGap
+	combinedH := int(math.Max(float64(leftH), float64(rightH)))
+
+	// Create combined image
+	combinedImg := ebiten.NewImage(combinedW, combinedH)
+
+	// Draw left image (right-aligned in its space)
+	leftOp := &ebiten.DrawImageOptions{}
+	leftOp.Filter = ebiten.FilterLinear
+	leftOp.GeoM.Translate(0, float64(combinedH)/2-float64(leftH)/2)
+	combinedImg.DrawImage(leftImg, leftOp)
+
+	// Draw right image (left-aligned in its space)
+	rightOp := &ebiten.DrawImageOptions{}
+	rightOp.Filter = ebiten.FilterLinear
+	rightOp.GeoM.Translate(float64(leftW+imageGap), float64(combinedH)/2-float64(rightH)/2)
+	combinedImg.DrawImage(rightImg, rightOp)
+
+	return combinedImg
+}
+
+func (r *Renderer) drawTransformedImageCentered(screen *ebiten.Image, img *ebiten.Image) {
+	iw, ih := img.Bounds().Dx(), img.Bounds().Dy()
+	w, h := screen.Bounds().Dx(), screen.Bounds().Dy()
+
+	var scale float64
+	if r.game.fullscreen {
+		scale = math.Min(float64(w)/float64(iw), float64(h)/float64(ih))
+	} else {
+		if iw > w || ih > h {
+			scale = math.Min(float64(w)/float64(iw), float64(h)/float64(ih))
+		} else {
+			scale = 1
+		}
+	}
+
+	op := &ebiten.DrawImageOptions{}
+	op.Filter = ebiten.FilterLinear
+	op.GeoM.Scale(scale, scale)
+	sw, sh := float64(iw)*scale, float64(ih)*scale
+	op.GeoM.Translate(float64(w)/2-sw/2, float64(h)/2-sh/2)
+
+	screen.DrawImage(img, op)
 }

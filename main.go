@@ -73,6 +73,11 @@ type Game struct {
 	originalArgs       []string // Original command line arguments
 	expandedFromSingle bool     // Whether the current file list was expanded from a single file
 	originalFileIndex  int      // Index of the original file in the expanded list
+
+	// Image transformation state
+	rotationAngle int  // 0, 90, 180, 270 degrees
+	flipH         bool // Horizontal flip
+	flipV         bool // Vertical flip
 }
 
 func (g *Game) getCurrentImage() *ebiten.Image {
@@ -89,6 +94,22 @@ func (g *Game) saveCurrentConfig() {
 	} else {
 		saveConfig(g.config)
 	}
+}
+
+func (g *Game) rotateLeft() {
+	g.rotationAngle = (g.rotationAngle + 270) % 360
+}
+
+func (g *Game) rotateRight() {
+	g.rotationAngle = (g.rotationAngle + 90) % 360
+}
+
+func (g *Game) flipHorizontal() {
+	g.flipH = !g.flipH
+}
+
+func (g *Game) flipVertical() {
+	g.flipV = !g.flipV
 }
 
 func (g *Game) cycleSortMethod() {
