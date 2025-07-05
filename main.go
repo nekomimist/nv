@@ -95,9 +95,6 @@ func (g *Game) cycleSortMethod() {
 	// Cycle through sort methods
 	g.config.SortMethod = (g.config.SortMethod + 1) % 3
 
-	// Save config
-	g.saveCurrentConfig()
-
 	// Show message
 	g.showOverlayMessage("Sort: " + getSortMethodName(g.config.SortMethod))
 
@@ -178,7 +175,6 @@ func (g *Game) toggleBookMode() {
 
 	// Save the book mode preference (true even if in temp single mode)
 	g.config.BookMode = g.bookMode
-	g.saveCurrentConfig()
 }
 
 func (g *Game) processPageInput() {
@@ -322,10 +318,12 @@ func (g *Game) saveCurrentWindowSize() {
 		g.config.WindowWidth = w
 		g.config.WindowHeight = h
 	}
-	g.saveCurrentConfig()
 }
 
 func (g *Game) Exit() {
+	// Save all current settings before exiting
+	g.saveCurrentWindowSize()
+	g.saveCurrentConfig()
 	os.Exit(0)
 }
 
@@ -427,6 +425,9 @@ func (g *Game) toggleFullscreen() {
 			ebiten.SetWindowSize(g.savedWinW, g.savedWinH)
 		}
 	}
+
+	// Save fullscreen state to config
+	g.config.Fullscreen = g.fullscreen
 }
 
 func (g *Game) Draw(screen *ebiten.Image) {
@@ -468,6 +469,7 @@ func main() {
 		imageManager:       imageManager,
 		idx:                0,
 		bookMode:           config.BookMode,
+		fullscreen:         config.Fullscreen,
 		config:             config,
 		configPath:         *configFile,
 		showInfo:           false, // Hide info display by default
@@ -506,6 +508,12 @@ func main() {
 	ebiten.SetWindowTitle("Ebiten Image Viewer")
 	ebiten.SetWindowSize(config.WindowWidth, config.WindowHeight)
 	ebiten.SetWindowResizingMode(ebiten.WindowResizingModeEnabled)
+
+	// Apply saved fullscreen setting
+	if config.Fullscreen {
+		g.savedWinW, g.savedWinH = config.WindowWidth, config.WindowHeight
+		ebiten.SetFullscreen(true)
+	}
 
 	if err := ebiten.RunGame(g); err != nil {
 		log.Fatal(err)

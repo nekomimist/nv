@@ -34,13 +34,12 @@ func (h *InputHandler) HandleInput() {
 
 func (h *InputHandler) handleExitKeys() {
 	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) || inpututil.IsKeyJustPressed(ebiten.KeyQ) {
-		h.game.saveCurrentWindowSize()
 		h.game.Exit()
 	}
 }
 
 func (h *InputHandler) handleHelpToggle() {
-	if inpututil.IsKeyJustPressed(ebiten.KeyH) {
+	if inpututil.IsKeyJustPressed(ebiten.KeySlash) && ebiten.IsKeyPressed(ebiten.KeyShift) {
 		h.game.showHelp = !h.game.showHelp
 	}
 }
@@ -109,7 +108,6 @@ func (h *InputHandler) handleModeToggleKeys() {
 		if ebiten.IsKeyPressed(ebiten.KeyShift) {
 			// SHIFT+B: Toggle reading direction
 			h.game.config.RightToLeft = !h.game.config.RightToLeft
-			h.game.saveCurrentConfig()
 
 			// Show direction change message
 			direction := "Left-to-Right"

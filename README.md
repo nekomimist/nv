@@ -43,7 +43,7 @@ A simple image viewer built with Go and Ebiten, featuring seamless archive suppo
 - `Z` - Toggle fullscreen
 
 ### Other
-- `H` - Show/hide help overlay
+- `?` - Show/hide help overlay
 - `Escape` / `Q` - Quit
 
 ## Book Mode

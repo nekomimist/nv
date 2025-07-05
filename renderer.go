@@ -65,7 +65,7 @@ func NewRenderer(game *Game) *Renderer {
 			title: "Other:",
 			items: []helpItem{
 				{"G", "Go to page (enter page number)"},
-				{"H", "Show/hide this help"},
+				{"?", "Show/hide this help"},
 				{"I", "Show/hide info display (page numbers)"},
 				{"Escape/Q", "Quit application"},
 			},

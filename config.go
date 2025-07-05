@@ -30,6 +30,7 @@ type Config struct {
 	HelpFontSize         float64 `json:"help_font_size"`
 	SortMethod           int     `json:"sort_method"`
 	BookMode             bool    `json:"book_mode"`
+	Fullscreen           bool    `json:"fullscreen"`
 }
 
 func getConfigPath() string {
@@ -53,6 +54,7 @@ func loadConfigFromPath(configPath string) Config {
 		HelpFontSize:         24.0,        // Default help font size
 		SortMethod:           SortNatural, // Default to natural sort
 		BookMode:             false,       // Default to single page mode
+		Fullscreen:           false,       // Default to windowed mode
 	}
 
 	data, err := os.ReadFile(configPath)
@@ -72,6 +74,7 @@ func loadConfigFromPath(configPath string) Config {
 			HelpFontSize:         24.0,
 			SortMethod:           SortNatural,
 			BookMode:             false,
+			Fullscreen:           false,
 		}
 	}
 
