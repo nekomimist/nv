@@ -1,8 +1,12 @@
 package main
 
 import (
+	"bytes"
+	_ "embed"
 	"flag"
 	"fmt"
+	"image"
+	"image/png"
 	"log"
 	"os"
 	"path/filepath"
@@ -12,6 +16,15 @@ import (
 
 	"github.com/hajimehoshi/ebiten/v2"
 )
+
+//go:embed icon/icon_16.png
+var icon16 []byte
+
+//go:embed icon/icon_32.png
+var icon32 []byte
+
+//go:embed icon/icon_48.png
+var icon48 []byte
 
 const (
 	// Book mode layout constants
@@ -530,6 +543,9 @@ func main() {
 	ebiten.SetWindowSize(config.WindowWidth, config.WindowHeight)
 	ebiten.SetWindowResizingMode(ebiten.WindowResizingModeEnabled)
 
+	// Set window icon
+	setWindowIcon()
+
 	// Apply saved fullscreen setting
 	if config.Fullscreen {
 		g.savedWinW, g.savedWinH = config.WindowWidth, config.WindowHeight
@@ -538,5 +554,24 @@ func main() {
 
 	if err := ebiten.RunGame(g); err != nil {
 		log.Fatal(err)
+	}
+}
+
+func setWindowIcon() {
+	// Load embedded icon images
+	iconData := [][]byte{icon16, icon32, icon48}
+	var iconImages []image.Image
+
+	for _, data := range iconData {
+		img, err := png.Decode(bytes.NewReader(data))
+		if err != nil {
+			continue
+		}
+		iconImages = append(iconImages, img)
+	}
+
+	// Set the window icon if we have at least one image
+	if len(iconImages) > 0 {
+		ebiten.SetWindowIcon(iconImages)
 	}
 }

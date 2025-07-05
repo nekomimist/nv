@@ -165,6 +165,25 @@ This codebase has been extensively refactored for maintainability:
 - **Return Logic**: Automatically returns to book mode when possible
 - **Visual Indication**: Page status shows current mode state
 
+## Window Icon Support
+
+The application includes embedded window icons for proper display across platforms:
+
+### Icon Files
+- **Multiple Sizes**: 16x16, 32x32, and 48x48 pixel PNG icons for optimal display
+- **Embedded Resources**: Icons are embedded using Go's `embed` directive for self-contained executable
+- **Source Files**: Original icon files stored in `icon/` directory for future modifications
+
+### Implementation
+- **Automatic Loading**: Icons are loaded from embedded data at startup
+- **Platform Support**: Works on Windows and Linux (macOS doesn't support window icons)
+- **Fallback Handling**: Gracefully handles missing or corrupted icon data
+
+### Build Integration
+- **Windows GUI**: Icons display in window title bar and taskbar
+- **Windows Resource**: Additional `.syso` file provides executable icon for file explorer
+- **Cross-Platform**: Icon embedding works across all supported platforms
+
 ## Architecture Notes
 
 ### Design Principles
