@@ -16,7 +16,7 @@ import (
 
 // Renderer handles all drawing operations
 type Renderer struct {
-	game           *Game
+	renderState    RenderState
 	helpFontSource *text.GoTextFaceSource
 	helpSections   []helpSection
 }
@@ -32,7 +32,7 @@ type helpItem struct {
 }
 
 // NewRenderer creates a new Renderer
-func NewRenderer(game *Game) *Renderer {
+func NewRenderer(renderState RenderState) *Renderer {
 	// Initialize font source with lightweight goregular
 	s, err := text.NewGoTextFaceSource(bytes.NewReader(goregular.TTF))
 	if err != nil {
@@ -82,7 +82,7 @@ func NewRenderer(game *Game) *Renderer {
 	}
 
 	return &Renderer{
-		game:           game,
+		renderState:    renderState,
 		helpFontSource: s,
 		helpSections:   helpSections,
 	}
@@ -90,7 +90,7 @@ func NewRenderer(game *Game) *Renderer {
 
 // Draw renders the entire screen
 func (r *Renderer) Draw(screen *ebiten.Image) {
-	if r.game.tempSingleMode || !r.game.bookMode {
+	if r.renderState.IsTempSingleMode() || !r.renderState.IsBookMode() {
 		// Single page mode or temporary single mode
 		r.drawSingleImage(screen)
 	} else {
@@ -99,28 +99,28 @@ func (r *Renderer) Draw(screen *ebiten.Image) {
 	}
 
 	// Draw info display (page status, etc.) at bottom of screen if enabled
-	if r.game.showInfo {
+	if r.renderState.IsShowingInfo() {
 		r.drawInfoDisplay(screen)
 	}
 
 	// Draw help overlay if enabled
-	if r.game.showHelp {
+	if r.renderState.IsShowingHelp() {
 		r.drawHelpOverlay(screen)
 	}
 
 	// Draw page input overlay if active
-	if r.game.pageInputMode {
+	if r.renderState.IsInPageInputMode() {
 		r.drawPageInputOverlay(screen)
 	}
 
 	// Draw overlay message if active
-	if r.game.overlayMessage != "" && time.Since(r.game.overlayMessageTime) < overlayMessageDuration {
+	if r.renderState.GetOverlayMessage() != "" && time.Since(r.renderState.GetOverlayMessageTime()) < overlayMessageDuration {
 		r.drawOverlayMessage(screen)
 	}
 }
 
 func (r *Renderer) drawSingleImage(screen *ebiten.Image) {
-	img := r.game.getCurrentImage()
+	img := r.renderState.GetCurrentImage()
 	if img == nil {
 		return
 	}
@@ -132,7 +132,7 @@ func (r *Renderer) drawSingleImage(screen *ebiten.Image) {
 	w, h := screen.Bounds().Dx(), screen.Bounds().Dy()
 
 	var scale float64
-	if r.game.fullscreen {
+	if r.renderState.IsFullscreen() {
 		scale = math.Min(float64(w)/float64(iw), float64(h)/float64(ih))
 	} else {
 		if iw > w || ih > h {
@@ -152,13 +152,13 @@ func (r *Renderer) drawSingleImage(screen *ebiten.Image) {
 }
 
 func (r *Renderer) drawBookMode(screen *ebiten.Image) {
-	leftImg, rightImg := r.game.getBookModeImages()
+	leftImg, rightImg := r.renderState.GetBookModeImages()
 	if leftImg == nil {
 		return
 	}
 
 	// Check if images are compatible for book mode display
-	if !r.game.shouldUseBookMode(leftImg, rightImg) {
+	if !r.renderState.ShouldUseBookMode(leftImg, rightImg) {
 		// Fall back to single page display
 		r.drawSingleImage(screen)
 		return
@@ -205,7 +205,7 @@ func (r *Renderer) drawImageInRegionWithAlign(screen *ebiten.Image, img *ebiten.
 func (r *Renderer) calculateImageScale(img *ebiten.Image, maxW, maxH int) float64 {
 	iw, ih := img.Bounds().Dx(), img.Bounds().Dy()
 
-	if r.game.fullscreen {
+	if r.renderState.IsFullscreen() {
 		return math.Min(float64(maxW)/float64(iw), float64(maxH)/float64(ih))
 	}
 
@@ -246,7 +246,7 @@ func (r *Renderer) drawHelpOverlay(screen *ebiten.Image) {
 	// Create font with size from config
 	helpFont := &text.GoTextFace{
 		Source: r.helpFontSource,
-		Size:   r.game.config.HelpFontSize,
+		Size:   r.renderState.GetHelpFontSize(),
 	}
 
 	// Draw title
@@ -260,8 +260,8 @@ func (r *Renderer) drawHelpOverlay(screen *ebiten.Image) {
 	keyColumnX := float64(padding + 220)  // Key column (right-aligned)
 	descColumnX := float64(padding + 270) // Description column (left-aligned)
 
-	currentY := titleY + r.game.config.HelpFontSize*2 // Start below title
-	lineHeight := r.game.config.HelpFontSize * 1.5
+	currentY := titleY + r.renderState.GetHelpFontSize()*2 // Start below title
+	lineHeight := r.renderState.GetHelpFontSize() * 1.5
 
 	// Draw each section
 	for _, section := range r.helpSections {
@@ -302,20 +302,20 @@ func (r *Renderer) drawPageInputOverlay(screen *ebiten.Image) {
 	// Create font for page input
 	inputFont := &text.GoTextFace{
 		Source: r.helpFontSource,
-		Size:   r.game.config.HelpFontSize,
+		Size:   r.renderState.GetHelpFontSize(),
 	}
 
 	// Create smaller font for range display
 	rangeFont := &text.GoTextFace{
 		Source: r.helpFontSource,
-		Size:   r.game.config.HelpFontSize * 0.8,
+		Size:   r.renderState.GetHelpFontSize() * 0.8,
 	}
 
 	// Get total pages for range display
-	totalPages := r.game.imageManager.GetPathsCount()
+	totalPages := r.renderState.GetTotalPagesCount()
 
 	// Create display texts
-	inputText := fmt.Sprintf("Go to page: %s_", r.game.pageInputBuffer)
+	inputText := fmt.Sprintf("Go to page: %s_", r.renderState.GetPageInputBuffer())
 	rangeText := fmt.Sprintf("(1-%d)", totalPages)
 
 	// Measure text dimensions
@@ -356,11 +356,11 @@ func (r *Renderer) drawInfoDisplay(screen *ebiten.Image) {
 	// Create font for info display (same size as help text)
 	infoFont := &text.GoTextFace{
 		Source: r.helpFontSource,
-		Size:   r.game.config.HelpFontSize,
+		Size:   r.renderState.GetHelpFontSize(),
 	}
 
 	// Get page status text
-	infoText := r.game.getCurrentPageNumber()
+	infoText := r.renderState.GetCurrentPageNumber()
 
 	// Measure text dimensions
 	textWidth, textHeight := text.Measure(infoText, infoFont, 0)
@@ -392,11 +392,11 @@ func (r *Renderer) drawOverlayMessage(screen *ebiten.Image) {
 	// Create font for overlay message
 	messageFont := &text.GoTextFace{
 		Source: r.helpFontSource,
-		Size:   r.game.config.HelpFontSize,
+		Size:   r.renderState.GetHelpFontSize(),
 	}
 
 	// Measure text dimensions
-	textWidth, textHeight := text.Measure(r.game.overlayMessage, messageFont, 0)
+	textWidth, textHeight := text.Measure(r.renderState.GetOverlayMessage(), messageFont, 0)
 
 	// Calculate position (center of screen)
 	padding := 20
@@ -412,11 +412,11 @@ func (r *Renderer) drawOverlayMessage(screen *ebiten.Image) {
 	textOp := &text.DrawOptions{}
 	textOp.GeoM.Translate(boxX+float64(padding), boxY+float64(padding))
 	textOp.ColorScale.ScaleWithColor(color.RGBA{255, 255, 255, 255})
-	text.Draw(screen, r.game.overlayMessage, messageFont, textOp)
+	text.Draw(screen, r.renderState.GetOverlayMessage(), messageFont, textOp)
 }
 
 func (r *Renderer) applyTransformations(img *ebiten.Image) *ebiten.Image {
-	if r.game.rotationAngle == 0 && !r.game.flipH && !r.game.flipV {
+	if r.renderState.GetRotationAngle() == 0 && !r.renderState.IsFlippedH() && !r.renderState.IsFlippedV() {
 		return img
 	}
 
@@ -424,7 +424,7 @@ func (r *Renderer) applyTransformations(img *ebiten.Image) *ebiten.Image {
 
 	// Calculate final dimensions after rotation
 	var finalW, finalH int
-	if r.game.rotationAngle == 90 || r.game.rotationAngle == 270 {
+	if r.renderState.GetRotationAngle() == 90 || r.renderState.GetRotationAngle() == 270 {
 		finalW, finalH = h, w
 	} else {
 		finalW, finalH = w, h
@@ -443,16 +443,16 @@ func (r *Renderer) applyTransformations(img *ebiten.Image) *ebiten.Image {
 	op.GeoM.Translate(-centerX, -centerY)
 
 	// Apply flips
-	if r.game.flipH {
+	if r.renderState.IsFlippedH() {
 		op.GeoM.Scale(-1, 1)
 	}
-	if r.game.flipV {
+	if r.renderState.IsFlippedV() {
 		op.GeoM.Scale(1, -1)
 	}
 
 	// Apply rotation
-	if r.game.rotationAngle != 0 {
-		op.GeoM.Rotate(float64(r.game.rotationAngle) * math.Pi / 180)
+	if r.renderState.GetRotationAngle() != 0 {
+		op.GeoM.Rotate(float64(r.renderState.GetRotationAngle()) * math.Pi / 180)
 	}
 
 	// Move to center of new image
@@ -497,7 +497,7 @@ func (r *Renderer) drawTransformedImageCentered(screen *ebiten.Image, img *ebite
 	w, h := screen.Bounds().Dx(), screen.Bounds().Dy()
 
 	var scale float64
-	if r.game.fullscreen {
+	if r.renderState.IsFullscreen() {
 		scale = math.Min(float64(w)/float64(iw), float64(h)/float64(ih))
 	} else {
 		if iw > w || ih > h {

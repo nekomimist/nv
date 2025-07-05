@@ -7,19 +7,21 @@ import (
 
 // InputHandler handles all keyboard input processing
 type InputHandler struct {
-	game *Game
+	inputActions InputActions
+	inputState   InputState
 }
 
 // NewInputHandler creates a new InputHandler
-func NewInputHandler(game *Game) *InputHandler {
+func NewInputHandler(inputActions InputActions, inputState InputState) *InputHandler {
 	return &InputHandler{
-		game: game,
+		inputActions: inputActions,
+		inputState:   inputState,
 	}
 }
 
 // HandleInput processes all input for the current frame
 func (h *InputHandler) HandleInput() {
-	if h.game.imageManager.GetPathsCount() == 0 {
+	if h.inputActions.GetTotalPagesCount() == 0 {
 		return
 	}
 
@@ -35,28 +37,27 @@ func (h *InputHandler) HandleInput() {
 
 func (h *InputHandler) handleExitKeys() {
 	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) || inpututil.IsKeyJustPressed(ebiten.KeyQ) {
-		h.game.Exit()
+		h.inputActions.Exit()
 	}
 }
 
 func (h *InputHandler) handleHelpToggle() {
 	if inpututil.IsKeyJustPressed(ebiten.KeySlash) && ebiten.IsKeyPressed(ebiten.KeyShift) {
-		h.game.showHelp = !h.game.showHelp
+		h.inputActions.ToggleHelp()
 	}
 }
 
 func (h *InputHandler) handleInfoToggle() {
 	if inpututil.IsKeyJustPressed(ebiten.KeyI) {
-		h.game.showInfo = !h.game.showInfo
+		h.inputActions.ToggleInfo()
 	}
 }
 
 func (h *InputHandler) handlePageInputMode() {
 	// Check for G key to enter page input mode
-	if !h.game.pageInputMode {
+	if !h.inputState.IsInPageInputMode() {
 		if inpututil.IsKeyJustPressed(ebiten.KeyG) {
-			h.game.pageInputMode = true
-			h.game.pageInputBuffer = ""
+			h.inputActions.EnterPageInputMode()
 		}
 		return
 	}
@@ -64,23 +65,23 @@ func (h *InputHandler) handlePageInputMode() {
 	// Handle page input mode
 	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
 		// Cancel page input
-		h.game.pageInputMode = false
-		h.game.pageInputBuffer = ""
+		h.inputActions.ExitPageInputMode()
 		return
 	}
 
 	if inpututil.IsKeyJustPressed(ebiten.KeyEnter) || inpututil.IsKeyJustPressed(ebiten.KeyNumpadEnter) {
 		// Confirm page input
-		h.game.processPageInput()
-		h.game.pageInputMode = false
-		h.game.pageInputBuffer = ""
+		h.inputActions.ProcessPageInput()
+		h.inputActions.ExitPageInputMode()
 		return
 	}
 
 	if inpututil.IsKeyJustPressed(ebiten.KeyBackspace) {
 		// Delete last character
-		if len(h.game.pageInputBuffer) > 0 {
-			h.game.pageInputBuffer = h.game.pageInputBuffer[:len(h.game.pageInputBuffer)-1]
+		currentBuffer := h.inputState.GetPageInputBuffer()
+		if len(currentBuffer) > 0 {
+			newBuffer := currentBuffer[:len(currentBuffer)-1]
+			h.inputActions.UpdatePageInputBuffer(newBuffer)
 		}
 		return
 	}
@@ -91,7 +92,8 @@ func (h *InputHandler) handlePageInputMode() {
 		digit = h.checkDigitKeys(ebiten.KeyNumpad0, ebiten.KeyNumpad9, '0')
 	}
 	if digit != "" {
-		h.game.pageInputBuffer += digit
+		currentBuffer := h.inputState.GetPageInputBuffer()
+		h.inputActions.UpdatePageInputBuffer(currentBuffer + digit)
 	}
 }
 
@@ -108,28 +110,21 @@ func (h *InputHandler) handleModeToggleKeys() {
 	if inpututil.IsKeyJustPressed(ebiten.KeyB) {
 		if ebiten.IsKeyPressed(ebiten.KeyShift) {
 			// SHIFT+B: Toggle reading direction
-			h.game.config.RightToLeft = !h.game.config.RightToLeft
-
-			// Show direction change message
-			direction := "Left-to-Right"
-			if h.game.config.RightToLeft {
-				direction = "Right-to-Left"
-			}
-			h.game.showOverlayMessage("Reading Direction: " + direction)
+			h.inputActions.ToggleReadingDirection()
 		} else {
 			// B: Toggle book mode
-			h.game.toggleBookMode()
-			h.game.imageManager.PreloadAdjacentImages(h.game.idx)
+			h.inputActions.ToggleBookMode()
+			h.inputActions.PreloadAdjacentImages(h.inputActions.GetCurrentIndex())
 		}
 	}
 
 	if inpututil.IsKeyJustPressed(ebiten.KeyS) {
 		if ebiten.IsKeyPressed(ebiten.KeyShift) {
 			// SHIFT+S: Cycle sort method
-			h.game.cycleSortMethod()
+			h.inputActions.CycleSortMethod()
 		} else {
 			// S: Scan directory images - only works for single file launch
-			h.game.expandToDirectoryAndJump()
+			h.inputActions.ExpandToDirectory()
 		}
 	}
 }
@@ -137,48 +132,48 @@ func (h *InputHandler) handleModeToggleKeys() {
 func (h *InputHandler) handleTransformationKeys() {
 	// L: Rotate left 90 degrees
 	if inpututil.IsKeyJustPressed(ebiten.KeyL) {
-		h.game.rotateLeft()
+		h.inputActions.RotateLeft()
 	}
 	// R: Rotate right 90 degrees
 	if inpututil.IsKeyJustPressed(ebiten.KeyR) {
-		h.game.rotateRight()
+		h.inputActions.RotateRight()
 	}
 	// H: Flip horizontally
 	if inpututil.IsKeyJustPressed(ebiten.KeyH) {
-		h.game.flipHorizontal()
+		h.inputActions.FlipHorizontal()
 	}
 	// V: Flip vertically
 	if inpututil.IsKeyJustPressed(ebiten.KeyV) {
-		h.game.flipVertical()
+		h.inputActions.FlipVertical()
 	}
 }
 
 func (h *InputHandler) handleNavigationKeys() {
 	// Next page
 	if inpututil.IsKeyJustPressed(ebiten.KeySpace) || inpututil.IsKeyJustPressed(ebiten.KeyN) {
-		h.game.navigateNext()
-		h.game.imageManager.PreloadAdjacentImages(h.game.idx)
+		h.inputActions.NavigateNext()
+		h.inputActions.PreloadAdjacentImages(h.inputActions.GetCurrentIndex())
 	}
 	// Previous page
 	if inpututil.IsKeyJustPressed(ebiten.KeyBackspace) || inpututil.IsKeyJustPressed(ebiten.KeyP) {
-		h.game.navigatePrevious()
-		h.game.imageManager.PreloadAdjacentImages(h.game.idx)
+		h.inputActions.NavigatePrevious()
+		h.inputActions.PreloadAdjacentImages(h.inputActions.GetCurrentIndex())
 	}
 	// Jump to first page
 	if inpututil.IsKeyJustPressed(ebiten.KeyHome) || inpututil.IsKeyJustPressed(ebiten.KeyComma) {
-		h.game.jumpToPage(1)
+		h.inputActions.JumpToPage(1)
 	}
 	// Jump to last page
 	if inpututil.IsKeyJustPressed(ebiten.KeyEnd) || inpututil.IsKeyJustPressed(ebiten.KeyPeriod) {
-		totalPages := h.game.imageManager.GetPathsCount()
+		totalPages := h.inputActions.GetTotalPagesCount()
 		if totalPages > 0 {
-			h.game.jumpToPage(totalPages)
+			h.inputActions.JumpToPage(totalPages)
 		}
 	}
 }
 
 func (h *InputHandler) handleFullscreenToggle() {
 	if inpututil.IsKeyJustPressed(ebiten.KeyZ) {
-		h.game.toggleFullscreen()
+		h.inputActions.ToggleFullscreen()
 	}
 }

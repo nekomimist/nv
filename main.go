@@ -361,6 +361,171 @@ func (g *Game) Exit() {
 	os.Exit(0)
 }
 
+// RenderState interface implementation
+func (g *Game) IsBookMode() bool {
+	return g.bookMode
+}
+
+func (g *Game) IsTempSingleMode() bool {
+	return g.tempSingleMode
+}
+
+func (g *Game) IsFullscreen() bool {
+	return g.fullscreen
+}
+
+func (g *Game) GetCurrentImage() *ebiten.Image {
+	return g.getCurrentImage()
+}
+
+func (g *Game) GetBookModeImages() (*ebiten.Image, *ebiten.Image) {
+	return g.getBookModeImages()
+}
+
+func (g *Game) ShouldUseBookMode(left, right *ebiten.Image) bool {
+	return g.shouldUseBookMode(left, right)
+}
+
+func (g *Game) GetRotationAngle() int {
+	return g.rotationAngle
+}
+
+func (g *Game) IsFlippedH() bool {
+	return g.flipH
+}
+
+func (g *Game) IsFlippedV() bool {
+	return g.flipV
+}
+
+func (g *Game) IsShowingHelp() bool {
+	return g.showHelp
+}
+
+func (g *Game) IsShowingInfo() bool {
+	return g.showInfo
+}
+
+func (g *Game) IsInPageInputMode() bool {
+	return g.pageInputMode
+}
+
+func (g *Game) GetPageInputBuffer() string {
+	return g.pageInputBuffer
+}
+
+func (g *Game) GetOverlayMessage() string {
+	return g.overlayMessage
+}
+
+func (g *Game) GetOverlayMessageTime() time.Time {
+	return g.overlayMessageTime
+}
+
+func (g *Game) GetCurrentPageNumber() string {
+	return g.getCurrentPageNumber()
+}
+
+func (g *Game) GetTotalPagesCount() int {
+	return g.imageManager.GetPathsCount()
+}
+
+func (g *Game) GetHelpFontSize() float64 {
+	return g.config.HelpFontSize
+}
+
+// InputActions interface implementation
+func (g *Game) ToggleHelp() {
+	g.showHelp = !g.showHelp
+}
+
+func (g *Game) ToggleInfo() {
+	g.showInfo = !g.showInfo
+}
+
+func (g *Game) ToggleBookMode() {
+	g.toggleBookMode()
+}
+
+func (g *Game) ToggleFullscreen() {
+	g.toggleFullscreen()
+}
+
+func (g *Game) EnterPageInputMode() {
+	g.pageInputMode = true
+	g.pageInputBuffer = ""
+}
+
+func (g *Game) ExitPageInputMode() {
+	g.pageInputMode = false
+	g.pageInputBuffer = ""
+}
+
+func (g *Game) ProcessPageInput() {
+	g.processPageInput()
+}
+
+func (g *Game) UpdatePageInputBuffer(buffer string) {
+	g.pageInputBuffer = buffer
+}
+
+func (g *Game) ToggleReadingDirection() {
+	g.config.RightToLeft = !g.config.RightToLeft
+	direction := "Left-to-Right"
+	if g.config.RightToLeft {
+		direction = "Right-to-Left"
+	}
+	g.showOverlayMessage("Reading Direction: " + direction)
+}
+
+func (g *Game) CycleSortMethod() {
+	g.cycleSortMethod()
+}
+
+func (g *Game) NavigateNext() {
+	g.navigateNext()
+}
+
+func (g *Game) NavigatePrevious() {
+	g.navigatePrevious()
+}
+
+func (g *Game) JumpToPage(page int) {
+	g.jumpToPage(page)
+}
+
+func (g *Game) ExpandToDirectory() {
+	g.expandToDirectoryAndJump()
+}
+
+func (g *Game) RotateLeft() {
+	g.rotateLeft()
+}
+
+func (g *Game) RotateRight() {
+	g.rotateRight()
+}
+
+func (g *Game) FlipHorizontal() {
+	g.flipHorizontal()
+}
+
+func (g *Game) FlipVertical() {
+	g.flipVertical()
+}
+
+func (g *Game) ShowOverlayMessage(message string) {
+	g.showOverlayMessage(message)
+}
+
+func (g *Game) GetCurrentIndex() int {
+	return g.idx
+}
+
+func (g *Game) PreloadAdjacentImages(idx int) {
+	g.imageManager.PreloadAdjacentImages(idx)
+}
+
 func (g *Game) Update() error {
 	g.inputHandler.HandleInput()
 	return nil
@@ -513,7 +678,7 @@ func main() {
 	}
 
 	// Initialize input handler and renderer
-	g.inputHandler = NewInputHandler(g)
+	g.inputHandler = NewInputHandler(g, g)
 	g.renderer = NewRenderer(g)
 
 	// Set up single file expansion mode if applicable
