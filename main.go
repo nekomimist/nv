@@ -33,9 +33,6 @@ const (
 	// Aspect ratio thresholds
 	minAspectRatio = 0.4 // Extremely tall images
 	maxAspectRatio = 2.5 // Extremely wide images
-
-	// Overlay message display duration
-	overlayMessageDuration = 2 * time.Second
 )
 
 func isArchiveExt(path string) bool {
@@ -91,6 +88,9 @@ type Game struct {
 	rotationAngle int  // 0, 90, 180, 270 degrees
 	flipH         bool // Horizontal flip
 	flipV         bool // Vertical flip
+
+	// Rendering optimization state
+	forceRedraw bool // Force redraw on next frame
 }
 
 func (g *Game) getCurrentImage() *ebiten.Image {
@@ -172,7 +172,11 @@ func (g *Game) shouldUseBookMode(leftImg, rightImg *ebiten.Image) bool {
 
 func (g *Game) showOverlayMessage(message string) {
 	g.overlayMessage = message
-	g.overlayMessageTime = time.Now()
+	if message != "" {
+		g.overlayMessageTime = time.Now()
+	} else {
+		g.overlayMessageTime = time.Time{} // Zero value for empty messages
+	}
 }
 
 func (g *Game) toggleBookMode() {
@@ -528,6 +532,13 @@ func (g *Game) PreloadAdjacentImages(idx int) {
 
 func (g *Game) Update() error {
 	g.inputHandler.HandleInput()
+
+	// Clear expired overlay messages to avoid unnecessary redraws
+	if g.overlayMessage != "" && time.Since(g.overlayMessageTime) >= overlayMessageDuration {
+		g.overlayMessage = ""
+		g.overlayMessageTime = time.Time{}
+	}
+
 	return nil
 }
 
@@ -630,10 +641,33 @@ func (g *Game) toggleFullscreen() {
 }
 
 func (g *Game) Draw(screen *ebiten.Image) {
-	g.renderer.Draw(screen)
+	// Get current window size
+	w, h := screen.Bounds().Dx(), screen.Bounds().Dy()
+
+	// Create snapshot of current render state
+	currentSnapshot := NewRenderStateSnapshot(g, w, h)
+
+	// Check if we need to redraw by comparing with last snapshot or force flag
+	if g.renderer.lastSnapshot == nil || !currentSnapshot.Equals(g.renderer.lastSnapshot) || g.forceRedraw {
+		// State has changed, perform actual drawing
+		g.renderer.Draw(screen)
+
+		// Save current snapshot for next frame
+		g.renderer.lastSnapshot = currentSnapshot
+
+		// Clear force redraw flag after drawing
+		g.forceRedraw = false
+	}
+	// If state hasn't changed, skip drawing entirely
 }
 
 func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {
+	// Only force redraw when layout actually changes
+	if g.savedWinW != outsideWidth || g.savedWinH != outsideHeight {
+		g.savedWinW = outsideWidth
+		g.savedWinH = outsideHeight
+		g.forceRedraw = true
+	}
 	return outsideWidth, outsideHeight
 }
 
@@ -707,6 +741,9 @@ func main() {
 	ebiten.SetWindowTitle("Ebiten Image Viewer")
 	ebiten.SetWindowSize(config.WindowWidth, config.WindowHeight)
 	ebiten.SetWindowResizingMode(ebiten.WindowResizingModeEnabled)
+
+	// Enable rendering optimization by preserving screen content between frames
+	ebiten.SetScreenClearedEveryFrame(false)
 
 	// Set window icon
 	setWindowIcon()

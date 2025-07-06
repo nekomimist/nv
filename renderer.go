@@ -19,6 +19,7 @@ type Renderer struct {
 	renderState    RenderState
 	helpFontSource *text.GoTextFaceSource
 	helpSections   []helpSection
+	lastSnapshot   *RenderStateSnapshot // Previous frame's state for comparison
 }
 
 type helpSection struct {
@@ -90,6 +91,9 @@ func NewRenderer(renderState RenderState) *Renderer {
 
 // Draw renders the entire screen
 func (r *Renderer) Draw(screen *ebiten.Image) {
+	// Clear the screen since SetScreenClearedEveryFrame(false) is enabled
+	screen.Clear()
+
 	if r.renderState.IsTempSingleMode() || !r.renderState.IsBookMode() {
 		// Single page mode or temporary single mode
 		r.drawSingleImage(screen)
