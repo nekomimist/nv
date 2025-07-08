@@ -140,7 +140,6 @@ func (g *Game) cycleSortMethod() {
 			g.imageManager.SetPaths(paths)
 			// Reset to first image
 			g.idx = 0
-			g.imageManager.PreloadAdjacentImages(0)
 		}
 	}
 }
@@ -268,8 +267,6 @@ func (g *Game) jumpToPage(pageNum int) {
 		g.idx = targetIdx
 		g.tempSingleMode = false // Reset temp single mode
 	}
-
-	g.imageManager.PreloadAdjacentImages(g.idx)
 }
 
 func (g *Game) expandToDirectoryAndJump() {
@@ -312,9 +309,6 @@ func (g *Game) expandToDirectoryAndJump() {
 	// Jump to the original file
 	g.idx = originalFileIndex
 	g.expandedFromSingle = true
-
-	// Preload adjacent images
-	g.imageManager.PreloadAdjacentImages(g.idx)
 
 	// Show success message
 	g.showOverlayMessage(fmt.Sprintf("Loaded %d images from directory", len(newPaths)))
@@ -526,10 +520,6 @@ func (g *Game) GetCurrentIndex() int {
 	return g.idx
 }
 
-func (g *Game) PreloadAdjacentImages(idx int) {
-	g.imageManager.PreloadAdjacentImages(idx)
-}
-
 func (g *Game) Update() error {
 	g.inputHandler.HandleInput()
 
@@ -734,9 +724,6 @@ func main() {
 			}
 		}
 	}
-
-	// Preload the first image and adjacent ones for faster startup
-	g.imageManager.PreloadAdjacentImages(0)
 
 	ebiten.SetWindowTitle("Ebiten Image Viewer")
 	ebiten.SetWindowSize(config.WindowWidth, config.WindowHeight)

@@ -114,7 +114,6 @@ func (h *InputHandler) handleModeToggleKeys() {
 		} else {
 			// B: Toggle book mode
 			h.inputActions.ToggleBookMode()
-			h.inputActions.PreloadAdjacentImages(h.inputActions.GetCurrentIndex())
 		}
 	}
 
@@ -152,12 +151,10 @@ func (h *InputHandler) handleNavigationKeys() {
 	// Next page
 	if inpututil.IsKeyJustPressed(ebiten.KeySpace) || inpututil.IsKeyJustPressed(ebiten.KeyN) {
 		h.inputActions.NavigateNext()
-		h.inputActions.PreloadAdjacentImages(h.inputActions.GetCurrentIndex())
 	}
 	// Previous page
 	if inpututil.IsKeyJustPressed(ebiten.KeyBackspace) || inpututil.IsKeyJustPressed(ebiten.KeyP) {
 		h.inputActions.NavigatePrevious()
-		h.inputActions.PreloadAdjacentImages(h.inputActions.GetCurrentIndex())
 	}
 	// Jump to first page
 	if inpututil.IsKeyJustPressed(ebiten.KeyHome) || inpututil.IsKeyJustPressed(ebiten.KeyComma) {

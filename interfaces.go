@@ -196,7 +196,6 @@ type InputActions interface {
 	// Common data access
 	GetCurrentIndex() int
 	GetTotalPagesCount() int
-	PreloadAdjacentImages(idx int)
 }
 
 // InputState provides read-only access to input-related state

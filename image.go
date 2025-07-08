@@ -21,9 +21,6 @@ import (
 	_ "golang.org/x/image/webp"
 )
 
-// Cache size limits
-const maxCacheSize = 4 // Maximum number of images to keep in cache
-
 type ImagePath struct {
 	Path        string // Local file path or archive:entry format
 	ArchivePath string // Empty for regular files, path to archive for entries
@@ -35,30 +32,24 @@ type ImageManager interface {
 	GetImage(idx int) *ebiten.Image
 	GetCurrentImage(idx int) *ebiten.Image
 	GetBookModeImages(idx int, rightToLeft bool) (*ebiten.Image, *ebiten.Image)
-	PreloadAdjacentImages(idx int)
 	SetPaths(paths []ImagePath)
 	GetPathsCount() int
-	CleanCache(currentIdx int)
 }
 
 // DefaultImageManager implements ImageManager
 type DefaultImageManager struct {
-	paths      []ImagePath
-	imageCache map[int]*ebiten.Image
+	paths []ImagePath
 }
 
 // NewImageManager creates a new DefaultImageManager
 func NewImageManager() ImageManager {
 	return &DefaultImageManager{
-		paths:      []ImagePath{},
-		imageCache: make(map[int]*ebiten.Image),
+		paths: []ImagePath{},
 	}
 }
 
 func (m *DefaultImageManager) SetPaths(paths []ImagePath) {
 	m.paths = paths
-	// Clear cache when paths change
-	m.imageCache = make(map[int]*ebiten.Image)
 }
 
 func (m *DefaultImageManager) GetPathsCount() int {
@@ -96,11 +87,6 @@ func (m *DefaultImageManager) GetImage(idx int) *ebiten.Image {
 		return nil
 	}
 
-	// Check if image is already in cache
-	if img, exists := m.imageCache[idx]; exists {
-		return img
-	}
-
 	// Load image on demand
 	img, err := loadImage(m.paths[idx])
 	if err != nil {
@@ -109,69 +95,7 @@ func (m *DefaultImageManager) GetImage(idx int) *ebiten.Image {
 		return nil
 	}
 
-	// Add to cache
-	m.imageCache[idx] = img
-
-	// Clean cache if it gets too large
-	if len(m.imageCache) > maxCacheSize {
-		m.CleanCache(idx)
-	}
-
 	return img
-}
-
-func (m *DefaultImageManager) CleanCache(currentIdx int) {
-	// Keep current, previous, and next images in cache
-	keepIndices := make(map[int]bool)
-	keepIndices[currentIdx] = true
-
-	if currentIdx > 0 {
-		keepIndices[currentIdx-1] = true
-	} else if len(m.paths) > 1 {
-		keepIndices[len(m.paths)-1] = true // wrap to last
-	}
-
-	if currentIdx < len(m.paths)-1 {
-		keepIndices[currentIdx+1] = true
-	} else if len(m.paths) > 1 {
-		keepIndices[0] = true // wrap to first
-	}
-
-	// Remove images not in keep list
-	for idx := range m.imageCache {
-		if !keepIndices[idx] {
-			delete(m.imageCache, idx)
-		}
-	}
-}
-
-func (m *DefaultImageManager) PreloadAdjacentImages(idx int) {
-	if len(m.paths) <= 1 {
-		return
-	}
-
-	// Preload previous image
-	prevIdx := idx - 1
-	if prevIdx < 0 {
-		prevIdx = len(m.paths) - 1
-	}
-	if _, exists := m.imageCache[prevIdx]; !exists {
-		if img, err := loadImage(m.paths[prevIdx]); err == nil {
-			m.imageCache[prevIdx] = img
-		} else {
-			log.Printf("Debug: Failed to preload previous image %s: %v", m.paths[prevIdx].Path, err)
-		}
-	}
-
-	// Preload next image
-	nextIdx := (idx + 1) % len(m.paths)
-	if _, exists := m.imageCache[nextIdx]; !exists {
-		if img, err := loadImage(m.paths[nextIdx]); err == nil {
-			m.imageCache[nextIdx] = img
-		} else {
-			log.Printf("Debug: Failed to preload next image %s: %v", m.paths[nextIdx].Path, err)
-		}
-	}
 }
 
 // Image loading functions
