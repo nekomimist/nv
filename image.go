@@ -12,10 +12,12 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/bodgit/sevenzip"
 	"github.com/hajimehoshi/ebiten/v2"
+	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/nwaples/rardecode"
 	_ "golang.org/x/image/bmp"
 	_ "golang.org/x/image/webp"
@@ -39,17 +41,26 @@ type ImageManager interface {
 // DefaultImageManager implements ImageManager
 type DefaultImageManager struct {
 	paths []ImagePath
+	cache *lru.Cache[string, *ebiten.Image]
 }
 
 // NewImageManager creates a new DefaultImageManager
-func NewImageManager() ImageManager {
+func NewImageManager(cacheSize int) ImageManager {
+	cache, err := lru.New[string, *ebiten.Image](cacheSize)
+	if err != nil {
+		log.Printf("Error: Failed to create LRU cache: %v", err)
+		cache, _ = lru.New[string, *ebiten.Image](16) // fallback to default size
+	}
 	return &DefaultImageManager{
 		paths: []ImagePath{},
+		cache: cache,
 	}
 }
 
 func (m *DefaultImageManager) SetPaths(paths []ImagePath) {
 	m.paths = paths
+	// No need to clear cache since we use file paths as keys
+	log.Printf("SetPaths: %d new paths, cache preserved (%d items)", len(paths), m.cache.Len())
 }
 
 func (m *DefaultImageManager) GetPathsCount() int {
@@ -87,13 +98,31 @@ func (m *DefaultImageManager) GetImage(idx int) *ebiten.Image {
 		return nil
 	}
 
+	imagePath := m.paths[idx]
+	cacheKey := imagePath.Path
+
+	// Check if image is already in cache
+	if img, ok := m.cache.Get(cacheKey); ok {
+		log.Printf("Cache HIT: %s (cache: %d items)", cacheKey, m.cache.Len())
+		return img
+	}
+
 	// Load image on demand
-	img, err := loadImage(m.paths[idx])
+	img, err := loadImage(imagePath)
 	if err != nil {
 		log.Printf("Error: Failed to load image [%d/%d] %s: %v",
-			idx+1, len(m.paths), m.paths[idx].Path, err)
+			idx+1, len(m.paths), imagePath.Path, err)
 		return nil
 	}
+
+	// Add to cache
+	m.cache.Add(cacheKey, img)
+
+	// Log cache miss with memory info
+	var mem runtime.MemStats
+	runtime.ReadMemStats(&mem)
+	log.Printf("Cache MISS: %s, loaded and cached (cache: %d items, memory: %dMB)",
+		cacheKey, m.cache.Len(), mem.Alloc/1024/1024)
 
 	return img
 }

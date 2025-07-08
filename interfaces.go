@@ -42,63 +42,23 @@ type RenderState interface {
 }
 
 // RenderStateSnapshot captures a snapshot of render state for comparison
+// Only tracks fields that can change without key input
 type RenderStateSnapshot struct {
-	// Display modes
-	IsBookMode       bool
-	IsTempSingleMode bool
-	IsFullscreen     bool
-
-	// Rendering data
-	CurrentImage     *ebiten.Image
-	BookModeLeftImg  *ebiten.Image
-	BookModeRightImg *ebiten.Image
-
-	// Transformation state
-	RotationAngle int
-	IsFlippedH    bool
-	IsFlippedV    bool
-
-	// UI state
-	IsShowingHelp      bool
-	IsShowingInfo      bool
-	IsInPageInputMode  bool
-	PageInputBuffer    string
+	// Overlay message state (auto-expires after 2 seconds)
 	OverlayMessage     string
 	OverlayMessageTime time.Time
-
-	// Display data
-	CurrentPageNumber string
-	TotalPagesCount   int
-	HelpFontSize      float64
 
 	// Window dimensions for resize detection
 	WindowWidth  int
 	WindowHeight int
 }
 
-// NewRenderStateSnapshot creates a snapshot from current render state
+// NewRenderStateSnapshot creates a lightweight snapshot of non-key-input state
+// Only tracks fields that can change without key input
 func NewRenderStateSnapshot(state RenderState, windowWidth, windowHeight int) *RenderStateSnapshot {
-	leftImg, rightImg := state.GetBookModeImages()
-
 	return &RenderStateSnapshot{
-		IsBookMode:         state.IsBookMode(),
-		IsTempSingleMode:   state.IsTempSingleMode(),
-		IsFullscreen:       state.IsFullscreen(),
-		CurrentImage:       state.GetCurrentImage(),
-		BookModeLeftImg:    leftImg,
-		BookModeRightImg:   rightImg,
-		RotationAngle:      state.GetRotationAngle(),
-		IsFlippedH:         state.IsFlippedH(),
-		IsFlippedV:         state.IsFlippedV(),
-		IsShowingHelp:      state.IsShowingHelp(),
-		IsShowingInfo:      state.IsShowingInfo(),
-		IsInPageInputMode:  state.IsInPageInputMode(),
-		PageInputBuffer:    state.GetPageInputBuffer(),
 		OverlayMessage:     state.GetOverlayMessage(),
 		OverlayMessageTime: state.GetOverlayMessageTime(),
-		CurrentPageNumber:  state.GetCurrentPageNumber(),
-		TotalPagesCount:    state.GetTotalPagesCount(),
-		HelpFontSize:       state.GetHelpFontSize(),
 		WindowWidth:        windowWidth,
 		WindowHeight:       windowHeight,
 	}
@@ -135,24 +95,8 @@ func (s *RenderStateSnapshot) Equals(other *RenderStateSnapshot) bool {
 		return false
 	}
 
-	// Compare all fields for equality
-	return s.IsBookMode == other.IsBookMode &&
-		s.IsTempSingleMode == other.IsTempSingleMode &&
-		s.IsFullscreen == other.IsFullscreen &&
-		s.CurrentImage == other.CurrentImage &&
-		s.BookModeLeftImg == other.BookModeLeftImg &&
-		s.BookModeRightImg == other.BookModeRightImg &&
-		s.RotationAngle == other.RotationAngle &&
-		s.IsFlippedH == other.IsFlippedH &&
-		s.IsFlippedV == other.IsFlippedV &&
-		s.IsShowingHelp == other.IsShowingHelp &&
-		s.IsShowingInfo == other.IsShowingInfo &&
-		s.IsInPageInputMode == other.IsInPageInputMode &&
-		s.PageInputBuffer == other.PageInputBuffer &&
-		overlayEqual() &&
-		s.CurrentPageNumber == other.CurrentPageNumber &&
-		s.TotalPagesCount == other.TotalPagesCount &&
-		s.HelpFontSize == other.HelpFontSize &&
+	// Compare only fields that can change without key input
+	return overlayEqual() &&
 		s.WindowWidth == other.WindowWidth &&
 		s.WindowHeight == other.WindowHeight
 }

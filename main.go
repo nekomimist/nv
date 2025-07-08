@@ -90,7 +90,8 @@ type Game struct {
 	flipV         bool // Vertical flip
 
 	// Rendering optimization state
-	forceRedraw bool // Force redraw on next frame
+	forceRedraw     bool // Force redraw on next frame
+	wasInputHandled bool // True if input was processed in this frame
 }
 
 func (g *Game) getCurrentImage() *ebiten.Image {
@@ -521,7 +522,7 @@ func (g *Game) GetCurrentIndex() int {
 }
 
 func (g *Game) Update() error {
-	g.inputHandler.HandleInput()
+	g.wasInputHandled = g.inputHandler.HandleInput()
 
 	// Clear expired overlay messages to avoid unnecessary redraws
 	if g.overlayMessage != "" && time.Since(g.overlayMessageTime) >= overlayMessageDuration {
@@ -634,21 +635,26 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	// Get current window size
 	w, h := screen.Bounds().Dx(), screen.Bounds().Dy()
 
-	// Create snapshot of current render state
+	// Create lightweight snapshot of current render state
 	currentSnapshot := NewRenderStateSnapshot(g, w, h)
 
-	// Check if we need to redraw by comparing with last snapshot or force flag
-	if g.renderer.lastSnapshot == nil || !currentSnapshot.Equals(g.renderer.lastSnapshot) || g.forceRedraw {
+	// Check if we need to redraw: input was handled, state changed, or force flag
+	if g.wasInputHandled ||
+		g.renderer.lastSnapshot == nil ||
+		!currentSnapshot.Equals(g.renderer.lastSnapshot) ||
+		g.forceRedraw {
+
 		// State has changed, perform actual drawing
 		g.renderer.Draw(screen)
 
 		// Save current snapshot for next frame
 		g.renderer.lastSnapshot = currentSnapshot
 
-		// Clear force redraw flag after drawing
+		// Clear flags after drawing
 		g.forceRedraw = false
+		g.wasInputHandled = false
 	}
-	// If state hasn't changed, skip drawing entirely
+	// If state hasn't changed and no input, skip drawing entirely
 }
 
 func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {
@@ -685,7 +691,7 @@ func main() {
 		log.Fatal("no image files specified")
 	}
 
-	imageManager := NewImageManager()
+	imageManager := NewImageManager(config.CacheSize)
 	imageManager.SetPaths(paths)
 
 	g := &Game{

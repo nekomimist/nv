@@ -31,6 +31,7 @@ type Config struct {
 	SortMethod           int     `json:"sort_method"`
 	BookMode             bool    `json:"book_mode"`
 	Fullscreen           bool    `json:"fullscreen"`
+	CacheSize            int     `json:"cache_size"`
 }
 
 func getConfigPath() string {
@@ -55,6 +56,7 @@ func loadConfigFromPath(configPath string) Config {
 		SortMethod:           SortNatural, // Default to natural sort
 		BookMode:             false,       // Default to single page mode
 		Fullscreen:           false,       // Default to windowed mode
+		CacheSize:            16,          // Default cache size for images
 	}
 
 	data, err := os.ReadFile(configPath)
@@ -75,6 +77,7 @@ func loadConfigFromPath(configPath string) Config {
 			SortMethod:           SortNatural,
 			BookMode:             false,
 			Fullscreen:           false,
+			CacheSize:            16,
 		}
 	}
 
@@ -99,6 +102,13 @@ func loadConfigFromPath(configPath string) Config {
 	// Validate sort method
 	if config.SortMethod < SortNatural || config.SortMethod > SortEntryOrder {
 		config.SortMethod = SortNatural
+	}
+
+	// Validate cache size (minimum 1, maximum 64)
+	if config.CacheSize < 1 {
+		config.CacheSize = 16
+	} else if config.CacheSize > 64 {
+		config.CacheSize = 64
 	}
 
 	return config

@@ -191,7 +191,7 @@ func TestGameNavigation(t *testing.T) {
 				}
 			}
 
-			imageManager := NewImageManager()
+			imageManager := NewImageManager(4)
 			imageManager.SetPaths(paths)
 
 			g := &Game{
@@ -349,7 +349,7 @@ func TestImageManager(t *testing.T) {
 		{Path: "5.jpg"},
 	}
 
-	imageManager := NewImageManager()
+	imageManager := NewImageManager(4)
 	imageManager.SetPaths(paths)
 
 	// Test GetPathsCount
@@ -468,6 +468,10 @@ func TestLoadConfigDefaults(t *testing.T) {
 		AspectRatioThreshold: 1.5,
 		RightToLeft:          false,
 		HelpFontSize:         24.0,
+		SortMethod:           SortNatural,
+		BookMode:             false,
+		Fullscreen:           false,
+		CacheSize:            16,
 	}
 
 	if !reflect.DeepEqual(config, expectedConfig) {
