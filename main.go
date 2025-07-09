@@ -17,6 +17,9 @@ import (
 	"github.com/hajimehoshi/ebiten/v2"
 )
 
+// Global debug mode flag
+var debugMode bool
+
 //go:embed icon/icon_16.png
 var icon16 []byte
 
@@ -667,9 +670,19 @@ func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {
 	return outsideWidth, outsideHeight
 }
 
+// debugLog outputs debug messages only when debug mode is enabled
+func debugLog(format string, args ...interface{}) {
+	if debugMode {
+		log.Printf(format, args...)
+	}
+}
+
 func main() {
 	var configFile = flag.String("c", "", "config file path (default: ~/.nv.json)")
+	var debug = flag.Bool("d", false, "enable debug logging")
 	flag.Parse()
+
+	debugMode = *debug
 
 	args := flag.Args()
 

@@ -60,7 +60,7 @@ func NewImageManager(cacheSize int) ImageManager {
 func (m *DefaultImageManager) SetPaths(paths []ImagePath) {
 	m.paths = paths
 	// No need to clear cache since we use file paths as keys
-	log.Printf("SetPaths: %d new paths, cache preserved (%d items)", len(paths), m.cache.Len())
+	debugLog("SetPaths: %d new paths, cache preserved (%d items)", len(paths), m.cache.Len())
 }
 
 func (m *DefaultImageManager) GetPathsCount() int {
@@ -103,7 +103,7 @@ func (m *DefaultImageManager) GetImage(idx int) *ebiten.Image {
 
 	// Check if image is already in cache
 	if img, ok := m.cache.Get(cacheKey); ok {
-		log.Printf("Cache HIT: %s (cache: %d items)", cacheKey, m.cache.Len())
+		debugLog("Cache HIT: %s (cache: %d items)", cacheKey, m.cache.Len())
 		return img
 	}
 
@@ -121,7 +121,7 @@ func (m *DefaultImageManager) GetImage(idx int) *ebiten.Image {
 	// Log cache miss with memory info
 	var mem runtime.MemStats
 	runtime.ReadMemStats(&mem)
-	log.Printf("Cache MISS: %s, loaded and cached (cache: %d items, memory: %dMB)",
+	debugLog("Cache MISS: %s, loaded and cached (cache: %d items, memory: %dMB)",
 		cacheKey, m.cache.Len(), mem.Alloc/1024/1024)
 
 	return img
