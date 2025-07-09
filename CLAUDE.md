@@ -220,7 +220,8 @@ The application saves settings to `~/.nv.json`:
   "right_to_left": false,
   "help_font_size": 24.0,
   "sort_method": 0,
-  "book_mode": false
+  "book_mode": false,
+  "transition_frames": 0
 }
 ```
 
@@ -229,6 +230,7 @@ The application saves settings to `~/.nv.json`:
 - **help_font_size**: Font size for help overlay text. Must be > 12px for readability. Default: 24.0
 - **sort_method**: File sorting method for directories and archives. `0` = Natural, `1` = Simple, `2` = Entry Order. Default: 0 (Natural)
 - **book_mode**: Whether to start in book mode (spread view) by default. `false` for single page mode, `true` for book mode. Default: false
+- **transition_frames**: Number of frames to force redraw after fullscreen transitions. Helps fix rendering issues on some systems (e.g., WSL/WSLg). `0` = disabled, `1-60` = number of frames. Default: 0
 
 ## File Sorting Strategy
 

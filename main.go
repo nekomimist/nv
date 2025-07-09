@@ -93,8 +93,8 @@ type Game struct {
 	flipV         bool // Vertical flip
 
 	// Rendering optimization state
-	forceRedraw     bool // Force redraw on next frame
-	wasInputHandled bool // True if input was processed in this frame
+	forceRedrawFrames int  // Force redraw for N frames
+	wasInputHandled   bool // True if input was processed in this frame
 }
 
 func (g *Game) getCurrentImage() *ebiten.Image {
@@ -632,6 +632,11 @@ func (g *Game) toggleFullscreen() {
 
 	// Save fullscreen state to config
 	g.config.Fullscreen = g.fullscreen
+
+	// Force redraw for multiple frames to handle slow fullscreen transitions
+	if g.config.TransitionFrames > 0 {
+		g.forceRedrawFrames = g.config.TransitionFrames
+	}
 }
 
 func (g *Game) Draw(screen *ebiten.Image) {
@@ -645,7 +650,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	if g.wasInputHandled ||
 		g.renderer.lastSnapshot == nil ||
 		!currentSnapshot.Equals(g.renderer.lastSnapshot) ||
-		g.forceRedraw {
+		g.forceRedrawFrames > 0 {
 
 		// State has changed, perform actual drawing
 		g.renderer.Draw(screen)
@@ -654,7 +659,9 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		g.renderer.lastSnapshot = currentSnapshot
 
 		// Clear flags after drawing
-		g.forceRedraw = false
+		if g.forceRedrawFrames > 0 {
+			g.forceRedrawFrames--
+		}
 		g.wasInputHandled = false
 	}
 	// If state hasn't changed and no input, skip drawing entirely
@@ -663,9 +670,12 @@ func (g *Game) Draw(screen *ebiten.Image) {
 func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {
 	// Only force redraw when layout actually changes
 	if g.savedWinW != outsideWidth || g.savedWinH != outsideHeight {
-		g.savedWinW = outsideWidth
-		g.savedWinH = outsideHeight
-		g.forceRedraw = true
+		// Don't update saved window size during fullscreen
+		if !g.fullscreen {
+			g.savedWinW = outsideWidth
+			g.savedWinH = outsideHeight
+			g.forceRedrawFrames = 1
+		}
 	}
 	return outsideWidth, outsideHeight
 }

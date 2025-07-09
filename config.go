@@ -32,6 +32,7 @@ type Config struct {
 	BookMode             bool    `json:"book_mode"`
 	Fullscreen           bool    `json:"fullscreen"`
 	CacheSize            int     `json:"cache_size"`
+	TransitionFrames     int     `json:"transition_frames"`
 }
 
 func getConfigPath() string {
@@ -57,6 +58,7 @@ func loadConfigFromPath(configPath string) Config {
 		BookMode:             false,       // Default to single page mode
 		Fullscreen:           false,       // Default to windowed mode
 		CacheSize:            16,          // Default cache size for images
+		TransitionFrames:     0,           // Default: no forced transition frames
 	}
 
 	data, err := os.ReadFile(configPath)
@@ -78,6 +80,7 @@ func loadConfigFromPath(configPath string) Config {
 			BookMode:             false,
 			Fullscreen:           false,
 			CacheSize:            16,
+			TransitionFrames:     0,
 		}
 	}
 
@@ -109,6 +112,13 @@ func loadConfigFromPath(configPath string) Config {
 		config.CacheSize = 16
 	} else if config.CacheSize > 64 {
 		config.CacheSize = 64
+	}
+
+	// Validate transition frames (minimum 0, maximum 60)
+	if config.TransitionFrames < 0 {
+		config.TransitionFrames = 0
+	} else if config.TransitionFrames > 60 {
+		config.TransitionFrames = 60
 	}
 
 	return config

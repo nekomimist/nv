@@ -84,13 +84,15 @@ Settings are automatically saved to `~/.nv.json`:
   "window_height": 600,
   "aspect_ratio_threshold": 1.5,
   "right_to_left": false,
-  "help_font_size": 24.0
+  "help_font_size": 24.0,
+  "transition_frames": 0
 }
 ```
 
 - `aspect_ratio_threshold` - Controls book mode compatibility (default: 1.5)
 - `right_to_left` - Reading direction for book mode (default: false)
 - `help_font_size` - Font size for help overlay (default: 24.0)
+- `transition_frames` - Force redraw frames after fullscreen transitions (default: 0)
 
 ## License
 
