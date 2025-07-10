@@ -533,7 +533,11 @@ func (g *Game) GetCurrentIndex() int {
 }
 
 func (g *Game) Update() error {
-	g.wasInputHandled = g.inputHandler.HandleInput()
+	if (g.wasInputHandled) {
+		debugLog("waiting for previous input to complete\n")
+	} else {
+		g.wasInputHandled = g.inputHandler.HandleInput()
+	}
 
 	// Clear expired overlay messages to avoid unnecessary redraws
 	if g.overlayMessage != "" && time.Since(g.overlayMessageTime) >= overlayMessageDuration {
