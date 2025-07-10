@@ -33,6 +33,8 @@ type Config struct {
 	Fullscreen           bool    `json:"fullscreen"`
 	CacheSize            int     `json:"cache_size"`
 	TransitionFrames     int     `json:"transition_frames"`
+	PreloadEnabled       bool    `json:"preload_enabled"`
+	PreloadCount         int     `json:"preload_count"`
 }
 
 func getConfigPath() string {
@@ -59,6 +61,8 @@ func loadConfigFromPath(configPath string) Config {
 		Fullscreen:           false,       // Default to windowed mode
 		CacheSize:            16,          // Default cache size for images
 		TransitionFrames:     0,           // Default: no forced transition frames
+		PreloadEnabled:       true,        // Default: enable preloading
+		PreloadCount:         4,           // Default: preload up to 4 images
 	}
 
 	data, err := os.ReadFile(configPath)
@@ -81,6 +85,8 @@ func loadConfigFromPath(configPath string) Config {
 			Fullscreen:           false,
 			CacheSize:            16,
 			TransitionFrames:     0,
+			PreloadEnabled:       true,
+			PreloadCount:         4,
 		}
 	}
 
@@ -119,6 +125,13 @@ func loadConfigFromPath(configPath string) Config {
 		config.TransitionFrames = 0
 	} else if config.TransitionFrames > 60 {
 		config.TransitionFrames = 60
+	}
+
+	// Validate preload count (minimum 1, maximum 16)
+	if config.PreloadCount < 1 {
+		config.PreloadCount = 4
+	} else if config.PreloadCount > 16 {
+		config.PreloadCount = 16
 	}
 
 	return config

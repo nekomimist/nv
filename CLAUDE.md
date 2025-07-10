@@ -221,7 +221,9 @@ The application saves settings to `~/.nv.json`:
   "help_font_size": 24.0,
   "sort_method": 0,
   "book_mode": false,
-  "transition_frames": 0
+  "transition_frames": 0,
+  "preload_enabled": true,
+  "preload_count": 4
 }
 ```
 
@@ -231,6 +233,8 @@ The application saves settings to `~/.nv.json`:
 - **sort_method**: File sorting method for directories and archives. `0` = Natural, `1` = Simple, `2` = Entry Order. Default: 0 (Natural)
 - **book_mode**: Whether to start in book mode (spread view) by default. `false` for single page mode, `true` for book mode. Default: false
 - **transition_frames**: Number of frames to force redraw after fullscreen transitions. Helps fix rendering issues on some systems (e.g., WSL/WSLg). `0` = disabled, `1-60` = number of frames. Default: 0
+- **preload_enabled**: Whether to enable automatic image preloading for smoother navigation. `true` = enabled, `false` = disabled. Default: true
+- **preload_count**: Number of images to preload in the navigation direction. Higher values use more memory but provide smoother navigation. Range: 1-16. Default: 4
 
 ## File Sorting Strategy
 

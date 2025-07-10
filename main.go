@@ -271,6 +271,9 @@ func (g *Game) jumpToPage(pageNum int) {
 		g.idx = targetIdx
 		g.tempSingleMode = false // Reset temp single mode
 	}
+
+	// Start preload after jump (both directions)
+	g.imageManager.StartPreload(g.idx, NavigationJump)
 }
 
 func (g *Game) expandToDirectoryAndJump() {
@@ -360,6 +363,8 @@ func (g *Game) Exit() {
 	// Save all current settings before exiting
 	g.saveCurrentWindowSize()
 	g.saveCurrentConfig()
+	// Stop preload manager
+	g.imageManager.StopPreload()
 	os.Exit(0)
 }
 
@@ -486,10 +491,12 @@ func (g *Game) CycleSortMethod() {
 
 func (g *Game) NavigateNext() {
 	g.navigateNext()
+	g.imageManager.StartPreload(g.idx, NavigationForward)
 }
 
 func (g *Game) NavigatePrevious() {
 	g.navigatePrevious()
+	g.imageManager.StartPreload(g.idx, NavigationBackward)
 }
 
 func (g *Game) JumpToPage(page int) {
@@ -498,6 +505,7 @@ func (g *Game) JumpToPage(page int) {
 
 func (g *Game) ExpandToDirectory() {
 	g.expandToDirectoryAndJump()
+	g.imageManager.StartPreload(g.idx, NavigationJump)
 }
 
 func (g *Game) RotateLeft() {
@@ -714,7 +722,7 @@ func main() {
 		log.Fatal("no image files specified")
 	}
 
-	imageManager := NewImageManager(config.CacheSize)
+	imageManager := NewImageManagerWithPreload(config.CacheSize, config.PreloadCount, config.PreloadEnabled)
 	imageManager.SetPaths(paths)
 
 	g := &Game{
@@ -729,6 +737,9 @@ func main() {
 		expandedFromSingle: false,
 		originalFileIndex:  -1,
 	}
+
+	// Start initial preload in forward direction
+	imageManager.StartPreload(0, NavigationForward)
 
 	// Initialize input handler and renderer
 	g.inputHandler = NewInputHandler(g, g)

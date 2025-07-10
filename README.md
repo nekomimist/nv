@@ -85,7 +85,9 @@ Settings are automatically saved to `~/.nv.json`:
   "aspect_ratio_threshold": 1.5,
   "right_to_left": false,
   "help_font_size": 24.0,
-  "transition_frames": 0
+  "transition_frames": 0,
+  "preload_enabled": true,
+  "preload_count": 4
 }
 ```
 
@@ -93,6 +95,8 @@ Settings are automatically saved to `~/.nv.json`:
 - `right_to_left` - Reading direction for book mode (default: false)
 - `help_font_size` - Font size for help overlay (default: 24.0)
 - `transition_frames` - Force redraw frames after fullscreen transitions (default: 0)
+- `preload_enabled` - Enable automatic image preloading (default: true)
+- `preload_count` - Number of images to preload ahead (1-16, default: 4)
 
 ## License
 

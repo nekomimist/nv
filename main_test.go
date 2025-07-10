@@ -472,6 +472,9 @@ func TestLoadConfigDefaults(t *testing.T) {
 		BookMode:             false,
 		Fullscreen:           false,
 		CacheSize:            16,
+		TransitionFrames:     0,
+		PreloadEnabled:       true,
+		PreloadCount:         4,
 	}
 
 	if !reflect.DeepEqual(config, expectedConfig) {

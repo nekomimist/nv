@@ -3,6 +3,7 @@ package main
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"fmt"
 	"image"
 	_ "image/gif"
@@ -14,6 +15,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 
 	"github.com/bodgit/sevenzip"
 	"github.com/hajimehoshi/ebiten/v2"
@@ -29,6 +31,222 @@ type ImagePath struct {
 	EntryPath   string // Empty for regular files, path within archive for entries
 }
 
+// NavigationDirection represents the direction of navigation
+type NavigationDirection int
+
+const (
+	NavigationForward NavigationDirection = iota
+	NavigationBackward
+	NavigationJump
+)
+
+// PreloadRequest represents a request to preload an image
+type PreloadRequest struct {
+	Index     int
+	Direction NavigationDirection
+}
+
+// PreloadStats provides statistics about preloading
+type PreloadStats struct {
+	QueueSize     int
+	LoadedCount   int
+	FailedCount   int
+	LastDirection NavigationDirection
+}
+
+// PreloadManager manages asynchronous image preloading
+type PreloadManager struct {
+	requestChan  chan PreloadRequest
+	ctx          context.Context
+	cancel       context.CancelFunc
+	imageManager *DefaultImageManager
+	mu           sync.RWMutex
+	stats        PreloadStats
+	maxPreload   int
+	enabled      bool
+}
+
+// NewPreloadManager creates a new PreloadManager
+func NewPreloadManager(imageManager *DefaultImageManager, maxPreload int) *PreloadManager {
+	ctx, cancel := context.WithCancel(context.Background())
+	pm := &PreloadManager{
+		requestChan:  make(chan PreloadRequest, 100),
+		ctx:          ctx,
+		cancel:       cancel,
+		imageManager: imageManager,
+		maxPreload:   maxPreload,
+		enabled:      true,
+	}
+
+	// Start worker goroutine
+	go pm.worker()
+
+	return pm
+}
+
+// SetEnabled enables or disables preloading
+func (pm *PreloadManager) SetEnabled(enabled bool) {
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+	pm.enabled = enabled
+}
+
+// IsEnabled returns whether preloading is enabled
+func (pm *PreloadManager) IsEnabled() bool {
+	pm.mu.RLock()
+	defer pm.mu.RUnlock()
+	return pm.enabled
+}
+
+// GetStats returns current preload statistics
+func (pm *PreloadManager) GetStats() PreloadStats {
+	pm.mu.RLock()
+	defer pm.mu.RUnlock()
+	return pm.stats
+}
+
+// Stop stops the preload manager
+func (pm *PreloadManager) Stop() {
+	pm.cancel()
+}
+
+// StartPreload starts preloading images from the current index in the specified direction
+func (pm *PreloadManager) StartPreload(currentIdx int, direction NavigationDirection) {
+	if !pm.IsEnabled() {
+		return
+	}
+
+	// Clear the request channel to cancel any pending requests
+	select {
+	case <-pm.requestChan:
+	default:
+	}
+
+	// Send new preload request
+	select {
+	case pm.requestChan <- PreloadRequest{Index: currentIdx, Direction: direction}:
+	default:
+		// Channel is full, skip this request
+		debugLog("Preload request channel full, skipping preload request")
+	}
+}
+
+// worker runs the preload worker goroutine
+func (pm *PreloadManager) worker() {
+	for {
+		select {
+		case <-pm.ctx.Done():
+			return
+		case req := <-pm.requestChan:
+			if pm.IsEnabled() {
+				pm.processPreloadRequest(req)
+			}
+		}
+	}
+}
+
+// processPreloadRequest processes a single preload request
+func (pm *PreloadManager) processPreloadRequest(req PreloadRequest) {
+	pm.mu.Lock()
+	pm.stats.LastDirection = req.Direction
+	pm.mu.Unlock()
+
+	pathsCount := len(pm.imageManager.paths)
+	if pathsCount == 0 {
+		return
+	}
+
+	indices := pm.calculatePreloadIndices(req.Index, req.Direction, pathsCount)
+
+	for _, idx := range indices {
+		select {
+		case <-pm.ctx.Done():
+			return
+		default:
+			pm.preloadImage(idx)
+		}
+	}
+}
+
+// calculatePreloadIndices calculates which image indices to preload
+func (pm *PreloadManager) calculatePreloadIndices(currentIdx int, direction NavigationDirection, pathsCount int) []int {
+	var indices []int
+
+	switch direction {
+	case NavigationForward:
+		// Preload forward
+		for i := 1; i <= pm.maxPreload; i++ {
+			idx := currentIdx + i
+			if idx < pathsCount {
+				indices = append(indices, idx)
+			}
+		}
+	case NavigationBackward:
+		// Preload backward
+		for i := 1; i <= pm.maxPreload; i++ {
+			idx := currentIdx - i
+			if idx >= 0 {
+				indices = append(indices, idx)
+			}
+		}
+	case NavigationJump:
+		// Preload both directions from jump point
+		half := pm.maxPreload / 2
+
+		// Forward
+		for i := 1; i <= half; i++ {
+			idx := currentIdx + i
+			if idx < pathsCount {
+				indices = append(indices, idx)
+			}
+		}
+
+		// Backward
+		for i := 1; i <= half; i++ {
+			idx := currentIdx - i
+			if idx >= 0 {
+				indices = append(indices, idx)
+			}
+		}
+	}
+
+	return indices
+}
+
+// preloadImage loads a single image into cache if not already cached
+func (pm *PreloadManager) preloadImage(idx int) {
+	if idx < 0 || idx >= len(pm.imageManager.paths) {
+		return
+	}
+
+	imagePath := pm.imageManager.paths[idx]
+	cacheKey := imagePath.Path
+
+	// Check if already in cache
+	if _, ok := pm.imageManager.cache.Get(cacheKey); ok {
+		return // Already cached
+	}
+
+	// Load image
+	img, err := loadImage(imagePath)
+	if err != nil {
+		pm.mu.Lock()
+		pm.stats.FailedCount++
+		pm.mu.Unlock()
+		debugLog("Preload failed for [%d] %s: %v", idx+1, imagePath.Path, err)
+		return
+	}
+
+	// Add to cache
+	pm.imageManager.cache.Add(cacheKey, img)
+
+	pm.mu.Lock()
+	pm.stats.LoadedCount++
+	pm.mu.Unlock()
+
+	debugLog("Preloaded [%d] %s (cache: %d items)", idx+1, imagePath.Path, pm.imageManager.cache.Len())
+}
+
 // ImageManager interface for managing image loading and caching
 type ImageManager interface {
 	GetImage(idx int) *ebiten.Image
@@ -36,12 +254,16 @@ type ImageManager interface {
 	GetBookModeImages(idx int, rightToLeft bool) (*ebiten.Image, *ebiten.Image)
 	SetPaths(paths []ImagePath)
 	GetPathsCount() int
+	StartPreload(currentIdx int, direction NavigationDirection)
+	StopPreload()
+	GetPreloadStats() PreloadStats
 }
 
 // DefaultImageManager implements ImageManager
 type DefaultImageManager struct {
-	paths []ImagePath
-	cache *lru.Cache[string, *ebiten.Image]
+	paths          []ImagePath
+	cache          *lru.Cache[string, *ebiten.Image]
+	preloadManager *PreloadManager
 }
 
 // NewImageManager creates a new DefaultImageManager
@@ -51,10 +273,33 @@ func NewImageManager(cacheSize int) ImageManager {
 		log.Printf("Error: Failed to create LRU cache: %v", err)
 		cache, _ = lru.New[string, *ebiten.Image](16) // fallback to default size
 	}
-	return &DefaultImageManager{
+
+	manager := &DefaultImageManager{
 		paths: []ImagePath{},
 		cache: cache,
 	}
+
+	return manager
+}
+
+// NewImageManagerWithPreload creates a new DefaultImageManager with preload configuration
+func NewImageManagerWithPreload(cacheSize int, preloadCount int, preloadEnabled bool) ImageManager {
+	cache, err := lru.New[string, *ebiten.Image](cacheSize)
+	if err != nil {
+		log.Printf("Error: Failed to create LRU cache: %v", err)
+		cache, _ = lru.New[string, *ebiten.Image](16) // fallback to default size
+	}
+
+	manager := &DefaultImageManager{
+		paths: []ImagePath{},
+		cache: cache,
+	}
+
+	// Initialize preload manager with configuration
+	manager.preloadManager = NewPreloadManager(manager, preloadCount)
+	manager.preloadManager.SetEnabled(preloadEnabled)
+
+	return manager
 }
 
 func (m *DefaultImageManager) SetPaths(paths []ImagePath) {
@@ -65,6 +310,25 @@ func (m *DefaultImageManager) SetPaths(paths []ImagePath) {
 
 func (m *DefaultImageManager) GetPathsCount() int {
 	return len(m.paths)
+}
+
+func (m *DefaultImageManager) StartPreload(currentIdx int, direction NavigationDirection) {
+	if m.preloadManager != nil {
+		m.preloadManager.StartPreload(currentIdx, direction)
+	}
+}
+
+func (m *DefaultImageManager) StopPreload() {
+	if m.preloadManager != nil {
+		m.preloadManager.Stop()
+	}
+}
+
+func (m *DefaultImageManager) GetPreloadStats() PreloadStats {
+	if m.preloadManager != nil {
+		return m.preloadManager.GetStats()
+	}
+	return PreloadStats{}
 }
 
 func (m *DefaultImageManager) GetCurrentImage(idx int) *ebiten.Image {
