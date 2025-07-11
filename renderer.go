@@ -216,32 +216,44 @@ func (r *Renderer) drawHelpOverlay(screen *ebiten.Image) {
 	currentY := titleY + r.renderState.GetHelpFontSize()*2 // Start below title
 	lineHeight := r.renderState.GetHelpFontSize() * 1.5
 
-	// Dynamic keybinding display
+	// Dynamic input bindings display
 	keybindings := r.renderState.GetKeybindings()
+	mousebindings := r.renderState.GetMousebindings()
 	actionDescriptions := getActionDescriptions()
 
-	// Get sorted action list for consistent display
-	actions := make([]string, 0, len(keybindings))
+	// Get sorted action list for consistent display (union of keyboard and mouse actions)
+	actionSet := make(map[string]bool)
 	for action := range keybindings {
+		actionSet[action] = true
+	}
+	for action := range mousebindings {
+		actionSet[action] = true
+	}
+
+	actions := make([]string, 0, len(actionSet))
+	for action := range actionSet {
 		actions = append(actions, action)
 	}
 	sort.Strings(actions)
 
-	// Draw keybindings title
-	keybindingsTitleOp := &text.DrawOptions{}
-	keybindingsTitleOp.GeoM.Translate(float64(padding+20), currentY)
-	keybindingsTitleOp.ColorScale.ScaleWithColor(color.RGBA{255, 255, 255, 255})
-	text.Draw(screen, "Keybindings:", helpFont, keybindingsTitleOp)
+	// Draw input bindings title
+	inputTitleOp := &text.DrawOptions{}
+	inputTitleOp.GeoM.Translate(float64(padding+20), currentY)
+	inputTitleOp.ColorScale.ScaleWithColor(color.RGBA{255, 255, 255, 255})
+	text.Draw(screen, "Controls (Keyboard | Mouse):", helpFont, inputTitleOp)
 	currentY += lineHeight * 1.5
 
 	// Calculate column widths using text measurement
 	maxActionWidth := 0.0
-	maxKeysWidth := 0.0
+	maxInputWidth := 0.0
 
 	// First pass: measure text to determine column widths
 	for _, action := range actions {
 		keys := keybindings[action]
-		if len(keys) == 0 {
+		mouseActions := mousebindings[action]
+
+		// Skip if no bindings at all
+		if len(keys) == 0 && len(mouseActions) == 0 {
 			continue
 		}
 
@@ -251,29 +263,37 @@ func (r *Renderer) drawHelpOverlay(screen *ebiten.Image) {
 			maxActionWidth = actionWidth
 		}
 
-		// Measure keys width
-		keysList := strings.Join(keys, ", ")
-		keysWidth, _ := text.Measure(keysList, helpFont, 0)
-		if keysWidth > maxKeysWidth {
-			maxKeysWidth = keysWidth
+		// Build combined input string (keyboard | mouse)
+		var inputParts []string
+		if len(keys) > 0 {
+			inputParts = append(inputParts, strings.Join(keys, ", "))
+		}
+		if len(mouseActions) > 0 {
+			inputParts = append(inputParts, strings.Join(mouseActions, ", "))
+		}
+
+		combinedInput := strings.Join(inputParts, " | ")
+		inputWidth, _ := text.Measure(combinedInput, helpFont, 0)
+		if inputWidth > maxInputWidth {
+			maxInputWidth = inputWidth
 		}
 	}
 
 	// Calculate column positions with proper spacing
 	actionColumnX := float64(padding + 40)
 	arrowColumnX := actionColumnX + maxActionWidth + 20 // 20px spacing
-	keysColumnX := arrowColumnX + 30                    // Arrow width + spacing
-	descColumnX := keysColumnX + maxKeysWidth + 20      // 20px spacing after keys
+	inputColumnX := arrowColumnX + 30                   // Arrow width + spacing
+	descColumnX := inputColumnX + maxInputWidth + 20    // 20px spacing after input
 
-	// Draw each action and its keybindings on single line
+	// Draw each action and its input bindings on single line
 	for _, action := range actions {
 		keys := keybindings[action]
-		if len(keys) == 0 {
+		mouseActions := mousebindings[action]
+
+		// Skip if no bindings at all
+		if len(keys) == 0 && len(mouseActions) == 0 {
 			continue
 		}
-
-		// Format keys list
-		keysList := strings.Join(keys, ", ")
 
 		// Get description
 		description := actionDescriptions[action]
@@ -293,11 +313,40 @@ func (r *Renderer) drawHelpOverlay(screen *ebiten.Image) {
 		arrowOp.ColorScale.ScaleWithColor(color.RGBA{255, 255, 255, 255})
 		text.Draw(screen, "→", helpFont, arrowOp)
 
-		// Draw keys
-		keysOp := &text.DrawOptions{}
-		keysOp.GeoM.Translate(keysColumnX, currentY)
-		keysOp.ColorScale.ScaleWithColor(color.RGBA{255, 255, 100, 255}) // Yellow for keys
-		text.Draw(screen, keysList, helpFont, keysOp)
+		// Draw combined input bindings with color coding
+		currentInputX := inputColumnX
+
+		// Draw keyboard bindings in yellow
+		if len(keys) > 0 {
+			keysList := strings.Join(keys, ", ")
+			keysOp := &text.DrawOptions{}
+			keysOp.GeoM.Translate(currentInputX, currentY)
+			keysOp.ColorScale.ScaleWithColor(color.RGBA{255, 255, 100, 255}) // Yellow for keyboard
+			text.Draw(screen, keysList, helpFont, keysOp)
+
+			keysWidth, _ := text.Measure(keysList, helpFont, 0)
+			currentInputX += keysWidth
+		}
+
+		// Draw separator if both keyboard and mouse bindings exist
+		if len(keys) > 0 && len(mouseActions) > 0 {
+			sepOp := &text.DrawOptions{}
+			sepOp.GeoM.Translate(currentInputX, currentY)
+			sepOp.ColorScale.ScaleWithColor(color.RGBA{255, 255, 255, 255}) // White for separator
+			text.Draw(screen, " | ", helpFont, sepOp)
+
+			sepWidth, _ := text.Measure(" | ", helpFont, 0)
+			currentInputX += sepWidth
+		}
+
+		// Draw mouse bindings in cyan
+		if len(mouseActions) > 0 {
+			mouseList := strings.Join(mouseActions, ", ")
+			mouseOp := &text.DrawOptions{}
+			mouseOp.GeoM.Translate(currentInputX, currentY)
+			mouseOp.ColorScale.ScaleWithColor(color.RGBA{100, 255, 255, 255}) // Cyan for mouse
+			text.Draw(screen, mouseList, helpFont, mouseOp)
+		}
 
 		// Draw description on same line
 		descOp := &text.DrawOptions{}

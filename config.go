@@ -29,6 +29,16 @@ func getDefaultKeybindings() map[string][]string {
 	return GetDefaultKeybindings()
 }
 
+// getDefaultMousebindings returns the default mouse binding configuration
+func getDefaultMousebindings() map[string][]string {
+	return GetDefaultMousebindings()
+}
+
+// getDefaultMouseSettings returns the default mouse settings
+func getDefaultMouseSettings() MouseSettings {
+	return GetDefaultMouseSettings()
+}
+
 // validateKeybindings validates the keybindings configuration
 func validateKeybindings(keybindings map[string][]string) error {
 	// Check for valid key formats and detect conflicts
@@ -51,6 +61,101 @@ func validateKeybindings(keybindings map[string][]string) error {
 	}
 
 	return nil
+}
+
+// validateMousebindings validates the mouse bindings configuration
+func validateMousebindings(mousebindings map[string][]string) error {
+	// Check for valid mouse action formats and detect conflicts
+	mouseToAction := make(map[string]string)
+	validMouseActions := getValidMouseActionNames()
+
+	for action, mouseActions := range mousebindings {
+		for _, mouseStr := range mouseActions {
+			// Validate mouse action format
+			if err := validateMouseString(mouseStr, validMouseActions); err != nil {
+				return fmt.Errorf("invalid mouse action '%s' for action '%s': %v", mouseStr, action, err)
+			}
+
+			// Check for conflicts
+			if existingAction, exists := mouseToAction[mouseStr]; exists {
+				return fmt.Errorf("mouse action conflict: '%s' is bound to both '%s' and '%s'", mouseStr, existingAction, action)
+			}
+			mouseToAction[mouseStr] = action
+		}
+	}
+
+	return nil
+}
+
+// validateMouseString validates a single mouse string format
+func validateMouseString(mouseStr string, validMouseActions map[string]bool) error {
+	parts := strings.Split(mouseStr, "+")
+	if len(parts) == 0 {
+		return fmt.Errorf("empty mouse string")
+	}
+
+	// Last part should be the actual mouse action
+	actionName := parts[len(parts)-1]
+	if !validMouseActions[actionName] {
+		return fmt.Errorf("unknown mouse action: %s", actionName)
+	}
+
+	// Check modifiers
+	for i := 0; i < len(parts)-1; i++ {
+		modifier := strings.ToLower(parts[i])
+		if modifier != "shift" && modifier != "ctrl" && modifier != "alt" {
+			return fmt.Errorf("unknown modifier: %s", parts[i])
+		}
+	}
+
+	return nil
+}
+
+// getValidMouseActionNames returns a set of valid mouse action names
+func getValidMouseActionNames() map[string]bool {
+	return map[string]bool{
+		// Basic mouse buttons
+		"LeftClick":   true,
+		"RightClick":  true,
+		"MiddleClick": true,
+		"Back":        true,
+		"Forward":     true,
+		// Wheel actions
+		"WheelUp":    true,
+		"WheelDown":  true,
+		"WheelLeft":  true,
+		"WheelRight": true,
+		// Double-click actions
+		"DoubleLeftClick":   true,
+		"DoubleRightClick":  true,
+		"DoubleMiddleClick": true,
+	}
+}
+
+// validateMouseSettings validates the mouse settings configuration
+func validateMouseSettings(settings MouseSettings) MouseSettings {
+	// Validate wheel sensitivity (0.1 to 5.0)
+	if settings.WheelSensitivity < 0.1 {
+		settings.WheelSensitivity = 1.0
+	} else if settings.WheelSensitivity > 5.0 {
+		settings.WheelSensitivity = 5.0
+	}
+
+	// Validate double-click time (100 to 1000 milliseconds)
+	if settings.DoubleClickTime < 100 {
+		settings.DoubleClickTime = 300
+	} else if settings.DoubleClickTime > 1000 {
+		settings.DoubleClickTime = 1000
+	}
+
+	// Validate drag threshold (1 to 20 pixels)
+	if settings.DragThreshold < 1 {
+		settings.DragThreshold = 5
+	} else if settings.DragThreshold > 20 {
+		settings.DragThreshold = 20
+	}
+
+	return settings
 }
 
 // validateKeyString validates a single key string format
@@ -135,6 +240,8 @@ type Config struct {
 	PreloadEnabled       bool                `json:"preload_enabled"`
 	PreloadCount         int                 `json:"preload_count"`
 	Keybindings          map[string][]string `json:"keybindings"`
+	Mousebindings        map[string][]string `json:"mousebindings"`
+	MouseSettings        MouseSettings       `json:"mouse_settings"`
 }
 
 func getConfigPath() string {
@@ -158,17 +265,19 @@ func loadConfigFromPath(configPath string) ConfigLoadResult {
 	config := Config{
 		WindowWidth:          defaultWidth,
 		WindowHeight:         defaultHeight,
-		AspectRatioThreshold: 1.5,                     // Default threshold for aspect ratio compatibility
-		RightToLeft:          false,                   // Default to left-to-right reading (Western style)
-		HelpFontSize:         24.0,                    // Default help font size
-		SortMethod:           SortNatural,             // Default to natural sort
-		BookMode:             false,                   // Default to single page mode
-		Fullscreen:           false,                   // Default to windowed mode
-		CacheSize:            16,                      // Default cache size for images
-		TransitionFrames:     0,                       // Default: no forced transition frames
-		PreloadEnabled:       true,                    // Default: enable preloading
-		PreloadCount:         4,                       // Default: preload up to 4 images
-		Keybindings:          getDefaultKeybindings(), // Default keybindings
+		AspectRatioThreshold: 1.5,                       // Default threshold for aspect ratio compatibility
+		RightToLeft:          false,                     // Default to left-to-right reading (Western style)
+		HelpFontSize:         24.0,                      // Default help font size
+		SortMethod:           SortNatural,               // Default to natural sort
+		BookMode:             false,                     // Default to single page mode
+		Fullscreen:           false,                     // Default to windowed mode
+		CacheSize:            16,                        // Default cache size for images
+		TransitionFrames:     0,                         // Default: no forced transition frames
+		PreloadEnabled:       true,                      // Default: enable preloading
+		PreloadCount:         4,                         // Default: preload up to 4 images
+		Keybindings:          getDefaultKeybindings(),   // Default keybindings
+		Mousebindings:        getDefaultMousebindings(), // Default mouse bindings
+		MouseSettings:        getDefaultMouseSettings(), // Default mouse settings
 	}
 
 	result := ConfigLoadResult{
@@ -259,6 +368,30 @@ func loadConfigFromPath(configPath string) ConfigLoadResult {
 			result.Warnings = append(result.Warnings, fmt.Sprintf("Keybinding errors: %v", err))
 		}
 	}
+
+	// Validate mousebindings - ensure defaults exist for missing actions
+	if config.Mousebindings == nil {
+		config.Mousebindings = getDefaultMousebindings()
+	} else {
+		// Fill in missing mousebindings with defaults
+		mouseDefaults := getDefaultMousebindings()
+		for action, defaultMouseActions := range mouseDefaults {
+			if _, exists := config.Mousebindings[action]; !exists {
+				config.Mousebindings[action] = defaultMouseActions
+			}
+		}
+
+		// Validate mousebindings and resolve conflicts
+		if err := validateMousebindings(config.Mousebindings); err != nil {
+			log.Printf("Warning: Invalid mousebindings detected, using defaults: %v", err)
+			config.Mousebindings = getDefaultMousebindings()
+			result.Status = "Warning"
+			result.Warnings = append(result.Warnings, fmt.Sprintf("Mousebinding errors: %v", err))
+		}
+	}
+
+	// Validate mouse settings
+	config.MouseSettings = validateMouseSettings(config.MouseSettings)
 
 	// Update the result with the final config
 	result.Config = config

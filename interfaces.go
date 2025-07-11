@@ -41,6 +41,8 @@ type RenderState interface {
 	GetHelpFontSize() float64
 	GetConfigStatus() ConfigLoadResult
 	GetKeybindings() map[string][]string
+	GetMousebindings() map[string][]string
+	GetMouseSettings() MouseSettings
 }
 
 // RenderStateSnapshot captures a snapshot of render state for comparison

@@ -5,19 +5,21 @@ import (
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
 )
 
-// InputHandler handles all keyboard input processing
+// InputHandler handles all keyboard and mouse input processing
 type InputHandler struct {
-	inputActions      InputActions
-	inputState        InputState
-	keybindingManager *KeybindingManager
+	inputActions        InputActions
+	inputState          InputState
+	keybindingManager   *KeybindingManager
+	mousebindingManager *MousebindingManager
 }
 
 // NewInputHandler creates a new InputHandler
-func NewInputHandler(inputActions InputActions, inputState InputState, keybindingManager *KeybindingManager) *InputHandler {
+func NewInputHandler(inputActions InputActions, inputState InputState, keybindingManager *KeybindingManager, mousebindingManager *MousebindingManager) *InputHandler {
 	return &InputHandler{
-		inputActions:      inputActions,
-		inputState:        inputState,
-		keybindingManager: keybindingManager,
+		inputActions:        inputActions,
+		inputState:          inputState,
+		keybindingManager:   keybindingManager,
+		mousebindingManager: mousebindingManager,
 	}
 }
 
@@ -28,30 +30,30 @@ func (h *InputHandler) HandleInput() bool {
 		return false
 	}
 
-	inputProcessed := false
+	// Process keyboard input first
+	if h.handleKeyboardInput() {
+		return true
+	}
 
-	inputProcessed = h.handleExitKeys() || inputProcessed
-	inputProcessed = h.handleHelpToggle() || inputProcessed
-	inputProcessed = h.handleInfoToggle() || inputProcessed
-	inputProcessed = h.handlePageInputMode() || inputProcessed
-	inputProcessed = h.handleModeToggleKeys() || inputProcessed
-	inputProcessed = h.handleTransformationKeys() || inputProcessed
-	inputProcessed = h.handleNavigationKeys() || inputProcessed
-	inputProcessed = h.handleFullscreenToggle() || inputProcessed
-
-	return inputProcessed
+	// Process mouse input if keyboard didn't handle anything
+	return h.handleMouseInput()
 }
 
-func (h *InputHandler) handleExitKeys() bool {
-	return h.keybindingManager.ExecuteAction("exit", h.inputActions, h.inputState)
-}
+// handleKeyboardInput processes all keyboard input for the current frame
+func (h *InputHandler) handleKeyboardInput() bool {
+	// Page input mode has special key handling
+	if h.inputState.IsInPageInputMode() {
+		return h.handlePageInputModeKeys()
+	}
 
-func (h *InputHandler) handleHelpToggle() bool {
-	return h.keybindingManager.ExecuteAction("help", h.inputActions, h.inputState)
-}
+	// Normal input processing - unified with actionDefinitions
+	for _, actionDef := range actionDefinitions {
+		if h.keybindingManager.ExecuteAction(actionDef.Name, h.inputActions, h.inputState) {
+			return true
+		}
+	}
 
-func (h *InputHandler) handleInfoToggle() bool {
-	return h.keybindingManager.ExecuteAction("info", h.inputActions, h.inputState)
+	return false
 }
 
 func (h *InputHandler) handlePageInputMode() bool {
@@ -60,7 +62,12 @@ func (h *InputHandler) handlePageInputMode() bool {
 		return h.keybindingManager.ExecuteAction("page_input", h.inputActions, h.inputState)
 	}
 
-	// Handle page input mode
+	// If in page input mode, delegate to specialized handler
+	return h.handlePageInputModeKeys()
+}
+
+func (h *InputHandler) handlePageInputModeKeys() bool {
+	// Handle page input mode special keys
 	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
 		// Cancel page input
 		h.inputActions.ExitPageInputMode()
@@ -107,80 +114,19 @@ func (h *InputHandler) checkDigitKeys(startKey, endKey ebiten.Key, baseChar rune
 	return ""
 }
 
-func (h *InputHandler) handleModeToggleKeys() bool {
-	inputProcessed := false
-
-	if h.keybindingManager.ExecuteAction("toggle_book_mode", h.inputActions, h.inputState) {
-		inputProcessed = true
+// handleMouseInput processes all mouse input for the current frame
+func (h *InputHandler) handleMouseInput() bool {
+	if h.mousebindingManager == nil {
+		return false
 	}
 
-	if h.keybindingManager.ExecuteAction("toggle_reading_direction", h.inputActions, h.inputState) {
-		inputProcessed = true
+	// Process all mouse actions using actionDefinitions to ensure consistency
+	// and automatic handling of new actions
+	for _, actionDef := range actionDefinitions {
+		if h.mousebindingManager.ExecuteAction(actionDef.Name, h.inputActions, h.inputState) {
+			return true // Return immediately on first action processed
+		}
 	}
 
-	if h.keybindingManager.ExecuteAction("cycle_sort", h.inputActions, h.inputState) {
-		inputProcessed = true
-	}
-
-	if h.keybindingManager.ExecuteAction("expand_directory", h.inputActions, h.inputState) {
-		inputProcessed = true
-	}
-
-	return inputProcessed
-}
-
-func (h *InputHandler) handleTransformationKeys() bool {
-	inputProcessed := false
-
-	if h.keybindingManager.ExecuteAction("rotate_left", h.inputActions, h.inputState) {
-		inputProcessed = true
-	}
-
-	if h.keybindingManager.ExecuteAction("rotate_right", h.inputActions, h.inputState) {
-		inputProcessed = true
-	}
-
-	if h.keybindingManager.ExecuteAction("flip_horizontal", h.inputActions, h.inputState) {
-		inputProcessed = true
-	}
-
-	if h.keybindingManager.ExecuteAction("flip_vertical", h.inputActions, h.inputState) {
-		inputProcessed = true
-	}
-
-	return inputProcessed
-}
-
-func (h *InputHandler) handleNavigationKeys() bool {
-	inputProcessed := false
-
-	if h.keybindingManager.ExecuteAction("next", h.inputActions, h.inputState) {
-		inputProcessed = true
-	}
-
-	if h.keybindingManager.ExecuteAction("previous", h.inputActions, h.inputState) {
-		inputProcessed = true
-	}
-
-	if h.keybindingManager.ExecuteAction("next_single", h.inputActions, h.inputState) {
-		inputProcessed = true
-	}
-
-	if h.keybindingManager.ExecuteAction("previous_single", h.inputActions, h.inputState) {
-		inputProcessed = true
-	}
-
-	if h.keybindingManager.ExecuteAction("jump_first", h.inputActions, h.inputState) {
-		inputProcessed = true
-	}
-
-	if h.keybindingManager.ExecuteAction("jump_last", h.inputActions, h.inputState) {
-		inputProcessed = true
-	}
-
-	return inputProcessed
-}
-
-func (h *InputHandler) handleFullscreenToggle() bool {
-	return h.keybindingManager.ExecuteAction("fullscreen", h.inputActions, h.inputState)
+	return false
 }

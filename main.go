@@ -20,6 +20,9 @@ import (
 // Global debug mode flag
 var debugMode bool
 
+// Global action executor for centralized action processing
+var globalActionExecutor *ActionExecutor
+
 //go:embed icon/icon_16.png
 var icon16 []byte
 
@@ -59,16 +62,17 @@ func isSupportedExt(path string) bool {
 }
 
 type Game struct {
-	imageManager      ImageManager
-	inputHandler      *InputHandler
-	renderer          *Renderer
-	keybindingManager *KeybindingManager
-	idx               int
-	fullscreen        bool
-	bookMode          bool // Book/spread view mode
-	tempSingleMode    bool // Temporary single page mode (return to book mode after navigation)
-	showHelp          bool // Help overlay display
-	showInfo          bool // Info display (page numbers, metadata, etc.)
+	imageManager        ImageManager
+	inputHandler        *InputHandler
+	renderer            *Renderer
+	keybindingManager   *KeybindingManager
+	mousebindingManager *MousebindingManager
+	idx                 int
+	fullscreen          bool
+	bookMode            bool // Book/spread view mode
+	tempSingleMode      bool // Temporary single page mode (return to book mode after navigation)
+	showHelp            bool // Help overlay display
+	showInfo            bool // Info display (page numbers, metadata, etc.)
 
 	// Page input mode state
 	pageInputMode   bool
@@ -453,6 +457,14 @@ func (g *Game) GetKeybindings() map[string][]string {
 	return g.keybindingManager.GetKeybindings()
 }
 
+func (g *Game) GetMousebindings() map[string][]string {
+	return g.mousebindingManager.GetMousebindings()
+}
+
+func (g *Game) GetMouseSettings() MouseSettings {
+	return g.mousebindingManager.GetSettings()
+}
+
 // InputActions interface implementation
 func (g *Game) ToggleHelp() {
 	g.showHelp = !g.showHelp
@@ -718,6 +730,9 @@ func main() {
 
 	debugMode = *debug
 
+	// Initialize global action executor
+	globalActionExecutor = NewActionExecutor()
+
 	args := flag.Args()
 
 	var configResult ConfigLoadResult
@@ -762,7 +777,10 @@ func main() {
 	// Initialize input handler and renderer
 	keybindingManager := NewKeybindingManager(config.Keybindings)
 	g.keybindingManager = keybindingManager
-	g.inputHandler = NewInputHandler(g, g, keybindingManager)
+
+	mousebindingManager := NewMousebindingManager(config.Mousebindings, config.MouseSettings)
+	g.mousebindingManager = mousebindingManager
+	g.inputHandler = NewInputHandler(g, g, keybindingManager, mousebindingManager)
 	g.renderer = NewRenderer(g)
 
 	// Show config warnings if any
