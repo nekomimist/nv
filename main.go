@@ -713,7 +713,10 @@ func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {
 			g.forceRedrawFrames = 1
 		}
 	}
-	return outsideWidth, outsideHeight
+
+	// Hi-DPI support: multiply by device scale factor for sharper rendering
+	scale := ebiten.DeviceScaleFactor()
+	return int(float64(outsideWidth) * scale), int(float64(outsideHeight) * scale)
 }
 
 // debugLog outputs debug messages only when debug mode is enabled

@@ -88,6 +88,9 @@ func (r *Renderer) drawSingleImage(screen *ebiten.Image) {
 	iw, ih := transformedImg.Bounds().Dx(), transformedImg.Bounds().Dy()
 	w, h := screen.Bounds().Dx(), screen.Bounds().Dy()
 
+	// Get device scale factor for hi-DPI support
+	deviceScale := ebiten.DeviceScaleFactor()
+
 	var scale float64
 	if r.renderState.IsFullscreen() {
 		scale = math.Min(float64(w)/float64(iw), float64(h)/float64(ih))
@@ -95,7 +98,7 @@ func (r *Renderer) drawSingleImage(screen *ebiten.Image) {
 		if iw > w || ih > h {
 			scale = math.Min(float64(w)/float64(iw), float64(h)/float64(ih))
 		} else {
-			scale = 1
+			scale = deviceScale
 		}
 	}
 
@@ -603,6 +606,9 @@ func (r *Renderer) drawTransformedImageCentered(screen *ebiten.Image, img *ebite
 	iw, ih := img.Bounds().Dx(), img.Bounds().Dy()
 	w, h := screen.Bounds().Dx(), screen.Bounds().Dy()
 
+	// Get device scale factor for hi-DPI support
+	deviceScale := ebiten.DeviceScaleFactor()
+
 	var scale float64
 	if r.renderState.IsFullscreen() {
 		scale = math.Min(float64(w)/float64(iw), float64(h)/float64(ih))
@@ -610,7 +616,7 @@ func (r *Renderer) drawTransformedImageCentered(screen *ebiten.Image, img *ebite
 		if iw > w || ih > h {
 			scale = math.Min(float64(w)/float64(iw), float64(h)/float64(ih))
 		} else {
-			scale = 1
+			scale = deviceScale
 		}
 	}
 
