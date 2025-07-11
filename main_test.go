@@ -141,7 +141,8 @@ func TestConfigValidation(t *testing.T) {
 				t.Fatalf("Failed to write test config: %v", err)
 			}
 
-			config := loadConfigFromPath(configPath)
+			configResult := loadConfigFromPath(configPath)
+			config := configResult.Config
 
 			if config.WindowWidth != tt.expectedWidth {
 				t.Errorf("Expected width %d, got %d", tt.expectedWidth, config.WindowWidth)
@@ -459,25 +460,326 @@ func TestLoadConfigDefaults(t *testing.T) {
 	tempDir := t.TempDir()
 	configPath := filepath.Join(tempDir, "nonexistent.json")
 
-	config := loadConfigFromPath(configPath)
+	configResult := loadConfigFromPath(configPath)
+	config := configResult.Config
 
-	// Check all default values
-	expectedConfig := Config{
-		WindowWidth:          defaultWidth,
-		WindowHeight:         defaultHeight,
-		AspectRatioThreshold: 1.5,
-		RightToLeft:          false,
-		HelpFontSize:         24.0,
-		SortMethod:           SortNatural,
-		BookMode:             false,
-		Fullscreen:           false,
-		CacheSize:            16,
-		TransitionFrames:     0,
-		PreloadEnabled:       true,
-		PreloadCount:         4,
+	// Check all default values (without keybindings/mouse bindings for simplicity)
+	if config.WindowWidth != defaultWidth {
+		t.Errorf("Expected WindowWidth %d, got %d", defaultWidth, config.WindowWidth)
+	}
+	if config.WindowHeight != defaultHeight {
+		t.Errorf("Expected WindowHeight %d, got %d", defaultHeight, config.WindowHeight)
+	}
+	if config.AspectRatioThreshold != 1.5 {
+		t.Errorf("Expected AspectRatioThreshold 1.5, got %f", config.AspectRatioThreshold)
+	}
+	if config.RightToLeft != false {
+		t.Errorf("Expected RightToLeft false, got %t", config.RightToLeft)
+	}
+	if config.HelpFontSize != 24.0 {
+		t.Errorf("Expected HelpFontSize 24.0, got %f", config.HelpFontSize)
+	}
+	if config.SortMethod != SortNatural {
+		t.Errorf("Expected SortMethod %d, got %d", SortNatural, config.SortMethod)
+	}
+	if config.BookMode != false {
+		t.Errorf("Expected BookMode false, got %t", config.BookMode)
+	}
+	if config.Fullscreen != false {
+		t.Errorf("Expected Fullscreen false, got %t", config.Fullscreen)
+	}
+	if config.CacheSize != 16 {
+		t.Errorf("Expected CacheSize 16, got %d", config.CacheSize)
+	}
+	if config.TransitionFrames != 0 {
+		t.Errorf("Expected TransitionFrames 0, got %d", config.TransitionFrames)
+	}
+	if config.PreloadEnabled != true {
+		t.Errorf("Expected PreloadEnabled true, got %t", config.PreloadEnabled)
+	}
+	if config.PreloadCount != 4 {
+		t.Errorf("Expected PreloadCount 4, got %d", config.PreloadCount)
 	}
 
-	if !reflect.DeepEqual(config, expectedConfig) {
-		t.Errorf("Default config mismatch.\nExpected: %+v\nGot: %+v", expectedConfig, config)
+	// Check that keybindings and mouse bindings are properly initialized
+	if len(config.Keybindings) == 0 {
+		t.Error("Expected default keybindings to be populated")
+	}
+	if len(config.Mousebindings) == 0 {
+		t.Error("Expected default mouse bindings to be populated")
+	}
+	if config.MouseSettings.EnableMouse != true {
+		t.Errorf("Expected MouseSettings.EnableMouse true, got %t", config.MouseSettings.EnableMouse)
+	}
+}
+
+func TestKeybindingConflictDetection(t *testing.T) {
+	tests := []struct {
+		name        string
+		keybindings map[string][]string
+		expectError bool
+	}{
+		{
+			name: "no conflicts",
+			keybindings: map[string][]string{
+				"exit":     {"Escape"},
+				"help":     {"Shift+Slash"},
+				"next":     {"Space"},
+				"previous": {"Backspace"},
+			},
+			expectError: false,
+		},
+		{
+			name: "direct key conflict",
+			keybindings: map[string][]string{
+				"exit": {"Escape"},
+				"help": {"Escape"}, // Same key as exit
+			},
+			expectError: true,
+		},
+		{
+			name: "modifier key conflict",
+			keybindings: map[string][]string{
+				"exit": {"Shift+KeyA"},
+				"help": {"Shift+KeyA"}, // Same combination
+			},
+			expectError: true,
+		},
+		{
+			name: "multiple keys one conflict",
+			keybindings: map[string][]string{
+				"exit": {"Escape", "KeyQ"},
+				"help": {"Shift+Slash", "KeyQ"}, // KeyQ conflicts
+			},
+			expectError: true,
+		},
+		{
+			name: "valid modifier combinations",
+			keybindings: map[string][]string{
+				"action1": {"KeyA"},
+				"action2": {"Shift+KeyA"},
+				"action3": {"Ctrl+KeyA"},
+				"action4": {"Alt+KeyA"},
+			},
+			expectError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateKeybindings(tt.keybindings)
+			if tt.expectError && err == nil {
+				t.Error("Expected validation error, but got none")
+			}
+			if !tt.expectError && err != nil {
+				t.Errorf("Expected no validation error, but got: %v", err)
+			}
+		})
+	}
+}
+
+func TestMousebindingConflictDetection(t *testing.T) {
+	tests := []struct {
+		name          string
+		mousebindings map[string][]string
+		expectError   bool
+	}{
+		{
+			name: "no conflicts",
+			mousebindings: map[string][]string{
+				"next":     {"LeftClick"},
+				"previous": {"RightClick"},
+				"help":     {"Alt+RightClick"},
+			},
+			expectError: false,
+		},
+		{
+			name: "direct mouse action conflict",
+			mousebindings: map[string][]string{
+				"next": {"LeftClick"},
+				"help": {"LeftClick"}, // Same action
+			},
+			expectError: true,
+		},
+		{
+			name: "wheel action conflict",
+			mousebindings: map[string][]string{
+				"next":     {"WheelDown"},
+				"previous": {"WheelDown"}, // Same wheel direction
+			},
+			expectError: true,
+		},
+		{
+			name: "modifier mouse conflict",
+			mousebindings: map[string][]string{
+				"action1": {"Shift+LeftClick"},
+				"action2": {"Shift+LeftClick"}, // Same combination
+			},
+			expectError: true,
+		},
+		{
+			name: "valid modifier combinations",
+			mousebindings: map[string][]string{
+				"action1": {"LeftClick"},
+				"action2": {"Shift+LeftClick"},
+				"action3": {"Ctrl+LeftClick"},
+				"action4": {"Alt+LeftClick"},
+			},
+			expectError: false,
+		},
+		{
+			name: "double-click combinations",
+			mousebindings: map[string][]string{
+				"action1": {"LeftClick"},
+				"action2": {"DoubleLeftClick"}, // Different from single click
+			},
+			expectError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateMousebindings(tt.mousebindings)
+			if tt.expectError && err == nil {
+				t.Error("Expected validation error, but got none")
+			}
+			if !tt.expectError && err != nil {
+				t.Errorf("Expected no validation error, but got: %v", err)
+			}
+		})
+	}
+}
+
+func TestMouseSettingsValidation(t *testing.T) {
+	tests := []struct {
+		name           string
+		input          MouseSettings
+		expectedOutput MouseSettings
+		description    string
+	}{
+		{
+			name: "valid settings",
+			input: MouseSettings{
+				WheelSensitivity: 1.5,
+				DoubleClickTime:  250,
+				DragThreshold:    8,
+				EnableMouse:      true,
+				WheelInverted:    false,
+			},
+			expectedOutput: MouseSettings{
+				WheelSensitivity: 1.5,
+				DoubleClickTime:  250,
+				DragThreshold:    8,
+				EnableMouse:      true,
+				WheelInverted:    false,
+			},
+			description: "All values within valid ranges",
+		},
+		{
+			name: "wheel sensitivity too low",
+			input: MouseSettings{
+				WheelSensitivity: 0.05, // Below minimum of 0.1
+				DoubleClickTime:  300,
+				DragThreshold:    5,
+			},
+			expectedOutput: MouseSettings{
+				WheelSensitivity: 1.0, // Should be reset to default
+				DoubleClickTime:  300,
+				DragThreshold:    5,
+			},
+			description: "WheelSensitivity below minimum should be reset",
+		},
+		{
+			name: "wheel sensitivity too high",
+			input: MouseSettings{
+				WheelSensitivity: 10.0, // Above maximum of 5.0
+				DoubleClickTime:  300,
+				DragThreshold:    5,
+			},
+			expectedOutput: MouseSettings{
+				WheelSensitivity: 5.0, // Should be clamped to maximum
+				DoubleClickTime:  300,
+				DragThreshold:    5,
+			},
+			description: "WheelSensitivity above maximum should be clamped",
+		},
+		{
+			name: "double click time too low",
+			input: MouseSettings{
+				WheelSensitivity: 1.0,
+				DoubleClickTime:  50, // Below minimum of 100
+				DragThreshold:    5,
+			},
+			expectedOutput: MouseSettings{
+				WheelSensitivity: 1.0,
+				DoubleClickTime:  300, // Should be reset to default
+				DragThreshold:    5,
+			},
+			description: "DoubleClickTime below minimum should be reset",
+		},
+		{
+			name: "double click time too high",
+			input: MouseSettings{
+				WheelSensitivity: 1.0,
+				DoubleClickTime:  2000, // Above maximum of 1000
+				DragThreshold:    5,
+			},
+			expectedOutput: MouseSettings{
+				WheelSensitivity: 1.0,
+				DoubleClickTime:  1000, // Should be clamped to maximum
+				DragThreshold:    5,
+			},
+			description: "DoubleClickTime above maximum should be clamped",
+		},
+		{
+			name: "drag threshold too low",
+			input: MouseSettings{
+				WheelSensitivity: 1.0,
+				DoubleClickTime:  300,
+				DragThreshold:    0, // Below minimum of 1
+			},
+			expectedOutput: MouseSettings{
+				WheelSensitivity: 1.0,
+				DoubleClickTime:  300,
+				DragThreshold:    5, // Should be reset to default
+			},
+			description: "DragThreshold below minimum should be reset",
+		},
+		{
+			name: "drag threshold too high",
+			input: MouseSettings{
+				WheelSensitivity: 1.0,
+				DoubleClickTime:  300,
+				DragThreshold:    50, // Above maximum of 20
+			},
+			expectedOutput: MouseSettings{
+				WheelSensitivity: 1.0,
+				DoubleClickTime:  300,
+				DragThreshold:    20, // Should be clamped to maximum
+			},
+			description: "DragThreshold above maximum should be clamped",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := validateMouseSettings(tt.input)
+
+			if result.WheelSensitivity != tt.expectedOutput.WheelSensitivity {
+				t.Errorf("WheelSensitivity: expected %f, got %f", tt.expectedOutput.WheelSensitivity, result.WheelSensitivity)
+			}
+			if result.DoubleClickTime != tt.expectedOutput.DoubleClickTime {
+				t.Errorf("DoubleClickTime: expected %d, got %d", tt.expectedOutput.DoubleClickTime, result.DoubleClickTime)
+			}
+			if result.DragThreshold != tt.expectedOutput.DragThreshold {
+				t.Errorf("DragThreshold: expected %d, got %d", tt.expectedOutput.DragThreshold, result.DragThreshold)
+			}
+			if result.EnableMouse != tt.expectedOutput.EnableMouse {
+				t.Errorf("EnableMouse: expected %t, got %t", tt.expectedOutput.EnableMouse, result.EnableMouse)
+			}
+			if result.WheelInverted != tt.expectedOutput.WheelInverted {
+				t.Errorf("WheelInverted: expected %t, got %t", tt.expectedOutput.WheelInverted, result.WheelInverted)
+			}
+		})
 	}
 }
