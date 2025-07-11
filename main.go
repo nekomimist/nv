@@ -59,15 +59,16 @@ func isSupportedExt(path string) bool {
 }
 
 type Game struct {
-	imageManager   ImageManager
-	inputHandler   *InputHandler
-	renderer       *Renderer
-	idx            int
-	fullscreen     bool
-	bookMode       bool // Book/spread view mode
-	tempSingleMode bool // Temporary single page mode (return to book mode after navigation)
-	showHelp       bool // Help overlay display
-	showInfo       bool // Info display (page numbers, metadata, etc.)
+	imageManager      ImageManager
+	inputHandler      *InputHandler
+	renderer          *Renderer
+	keybindingManager *KeybindingManager
+	idx               int
+	fullscreen        bool
+	bookMode          bool // Book/spread view mode
+	tempSingleMode    bool // Temporary single page mode (return to book mode after navigation)
+	showHelp          bool // Help overlay display
+	showInfo          bool // Info display (page numbers, metadata, etc.)
 
 	// Page input mode state
 	pageInputMode   bool
@@ -95,6 +96,9 @@ type Game struct {
 	// Rendering optimization state
 	forceRedrawFrames int  // Force redraw for N frames
 	wasInputHandled   bool // True if input was processed in this frame
+
+	// Config status for help display
+	configStatus ConfigLoadResult
 }
 
 func (g *Game) getCurrentImage() *ebiten.Image {
@@ -441,6 +445,14 @@ func (g *Game) GetHelpFontSize() float64 {
 	return g.config.HelpFontSize
 }
 
+func (g *Game) GetConfigStatus() ConfigLoadResult {
+	return g.configStatus
+}
+
+func (g *Game) GetKeybindings() map[string][]string {
+	return g.keybindingManager.GetKeybindings()
+}
+
 // InputActions interface implementation
 func (g *Game) ToggleHelp() {
 	g.showHelp = !g.showHelp
@@ -533,7 +545,7 @@ func (g *Game) GetCurrentIndex() int {
 }
 
 func (g *Game) Update() error {
-	if (g.wasInputHandled) {
+	if g.wasInputHandled {
 		debugLog("waiting for previous input to complete\n")
 	} else {
 		g.wasInputHandled = g.inputHandler.HandleInput()
@@ -708,12 +720,13 @@ func main() {
 
 	args := flag.Args()
 
-	var config Config
+	var configResult ConfigLoadResult
 	if *configFile != "" {
-		config = loadConfigFromPath(*configFile)
+		configResult = loadConfigFromPath(*configFile)
 	} else {
-		config = loadConfig()
+		configResult = loadConfig()
 	}
+	config := configResult.Config
 
 	// Check if launched with single image file
 	isSingleImageFile := len(args) == 1 && isSupportedExt(args[0]) && !isArchiveExt(args[0])
@@ -740,14 +753,27 @@ func main() {
 		originalArgs:       args,
 		expandedFromSingle: false,
 		originalFileIndex:  -1,
+		configStatus:       configResult,
 	}
 
 	// Start initial preload in forward direction
 	imageManager.StartPreload(0, NavigationForward)
 
 	// Initialize input handler and renderer
-	g.inputHandler = NewInputHandler(g, g)
+	keybindingManager := NewKeybindingManager(config.Keybindings)
+	g.keybindingManager = keybindingManager
+	g.inputHandler = NewInputHandler(g, g, keybindingManager)
 	g.renderer = NewRenderer(g)
+
+	// Show config warnings if any
+	if configResult.Status == "Warning" || configResult.Status == "Error" {
+		if len(configResult.Warnings) > 0 {
+			warningMsg := fmt.Sprintf("Config %s: %s", configResult.Status, configResult.Warnings[0])
+			g.showOverlayMessage(warningMsg)
+		} else {
+			g.showOverlayMessage(fmt.Sprintf("Config %s: Using defaults", configResult.Status))
+		}
+	}
 
 	// Set up single file expansion mode if applicable
 	if isSingleImageFile {

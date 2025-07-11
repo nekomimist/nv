@@ -9,6 +9,7 @@ A simple image viewer built with Go and Ebiten, featuring seamless archive suppo
 - Book Mode: Side-by-side image display with configurable reading direction
 - Fullscreen Support: Toggle between windowed and fullscreen modes
 - Page Jump: Direct navigation to specific pages
+- Customizable Keybindings: Configure all keyboard shortcuts via JSON settings
 
 ## Usage
 
@@ -87,7 +88,15 @@ Settings are automatically saved to `~/.nv.json`:
   "help_font_size": 24.0,
   "transition_frames": 0,
   "preload_enabled": true,
-  "preload_count": 4
+  "preload_count": 4,
+  "keybindings": {
+    "exit": ["Escape", "KeyQ"],
+    "help": ["Shift+Slash"],
+    "next": ["Space", "KeyN"],
+    "previous": ["Backspace", "KeyP"],
+    "fullscreen": ["Enter"],
+    "page_input": ["KeyG"]
+  }
 }
 ```
 
@@ -97,6 +106,7 @@ Settings are automatically saved to `~/.nv.json`:
 - `transition_frames` - Force redraw frames after fullscreen transitions (default: 0)
 - `preload_enabled` - Enable automatic image preloading (default: true)
 - `preload_count` - Number of images to preload ahead (1-16, default: 4)
+- `keybindings` - Custom keyboard shortcuts for actions. Each action can have multiple keys. Use format like `"KeyA"`, `"Space"`, `"Shift+KeyB"`. Falls back to defaults if invalid.
 
 ## License
 

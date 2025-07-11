@@ -7,15 +7,17 @@ import (
 
 // InputHandler handles all keyboard input processing
 type InputHandler struct {
-	inputActions InputActions
-	inputState   InputState
+	inputActions      InputActions
+	inputState        InputState
+	keybindingManager *KeybindingManager
 }
 
 // NewInputHandler creates a new InputHandler
-func NewInputHandler(inputActions InputActions, inputState InputState) *InputHandler {
+func NewInputHandler(inputActions InputActions, inputState InputState, keybindingManager *KeybindingManager) *InputHandler {
 	return &InputHandler{
-		inputActions: inputActions,
-		inputState:   inputState,
+		inputActions:      inputActions,
+		inputState:        inputState,
+		keybindingManager: keybindingManager,
 	}
 }
 
@@ -41,37 +43,21 @@ func (h *InputHandler) HandleInput() bool {
 }
 
 func (h *InputHandler) handleExitKeys() bool {
-	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) || inpututil.IsKeyJustPressed(ebiten.KeyQ) {
-		h.inputActions.Exit()
-		return true
-	}
-	return false
+	return h.keybindingManager.ExecuteAction("exit", h.inputActions, h.inputState)
 }
 
 func (h *InputHandler) handleHelpToggle() bool {
-	if inpututil.IsKeyJustPressed(ebiten.KeySlash) && ebiten.IsKeyPressed(ebiten.KeyShift) {
-		h.inputActions.ToggleHelp()
-		return true
-	}
-	return false
+	return h.keybindingManager.ExecuteAction("help", h.inputActions, h.inputState)
 }
 
 func (h *InputHandler) handleInfoToggle() bool {
-	if inpututil.IsKeyJustPressed(ebiten.KeyI) {
-		h.inputActions.ToggleInfo()
-		return true
-	}
-	return false
+	return h.keybindingManager.ExecuteAction("info", h.inputActions, h.inputState)
 }
 
 func (h *InputHandler) handlePageInputMode() bool {
 	// Check for G key to enter page input mode
 	if !h.inputState.IsInPageInputMode() {
-		if inpututil.IsKeyJustPressed(ebiten.KeyG) {
-			h.inputActions.EnterPageInputMode()
-			return true
-		}
-		return false
+		return h.keybindingManager.ExecuteAction("page_input", h.inputActions, h.inputState)
 	}
 
 	// Handle page input mode
@@ -124,25 +110,19 @@ func (h *InputHandler) checkDigitKeys(startKey, endKey ebiten.Key, baseChar rune
 func (h *InputHandler) handleModeToggleKeys() bool {
 	inputProcessed := false
 
-	if inpututil.IsKeyJustPressed(ebiten.KeyB) {
-		if ebiten.IsKeyPressed(ebiten.KeyShift) {
-			// SHIFT+B: Toggle reading direction
-			h.inputActions.ToggleReadingDirection()
-		} else {
-			// B: Toggle book mode
-			h.inputActions.ToggleBookMode()
-		}
+	if h.keybindingManager.ExecuteAction("toggle_book_mode", h.inputActions, h.inputState) {
 		inputProcessed = true
 	}
 
-	if inpututil.IsKeyJustPressed(ebiten.KeyS) {
-		if ebiten.IsKeyPressed(ebiten.KeyShift) {
-			// SHIFT+S: Cycle sort method
-			h.inputActions.CycleSortMethod()
-		} else {
-			// S: Scan directory images - only works for single file launch
-			h.inputActions.ExpandToDirectory()
-		}
+	if h.keybindingManager.ExecuteAction("toggle_reading_direction", h.inputActions, h.inputState) {
+		inputProcessed = true
+	}
+
+	if h.keybindingManager.ExecuteAction("cycle_sort", h.inputActions, h.inputState) {
+		inputProcessed = true
+	}
+
+	if h.keybindingManager.ExecuteAction("expand_directory", h.inputActions, h.inputState) {
 		inputProcessed = true
 	}
 
@@ -152,24 +132,19 @@ func (h *InputHandler) handleModeToggleKeys() bool {
 func (h *InputHandler) handleTransformationKeys() bool {
 	inputProcessed := false
 
-	// L: Rotate left 90 degrees
-	if inpututil.IsKeyJustPressed(ebiten.KeyL) {
-		h.inputActions.RotateLeft()
+	if h.keybindingManager.ExecuteAction("rotate_left", h.inputActions, h.inputState) {
 		inputProcessed = true
 	}
-	// R: Rotate right 90 degrees
-	if inpututil.IsKeyJustPressed(ebiten.KeyR) {
-		h.inputActions.RotateRight()
+
+	if h.keybindingManager.ExecuteAction("rotate_right", h.inputActions, h.inputState) {
 		inputProcessed = true
 	}
-	// H: Flip horizontally
-	if inpututil.IsKeyJustPressed(ebiten.KeyH) {
-		h.inputActions.FlipHorizontal()
+
+	if h.keybindingManager.ExecuteAction("flip_horizontal", h.inputActions, h.inputState) {
 		inputProcessed = true
 	}
-	// V: Flip vertically
-	if inpututil.IsKeyJustPressed(ebiten.KeyV) {
-		h.inputActions.FlipVertical()
+
+	if h.keybindingManager.ExecuteAction("flip_vertical", h.inputActions, h.inputState) {
 		inputProcessed = true
 	}
 
@@ -179,27 +154,27 @@ func (h *InputHandler) handleTransformationKeys() bool {
 func (h *InputHandler) handleNavigationKeys() bool {
 	inputProcessed := false
 
-	// Next page
-	if inpututil.IsKeyJustPressed(ebiten.KeySpace) || inpututil.IsKeyJustPressed(ebiten.KeyN) {
-		h.inputActions.NavigateNext()
+	if h.keybindingManager.ExecuteAction("next", h.inputActions, h.inputState) {
 		inputProcessed = true
 	}
-	// Previous page
-	if inpututil.IsKeyJustPressed(ebiten.KeyBackspace) || inpututil.IsKeyJustPressed(ebiten.KeyP) {
-		h.inputActions.NavigatePrevious()
+
+	if h.keybindingManager.ExecuteAction("previous", h.inputActions, h.inputState) {
 		inputProcessed = true
 	}
-	// Jump to first page
-	if inpututil.IsKeyJustPressed(ebiten.KeyHome) || inpututil.IsKeyJustPressed(ebiten.KeyComma) {
-		h.inputActions.JumpToPage(1)
+
+	if h.keybindingManager.ExecuteAction("next_single", h.inputActions, h.inputState) {
 		inputProcessed = true
 	}
-	// Jump to last page
-	if inpututil.IsKeyJustPressed(ebiten.KeyEnd) || inpututil.IsKeyJustPressed(ebiten.KeyPeriod) {
-		totalPages := h.inputActions.GetTotalPagesCount()
-		if totalPages > 0 {
-			h.inputActions.JumpToPage(totalPages)
-		}
+
+	if h.keybindingManager.ExecuteAction("previous_single", h.inputActions, h.inputState) {
+		inputProcessed = true
+	}
+
+	if h.keybindingManager.ExecuteAction("jump_first", h.inputActions, h.inputState) {
+		inputProcessed = true
+	}
+
+	if h.keybindingManager.ExecuteAction("jump_last", h.inputActions, h.inputState) {
 		inputProcessed = true
 	}
 
@@ -207,9 +182,5 @@ func (h *InputHandler) handleNavigationKeys() bool {
 }
 
 func (h *InputHandler) handleFullscreenToggle() bool {
-	if inpututil.IsKeyJustPressed(ebiten.KeyZ) {
-		h.inputActions.ToggleFullscreen()
-		return true
-	}
-	return false
+	return h.keybindingManager.ExecuteAction("fullscreen", h.inputActions, h.inputState)
 }

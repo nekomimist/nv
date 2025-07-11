@@ -6,6 +6,8 @@ import (
 	"image/color"
 	"log"
 	"math"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
@@ -18,18 +20,7 @@ import (
 type Renderer struct {
 	renderState    RenderState
 	helpFontSource *text.GoTextFaceSource
-	helpSections   []helpSection
 	lastSnapshot   *RenderStateSnapshot // Previous frame's state for comparison
-}
-
-type helpSection struct {
-	title string
-	items []helpItem
-}
-
-type helpItem struct {
-	key  string
-	desc string
 }
 
 // NewRenderer creates a new Renderer
@@ -40,53 +31,15 @@ func NewRenderer(renderState RenderState) *Renderer {
 		log.Fatal(err)
 	}
 
-	helpSections := []helpSection{
-		{
-			title: "Navigation:",
-			items: []helpItem{
-				{"Space/N", "Next image (2 images in book mode)"},
-				{"Backspace/P", "Previous image (2 images in book mode)"},
-				{"Shift+Space/N", "Single page forward (fine adjustment)"},
-				{"Shift+Backspace/P", "Single page backward (fine adjustment)"},
-				{"Home/<", "Jump to first page"},
-				{"End/>", "Jump to last page"},
-				{"S", "Scan directory images (single file mode only)"},
-			},
-		},
-		{
-			title: "Display Modes:",
-			items: []helpItem{
-				{"B", "Toggle book mode (dual image view)"},
-				{"Shift+B", "Toggle reading direction (LTR ↔ RTL)"},
-				{"Shift+S", "Cycle sort method (Natural/Simple/Entry)"},
-				{"Z", "Toggle fullscreen"},
-			},
-		},
-		{
-			title: "Transformations:",
-			items: []helpItem{
-				{"L", "Rotate left 90 degrees"},
-				{"R", "Rotate right 90 degrees"},
-				{"H", "Flip horizontally"},
-				{"V", "Flip vertically"},
-			},
-		},
-		{
-			title: "Other:",
-			items: []helpItem{
-				{"G", "Go to page (enter page number)"},
-				{"?", "Show/hide this help"},
-				{"I", "Show/hide info display (page numbers)"},
-				{"Escape/Q", "Quit application"},
-			},
-		},
-	}
-
 	return &Renderer{
 		renderState:    renderState,
 		helpFontSource: s,
-		helpSections:   helpSections,
 	}
+}
+
+// getActionDescriptions returns descriptions for each action
+func getActionDescriptions() map[string]string {
+	return GetActionDescriptions()
 }
 
 // Draw renders the entire screen
@@ -258,46 +211,147 @@ func (r *Renderer) drawHelpOverlay(screen *ebiten.Image) {
 	titleOp := &text.DrawOptions{}
 	titleOp.GeoM.Translate(float64(padding+20), titleY)
 	titleOp.ColorScale.ScaleWithColor(color.RGBA{255, 255, 255, 255})
-	text.Draw(screen, "CONTROLS:", helpFont, titleOp)
-
-	// Calculate column positions
-	keyColumnX := float64(padding + 220)  // Key column (right-aligned)
-	descColumnX := float64(padding + 270) // Description column (left-aligned)
+	text.Draw(screen, "HELP:", helpFont, titleOp)
 
 	currentY := titleY + r.renderState.GetHelpFontSize()*2 // Start below title
 	lineHeight := r.renderState.GetHelpFontSize() * 1.5
 
-	// Draw each section
-	for _, section := range r.helpSections {
-		// Draw section title
-		sectionOp := &text.DrawOptions{}
-		sectionOp.GeoM.Translate(float64(padding+20), currentY)
-		sectionOp.ColorScale.ScaleWithColor(color.RGBA{255, 255, 255, 255})
-		text.Draw(screen, section.title, helpFont, sectionOp)
-		currentY += lineHeight
+	// Dynamic keybinding display
+	keybindings := r.renderState.GetKeybindings()
+	actionDescriptions := getActionDescriptions()
 
-		// Draw each key-description pair
-		for _, item := range section.items {
-			// Draw key (right-aligned)
-			keyOp := &text.DrawOptions{}
-			keyOp.GeoM.Translate(keyColumnX, currentY)
-			keyOp.ColorScale.ScaleWithColor(color.RGBA{255, 255, 255, 255})
-			keyOp.PrimaryAlign = text.AlignEnd // Right align keys
-			text.Draw(screen, item.key, helpFont, keyOp)
+	// Get sorted action list for consistent display
+	actions := make([]string, 0, len(keybindings))
+	for action := range keybindings {
+		actions = append(actions, action)
+	}
+	sort.Strings(actions)
 
-			// Draw description (left-aligned)
-			descOp := &text.DrawOptions{}
-			descOp.GeoM.Translate(descColumnX, currentY)
-			descOp.ColorScale.ScaleWithColor(color.RGBA{255, 255, 255, 255})
-			descOp.PrimaryAlign = text.AlignStart // Left align descriptions
-			text.Draw(screen, item.desc, helpFont, descOp)
+	// Draw keybindings title
+	keybindingsTitleOp := &text.DrawOptions{}
+	keybindingsTitleOp.GeoM.Translate(float64(padding+20), currentY)
+	keybindingsTitleOp.ColorScale.ScaleWithColor(color.RGBA{255, 255, 255, 255})
+	text.Draw(screen, "Keybindings:", helpFont, keybindingsTitleOp)
+	currentY += lineHeight * 1.5
 
-			currentY += lineHeight
+	// Calculate column widths using text measurement
+	maxActionWidth := 0.0
+	maxKeysWidth := 0.0
+
+	// First pass: measure text to determine column widths
+	for _, action := range actions {
+		keys := keybindings[action]
+		if len(keys) == 0 {
+			continue
 		}
 
-		// Add extra space between sections
-		currentY += lineHeight * 0.5
+		// Measure action name width
+		actionWidth, _ := text.Measure(action, helpFont, 0)
+		if actionWidth > maxActionWidth {
+			maxActionWidth = actionWidth
+		}
+
+		// Measure keys width
+		keysList := strings.Join(keys, ", ")
+		keysWidth, _ := text.Measure(keysList, helpFont, 0)
+		if keysWidth > maxKeysWidth {
+			maxKeysWidth = keysWidth
+		}
 	}
+
+	// Calculate column positions with proper spacing
+	actionColumnX := float64(padding + 40)
+	arrowColumnX := actionColumnX + maxActionWidth + 20 // 20px spacing
+	keysColumnX := arrowColumnX + 30                    // Arrow width + spacing
+	descColumnX := keysColumnX + maxKeysWidth + 20      // 20px spacing after keys
+
+	// Draw each action and its keybindings on single line
+	for _, action := range actions {
+		keys := keybindings[action]
+		if len(keys) == 0 {
+			continue
+		}
+
+		// Format keys list
+		keysList := strings.Join(keys, ", ")
+
+		// Get description
+		description := actionDescriptions[action]
+		if description == "" {
+			description = "No description available"
+		}
+
+		// Draw action name (left-aligned)
+		actionOp := &text.DrawOptions{}
+		actionOp.GeoM.Translate(actionColumnX, currentY)
+		actionOp.ColorScale.ScaleWithColor(color.RGBA{200, 200, 255, 255}) // Light blue for action names
+		text.Draw(screen, action, helpFont, actionOp)
+
+		// Draw arrow
+		arrowOp := &text.DrawOptions{}
+		arrowOp.GeoM.Translate(arrowColumnX, currentY)
+		arrowOp.ColorScale.ScaleWithColor(color.RGBA{255, 255, 255, 255})
+		text.Draw(screen, "→", helpFont, arrowOp)
+
+		// Draw keys
+		keysOp := &text.DrawOptions{}
+		keysOp.GeoM.Translate(keysColumnX, currentY)
+		keysOp.ColorScale.ScaleWithColor(color.RGBA{255, 255, 100, 255}) // Yellow for keys
+		text.Draw(screen, keysList, helpFont, keysOp)
+
+		// Draw description on same line
+		descOp := &text.DrawOptions{}
+		descOp.GeoM.Translate(descColumnX, currentY)
+		descOp.ColorScale.ScaleWithColor(color.RGBA{180, 180, 180, 255}) // Gray for descriptions
+		text.Draw(screen, description, helpFont, descOp)
+
+		currentY += lineHeight
+	}
+
+	// Add some spacing before config status
+	currentY += lineHeight
+
+	// Draw config status section
+	configStatus := r.renderState.GetConfigStatus()
+
+	// Draw section title
+	sectionOp := &text.DrawOptions{}
+	sectionOp.GeoM.Translate(float64(padding+20), currentY)
+	sectionOp.ColorScale.ScaleWithColor(color.RGBA{255, 255, 255, 255})
+	text.Draw(screen, "System:", helpFont, sectionOp)
+	currentY += lineHeight
+
+	// Add config status
+	statusText := fmt.Sprintf("Config Status: %s", configStatus.Status)
+
+	descOp := &text.DrawOptions{}
+	descOp.GeoM.Translate(float64(padding+40), currentY)
+	if configStatus.Status == "Warning" || configStatus.Status == "Error" {
+		descOp.ColorScale.ScaleWithColor(color.RGBA{255, 200, 100, 255}) // Orange for warnings/errors
+	} else {
+		descOp.ColorScale.ScaleWithColor(color.RGBA{100, 255, 100, 255}) // Green for OK
+	}
+	text.Draw(screen, statusText, helpFont, descOp)
+	currentY += lineHeight
+
+	// Add warnings if any
+	if len(configStatus.Warnings) > 0 {
+		for i, warning := range configStatus.Warnings {
+			if i >= 2 { // Limit to first 2 warnings to avoid clutter
+				break
+			}
+			warningOp := &text.DrawOptions{}
+			warningOp.GeoM.Translate(float64(padding+40), currentY)
+			warningOp.ColorScale.ScaleWithColor(color.RGBA{255, 150, 150, 255}) // Light red for warnings
+			shortWarning := warning
+			if len(shortWarning) > 50 {
+				shortWarning = shortWarning[:47] + "..."
+			}
+			text.Draw(screen, "• "+shortWarning, helpFont, warningOp)
+			currentY += lineHeight
+		}
+	}
+
 }
 
 func (r *Renderer) drawPageInputOverlay(screen *ebiten.Image) {

@@ -8,7 +8,7 @@ This is an image viewer application built using Go and the Ebiten game engine. T
 
 ## File Structure
 
-The application is organized into six main modules for maintainability:
+The application is organized into seven main modules for maintainability:
 
 ### `main.go`
 - **Game Loop**: Implements Ebiten's game interface (`Update()`, `Draw()`, `Layout()`)
@@ -50,9 +50,16 @@ The application is organized into six main modules for maintainability:
 - **Entry Order**: Preserves original file system or archive order
 - **Strategy Pattern**: Pluggable sorting algorithms for flexible file ordering
 
+### `keybinding.go`
+- **KeybindingManager**: Centralized keybinding processing and validation
+- **Action Definitions**: Unified action definitions with default keybindings and descriptions
+- **Dynamic Keybindings**: Runtime keybinding configuration and conflict detection
+- **Key Combination Parsing**: Support for modifier keys (Shift, Ctrl, Alt)
+- **Action Execution**: Maps keyboard input to game actions through interface abstraction
+
 ## Key Components
 
-- **Modular Architecture**: Clear separation of concerns across six files
+- **Modular Architecture**: Clear separation of concerns across seven files
 - **Interface-Based Design**: ImageManager enables dependency injection and testing
 - **Archive Integration**: Seamless ZIP/RAR support with automatic image detection
 - **Performance Optimization**: Intelligent caching and preloading strategies
@@ -223,7 +230,15 @@ The application saves settings to `~/.nv.json`:
   "book_mode": false,
   "transition_frames": 0,
   "preload_enabled": true,
-  "preload_count": 4
+  "preload_count": 4,
+  "keybindings": {
+    "exit": ["Escape", "KeyQ"],
+    "help": ["Shift+Slash"],
+    "next": ["Space", "KeyN"],
+    "previous": ["Backspace", "KeyP"],
+    "fullscreen": ["Enter"],
+    "page_input": ["KeyG"]
+  }
 }
 ```
 
@@ -235,6 +250,7 @@ The application saves settings to `~/.nv.json`:
 - **transition_frames**: Number of frames to force redraw after fullscreen transitions. Helps fix rendering issues on some systems (e.g., WSL/WSLg). `0` = disabled, `1-60` = number of frames. Default: 0
 - **preload_enabled**: Whether to enable automatic image preloading for smoother navigation. `true` = enabled, `false` = disabled. Default: true
 - **preload_count**: Number of images to preload in the navigation direction. Higher values use more memory but provide smoother navigation. Range: 1-16. Default: 4
+- **keybindings**: Custom keybinding definitions for actions. Each action can have multiple keys assigned. Uses format like `"KeyA"`, `"Space"`, `"Shift+KeyB"`. If not specified, defaults are used. Invalid configurations fall back to defaults with warnings.
 
 ## File Sorting Strategy
 

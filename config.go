@@ -2,9 +2,11 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // Window size constants
@@ -22,19 +24,117 @@ const (
 	SortEntryOrder = 2 // Maintain original order (no sort)
 )
 
+// getDefaultKeybindings returns the default keybinding configuration
+func getDefaultKeybindings() map[string][]string {
+	return GetDefaultKeybindings()
+}
+
+// validateKeybindings validates the keybindings configuration
+func validateKeybindings(keybindings map[string][]string) error {
+	// Check for valid key formats and detect conflicts
+	keyToAction := make(map[string]string)
+	validKeys := getValidKeyNames()
+
+	for action, keys := range keybindings {
+		for _, keyStr := range keys {
+			// Validate key format
+			if err := validateKeyString(keyStr, validKeys); err != nil {
+				return fmt.Errorf("invalid key '%s' for action '%s': %v", keyStr, action, err)
+			}
+
+			// Check for conflicts
+			if existingAction, exists := keyToAction[keyStr]; exists {
+				return fmt.Errorf("key conflict: '%s' is bound to both '%s' and '%s'", keyStr, existingAction, action)
+			}
+			keyToAction[keyStr] = action
+		}
+	}
+
+	return nil
+}
+
+// validateKeyString validates a single key string format
+func validateKeyString(keyStr string, validKeys map[string]bool) error {
+	parts := strings.Split(keyStr, "+")
+	if len(parts) == 0 {
+		return fmt.Errorf("empty key string")
+	}
+
+	// Last part should be the actual key
+	keyName := parts[len(parts)-1]
+	if !validKeys[keyName] {
+		return fmt.Errorf("unknown key: %s", keyName)
+	}
+
+	// Check modifiers
+	for i := 0; i < len(parts)-1; i++ {
+		modifier := strings.ToLower(parts[i])
+		if modifier != "shift" && modifier != "ctrl" && modifier != "alt" {
+			return fmt.Errorf("unknown modifier: %s", parts[i])
+		}
+	}
+
+	return nil
+}
+
+// getValidKeyNames returns a set of valid key names
+func getValidKeyNames() map[string]bool {
+	// Add all keys from the key mapping
+	keyMapping := map[string]bool{
+		// Letters
+		"KeyA": true, "KeyB": true, "KeyC": true, "KeyD": true,
+		"KeyE": true, "KeyF": true, "KeyG": true, "KeyH": true,
+		"KeyI": true, "KeyJ": true, "KeyK": true, "KeyL": true,
+		"KeyM": true, "KeyN": true, "KeyO": true, "KeyP": true,
+		"KeyQ": true, "KeyR": true, "KeyS": true, "KeyT": true,
+		"KeyU": true, "KeyV": true, "KeyW": true, "KeyX": true,
+		"KeyY": true, "KeyZ": true,
+
+		// Numbers
+		"Key0": true, "Key1": true, "Key2": true, "Key3": true,
+		"Key4": true, "Key5": true, "Key6": true, "Key7": true,
+		"Key8": true, "Key9": true,
+
+		// Special keys
+		"Space": true, "Backspace": true, "Enter": true, "Escape": true,
+		"Tab": true, "Home": true, "End": true, "PageUp": true, "PageDown": true,
+		"ArrowUp": true, "ArrowDown": true, "ArrowLeft": true, "ArrowRight": true,
+
+		// Punctuation
+		"Comma": true, "Period": true, "Slash": true, "Semicolon": true,
+		"Quote": true, "Minus": true, "Equal": true,
+
+		// Numpad
+		"Numpad0": true, "Numpad1": true, "Numpad2": true, "Numpad3": true,
+		"Numpad4": true, "Numpad5": true, "Numpad6": true, "Numpad7": true,
+		"Numpad8": true, "Numpad9": true, "NumpadEnter": true,
+	}
+
+	return keyMapping
+}
+
+// ConfigLoadResult contains the result of loading configuration
+type ConfigLoadResult struct {
+	Config   Config
+	HasError bool
+	Warnings []string
+	Status   string // "OK", "Warning", "Error"
+}
+
 type Config struct {
-	WindowWidth          int     `json:"window_width"`
-	WindowHeight         int     `json:"window_height"`
-	AspectRatioThreshold float64 `json:"aspect_ratio_threshold"`
-	RightToLeft          bool    `json:"right_to_left"`
-	HelpFontSize         float64 `json:"help_font_size"`
-	SortMethod           int     `json:"sort_method"`
-	BookMode             bool    `json:"book_mode"`
-	Fullscreen           bool    `json:"fullscreen"`
-	CacheSize            int     `json:"cache_size"`
-	TransitionFrames     int     `json:"transition_frames"`
-	PreloadEnabled       bool    `json:"preload_enabled"`
-	PreloadCount         int     `json:"preload_count"`
+	WindowWidth          int                 `json:"window_width"`
+	WindowHeight         int                 `json:"window_height"`
+	AspectRatioThreshold float64             `json:"aspect_ratio_threshold"`
+	RightToLeft          bool                `json:"right_to_left"`
+	HelpFontSize         float64             `json:"help_font_size"`
+	SortMethod           int                 `json:"sort_method"`
+	BookMode             bool                `json:"book_mode"`
+	Fullscreen           bool                `json:"fullscreen"`
+	CacheSize            int                 `json:"cache_size"`
+	TransitionFrames     int                 `json:"transition_frames"`
+	PreloadEnabled       bool                `json:"preload_enabled"`
+	PreloadCount         int                 `json:"preload_count"`
+	Keybindings          map[string][]string `json:"keybindings"`
 }
 
 func getConfigPath() string {
@@ -45,49 +145,54 @@ func getConfigPath() string {
 	return filepath.Join(homeDir, ".nv.json")
 }
 
-func loadConfig() Config {
+func loadConfig() ConfigLoadResult {
 	return loadConfigFromPath(getConfigPath())
 }
 
-func loadConfigFromPath(configPath string) Config {
+func loadConfigCompat() Config {
+	result := loadConfigFromPath(getConfigPath())
+	return result.Config
+}
+
+func loadConfigFromPath(configPath string) ConfigLoadResult {
 	config := Config{
 		WindowWidth:          defaultWidth,
 		WindowHeight:         defaultHeight,
-		AspectRatioThreshold: 1.5,         // Default threshold for aspect ratio compatibility
-		RightToLeft:          false,       // Default to left-to-right reading (Western style)
-		HelpFontSize:         24.0,        // Default help font size
-		SortMethod:           SortNatural, // Default to natural sort
-		BookMode:             false,       // Default to single page mode
-		Fullscreen:           false,       // Default to windowed mode
-		CacheSize:            16,          // Default cache size for images
-		TransitionFrames:     0,           // Default: no forced transition frames
-		PreloadEnabled:       true,        // Default: enable preloading
-		PreloadCount:         4,           // Default: preload up to 4 images
+		AspectRatioThreshold: 1.5,                     // Default threshold for aspect ratio compatibility
+		RightToLeft:          false,                   // Default to left-to-right reading (Western style)
+		HelpFontSize:         24.0,                    // Default help font size
+		SortMethod:           SortNatural,             // Default to natural sort
+		BookMode:             false,                   // Default to single page mode
+		Fullscreen:           false,                   // Default to windowed mode
+		CacheSize:            16,                      // Default cache size for images
+		TransitionFrames:     0,                       // Default: no forced transition frames
+		PreloadEnabled:       true,                    // Default: enable preloading
+		PreloadCount:         4,                       // Default: preload up to 4 images
+		Keybindings:          getDefaultKeybindings(), // Default keybindings
+	}
+
+	result := ConfigLoadResult{
+		Config:   config,
+		HasError: false,
+		Warnings: []string{},
+		Status:   "OK",
 	}
 
 	data, err := os.ReadFile(configPath)
 	if err != nil {
 		// Config file not found is not an error - use defaults
-		return config
+		result.Status = "Default"
+		return result
 	}
 
 	if err := json.Unmarshal(data, &config); err != nil {
 		// Invalid config file - log warning and use defaults
 		log.Printf("Warning: Invalid config file %s, using defaults: %v", configPath, err)
-		return Config{
-			WindowWidth:          defaultWidth,
-			WindowHeight:         defaultHeight,
-			AspectRatioThreshold: 1.5,
-			RightToLeft:          false,
-			HelpFontSize:         24.0,
-			SortMethod:           SortNatural,
-			BookMode:             false,
-			Fullscreen:           false,
-			CacheSize:            16,
-			TransitionFrames:     0,
-			PreloadEnabled:       true,
-			PreloadCount:         4,
-		}
+		result.HasError = true
+		result.Status = "Error"
+		result.Warnings = append(result.Warnings, fmt.Sprintf("Invalid config file: %v", err))
+		// Keep default config values
+		return result
 	}
 
 	// Validate minimum size
@@ -134,7 +239,30 @@ func loadConfigFromPath(configPath string) Config {
 		config.PreloadCount = 16
 	}
 
-	return config
+	// Validate keybindings - ensure defaults exist for missing actions
+	if config.Keybindings == nil {
+		config.Keybindings = getDefaultKeybindings()
+	} else {
+		// Fill in missing keybindings with defaults
+		defaults := getDefaultKeybindings()
+		for action, defaultKeys := range defaults {
+			if _, exists := config.Keybindings[action]; !exists {
+				config.Keybindings[action] = defaultKeys
+			}
+		}
+
+		// Validate keybindings and resolve conflicts
+		if err := validateKeybindings(config.Keybindings); err != nil {
+			log.Printf("Warning: Invalid keybindings detected, using defaults: %v", err)
+			config.Keybindings = getDefaultKeybindings()
+			result.Status = "Warning"
+			result.Warnings = append(result.Warnings, fmt.Sprintf("Keybinding errors: %v", err))
+		}
+	}
+
+	// Update the result with the final config
+	result.Config = config
+	return result
 }
 
 // getSortMethodName returns the human-readable name of a sort method

@@ -39,6 +39,8 @@ type RenderState interface {
 	GetCurrentPageNumber() string
 	GetTotalPagesCount() int
 	GetHelpFontSize() float64
+	GetConfigStatus() ConfigLoadResult
+	GetKeybindings() map[string][]string
 }
 
 // RenderStateSnapshot captures a snapshot of render state for comparison
