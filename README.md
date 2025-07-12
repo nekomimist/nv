@@ -41,7 +41,7 @@ A simple image viewer built with Go and Ebiten, featuring seamless archive suppo
 ### Display Modes
 - `B` - Toggle book mode (side-by-side view)
 - `Shift+B` - Toggle reading direction (LTR ↔ RTL)
-- `Z` - Toggle fullscreen
+- `Enter` - Toggle fullscreen
 
 ### Other
 - `?` - Show/hide help overlay

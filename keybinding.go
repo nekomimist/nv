@@ -7,37 +7,6 @@ import (
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
 )
 
-// ActionDefinition defines an action with its default keybindings, mouse bindings, and description
-type ActionDefinition struct {
-	Name         string
-	Keys         []string
-	MouseActions []string
-	Description  string
-}
-
-// actionDefinitions contains all action definitions with default keybindings, mouse bindings, and descriptions
-var actionDefinitions = []ActionDefinition{
-	{"exit", []string{"Escape", "KeyQ"}, []string{}, "Quit application"},
-	{"help", []string{"Shift+Slash"}, []string{"Alt+RightClick"}, "Show/hide help"},
-	{"info", []string{"KeyI"}, []string{}, "Show/hide info display"},
-	{"next", []string{"Space", "KeyN"}, []string{"LeftClick", "WheelDown"}, "Next image (or 2 images in book mode)"},
-	{"previous", []string{"Backspace", "KeyP"}, []string{"RightClick", "WheelUp"}, "Previous image (or 2 images in book mode)"},
-	{"next_single", []string{"Shift+Space", "Shift+KeyN"}, []string{"Shift+LeftClick", "Shift+WheelDown"}, "Single page forward (fine adjustment)"},
-	{"previous_single", []string{"Shift+Backspace", "Shift+KeyP"}, []string{"Shift+RightClick", "Shift+WheelUp"}, "Single page backward (fine adjustment)"},
-	{"toggle_book_mode", []string{"KeyB"}, []string{"MiddleClick"}, "Toggle book mode (dual image view)"},
-	{"toggle_reading_direction", []string{"Shift+KeyB"}, []string{"Ctrl+MiddleClick"}, "Toggle reading direction (LTR ↔ RTL)"},
-	{"fullscreen", []string{"Enter"}, []string{"DoubleLeftClick"}, "Toggle fullscreen"},
-	{"page_input", []string{"KeyG"}, []string{"Ctrl+LeftClick"}, "Go to page (enter page number)"},
-	{"jump_first", []string{"Home", "Shift+Comma"}, []string{}, "Jump to first page"},
-	{"jump_last", []string{"End", "Shift+Period"}, []string{}, "Jump to last page"},
-	{"rotate_left", []string{"KeyL"}, []string{}, "Rotate left 90 degrees"},
-	{"rotate_right", []string{"KeyR"}, []string{}, "Rotate right 90 degrees"},
-	{"flip_horizontal", []string{"KeyH"}, []string{}, "Flip horizontally"},
-	{"flip_vertical", []string{"KeyV"}, []string{}, "Flip vertically"},
-	{"cycle_sort", []string{"Shift+KeyS"}, []string{"Alt+MiddleClick"}, "Cycle sort method (Natural/Simple/Entry)"},
-	{"expand_directory", []string{"KeyS"}, []string{}, "Scan directory images (single file mode)"},
-}
-
 // KeybindingManager handles dynamic keybinding processing
 type KeybindingManager struct {
 	keybindings map[string][]string
@@ -215,31 +184,4 @@ func (km *KeybindingManager) GetKeybindings() map[string][]string {
 // UpdateKeybindings updates the keybindings map
 func (km *KeybindingManager) UpdateKeybindings(keybindings map[string][]string) {
 	km.keybindings = keybindings
-}
-
-// GetActionDescriptions returns a map of action names to their descriptions
-func GetActionDescriptions() map[string]string {
-	descriptions := make(map[string]string)
-	for _, action := range actionDefinitions {
-		descriptions[action.Name] = action.Description
-	}
-	return descriptions
-}
-
-// GetDefaultKeybindings returns a map of action names to their default keybindings
-func GetDefaultKeybindings() map[string][]string {
-	keybindings := make(map[string][]string)
-	for _, action := range actionDefinitions {
-		keybindings[action.Name] = action.Keys
-	}
-	return keybindings
-}
-
-// GetDefaultMousebindingsFromActions returns a map of action names to their default mouse bindings
-func GetDefaultMousebindingsFromActions() map[string][]string {
-	mousebindings := make(map[string][]string)
-	for _, action := range actionDefinitions {
-		mousebindings[action.Name] = action.MouseActions
-	}
-	return mousebindings
 }

@@ -8,7 +8,7 @@ This is an image viewer application built using Go and the Ebiten game engine. T
 
 ## File Structure
 
-The application is organized into seven main modules for maintainability:
+The application is organized into the following main modules for maintainability:
 
 ### `main.go`
 - **Game Loop**: Implements Ebiten's game interface (`Update()`, `Draw()`, `Layout()`)
@@ -17,10 +17,10 @@ The application is organized into seven main modules for maintainability:
 - **Game State Management**: Handles fullscreen, overlay messages, and single file expansion
 
 ### `input.go`
-- **InputHandler**: Centralized keyboard input processing
-- **Key Mapping**: Maps keyboard events to game actions
-- **Page Input Mode**: Handles direct page number input (G key)
-- **Mode Toggle Keys**: Book mode, reading direction, and sort method switching
+- **InputHandler**: High-level input coordination and delegation
+- **Input Processing**: Orchestrates keyboard and mouse input handling
+- **Page Input Mode**: Special handling for dynamic digit input during page jumps
+- **Input Flow Control**: Manages flow between different input modes and processors
 
 ### `renderer.go`
 - **Rendering Engine**: All drawing operations and visual output
@@ -50,16 +50,27 @@ The application is organized into seven main modules for maintainability:
 - **Entry Order**: Preserves original file system or archive order
 - **Strategy Pattern**: Pluggable sorting algorithms for flexible file ordering
 
+### `actions.go`
+- **Action Definitions**: Centralized action definitions with keybindings, mouse bindings, and descriptions
+- **Action Executor**: Single source of truth for all action execution logic
+- **Action Registry**: Complete catalog of available actions and their default bindings
+- **Unified Action System**: Eliminates duplication between keyboard and mouse handling
+
 ### `keybinding.go`
-- **KeybindingManager**: Centralized keybinding processing and validation
-- **Action Definitions**: Unified action definitions with default keybindings and descriptions
+- **KeybindingManager**: Keyboard input processing and validation
 - **Dynamic Keybindings**: Runtime keybinding configuration and conflict detection
 - **Key Combination Parsing**: Support for modifier keys (Shift, Ctrl, Alt)
-- **Action Execution**: Maps keyboard input to game actions through interface abstraction
+- **Keyboard Action Mapping**: Maps keyboard events to actions through the action system
+
+### `mousebinding.go`
+- **MousebindingManager**: Mouse input processing and validation
+- **Mouse Action Support**: Click, double-click, wheel, and combination handling
+- **Mouse Settings**: Configurable sensitivity, timing, and behavior settings
+- **Mouse Action Mapping**: Maps mouse events to actions through the action system
 
 ## Key Components
 
-- **Modular Architecture**: Clear separation of concerns across seven files
+- **Modular Architecture**: Clear separation of concerns across multiple focused modules
 - **Interface-Based Design**: ImageManager enables dependency injection and testing
 - **Archive Integration**: Seamless ZIP/RAR support with automatic image detection
 - **Performance Optimization**: Intelligent caching and preloading strategies
@@ -208,6 +219,7 @@ The application includes embedded window icons for proper display across platfor
 - **Aspect Ratio Intelligence**: Automatic fallback to single page for mismatched ratios
 - **Help System**: Interactive H key overlay with column-aligned controls display
 - **Configuration Persistence**: JSON-based settings with validation including font preferences and book mode state
+- **Unified Action System**: Centralized action definitions support both keyboard and mouse input through the same interface
 
 ### Performance Optimizations
 - **Lazy Loading**: Images loaded on-demand with intelligent preloading

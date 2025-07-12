@@ -20,9 +20,6 @@ import (
 // Global debug mode flag
 var debugMode bool
 
-// Global action executor for centralized action processing
-var globalActionExecutor *ActionExecutor
-
 //go:embed icon/icon_16.png
 var icon16 []byte
 
@@ -732,9 +729,6 @@ func main() {
 	flag.Parse()
 
 	debugMode = *debug
-
-	// Initialize global action executor
-	globalActionExecutor = NewActionExecutor()
 
 	args := flag.Args()
 

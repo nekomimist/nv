@@ -41,12 +41,12 @@ func (h *InputHandler) HandleInput() bool {
 
 // handleKeyboardInput processes all keyboard input for the current frame
 func (h *InputHandler) handleKeyboardInput() bool {
-	// Page input mode has special key handling
+	// Page input mode requires special handling for dynamic digit input
 	if h.inputState.IsInPageInputMode() {
 		return h.handlePageInputModeKeys()
 	}
 
-	// Normal input processing - unified with actionDefinitions
+	// Normal input processing uses the action system
 	for _, actionDef := range actionDefinitions {
 		if h.keybindingManager.ExecuteAction(actionDef.Name, h.inputActions, h.inputState) {
 			return true
@@ -56,16 +56,9 @@ func (h *InputHandler) handleKeyboardInput() bool {
 	return false
 }
 
-func (h *InputHandler) handlePageInputMode() bool {
-	// Check for G key to enter page input mode
-	if !h.inputState.IsInPageInputMode() {
-		return h.keybindingManager.ExecuteAction("page_input", h.inputActions, h.inputState)
-	}
-
-	// If in page input mode, delegate to specialized handler
-	return h.handlePageInputModeKeys()
-}
-
+// handlePageInputModeKeys handles keyboard input when in page input mode
+// This bypasses the normal action system because page input needs to accept
+// any digit key dynamically, which doesn't fit the predefined action model
 func (h *InputHandler) handlePageInputModeKeys() bool {
 	// Handle page input mode special keys
 	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {

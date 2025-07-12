@@ -262,11 +262,6 @@ func (mm *MousebindingManager) GetSettings() MouseSettings {
 	return mm.settings
 }
 
-// GetDefaultMousebindings returns a map of action names to their default mouse bindings
-func GetDefaultMousebindings() map[string][]string {
-	return GetDefaultMousebindingsFromActions()
-}
-
 // GetDefaultMouseSettings returns the default mouse settings
 func GetDefaultMouseSettings() MouseSettings {
 	return MouseSettings{
