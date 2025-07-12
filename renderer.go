@@ -115,17 +115,17 @@ func (r *Renderer) drawSingleImage(screen *ebiten.Image) {
 		// Manual zoom mode
 		scale = r.renderState.GetZoomLevel()
 		sw, sh := float64(iw)*scale, float64(ih)*scale
-		
+
 		// Apply pan offset with boundary clamping
 		panX := r.renderState.GetPanOffsetX()
 		panY := r.renderState.GetPanOffsetY()
-		
+
 		// Calculate boundaries
 		minX := float64(w) - sw
 		maxX := 0.0
 		minY := float64(h) - sh
 		maxY := 0.0
-		
+
 		// Clamp pan offsets to keep image on screen
 		if sw <= float64(w) {
 			// Image is smaller than screen width, center horizontally
@@ -134,7 +134,7 @@ func (r *Renderer) drawSingleImage(screen *ebiten.Image) {
 			// Image is larger than screen, apply pan with clamping
 			offsetX = math.Max(minX, math.Min(maxX, float64(w)/2-sw/2+panX))
 		}
-		
+
 		if sh <= float64(h) {
 			// Image is smaller than screen height, center vertically
 			offsetY = float64(h)/2 - sh/2

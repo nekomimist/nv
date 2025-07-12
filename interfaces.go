@@ -153,6 +153,7 @@ type InputActions interface {
 	PanDown()
 	PanLeft()
 	PanRight()
+	PanByDelta(deltaX, deltaY float64) // Mouse drag pan
 
 	// Messages
 	ShowOverlayMessage(message string)
@@ -166,4 +167,5 @@ type InputActions interface {
 type InputState interface {
 	IsInPageInputMode() bool
 	GetPageInputBuffer() string
+	GetZoomMode() ZoomMode // For drag permission checking
 }

@@ -150,6 +150,14 @@ This codebase has been extensively refactored for maintainability:
 - **Shift+B**: Toggle reading direction (left-to-right ↔ right-to-left)
 - **Z**: Toggle fullscreen
 
+### Zoom and Pan
+- **=, Shift+=**: Zoom in (25%-400% range)
+- **-**: Zoom out (25%-400% range)
+- **0**: Reset to 100% zoom (actual size)
+- **F**: Toggle between fit-to-window and manual zoom modes
+- **Arrow Keys**: Pan image when in manual zoom mode
+- **Mouse Drag**: Pan image by dragging with left mouse button (manual zoom mode only)
+
 ### Other
 - **H**: Show/hide help overlay with all controls
 - **Escape/Q**: Quit application
@@ -251,6 +259,20 @@ The application saves settings to `~/.nv.json`:
     "previous": ["Backspace", "KeyP"],
     "fullscreen": ["Enter"],
     "page_input": ["KeyG"]
+  },
+  "mousebindings": {
+    "next": ["LeftClick", "WheelDown"],
+    "previous": ["RightClick", "WheelUp"],
+    "fullscreen": ["DoubleLeftClick"]
+  },
+  "mouse_settings": {
+    "wheel_sensitivity": 1.0,
+    "double_click_time": 300,
+    "drag_threshold": 5,
+    "enable_mouse": true,
+    "wheel_inverted": false,
+    "enable_drag_pan": true,
+    "drag_sensitivity": 1.0
   }
 }
 ```
@@ -265,6 +287,15 @@ The application saves settings to `~/.nv.json`:
 - **preload_count**: Number of images to preload in the navigation direction. Higher values use more memory but provide smoother navigation. Range: 1-16. Default: 4
 - **initial_zoom_mode**: Initial zoom mode when opening images. `"fit"` = fit to window (default), `"actual_size"` = 100% zoom level. Images are reset to this mode when changing images. Default: "fit"
 - **keybindings**: Custom keybinding definitions for actions. Each action can have multiple keys assigned. Uses format like `"KeyA"`, `"Space"`, `"Shift+KeyB"`. If not specified, defaults are used. Invalid configurations fall back to defaults with warnings.
+- **mousebindings**: Custom mouse binding definitions for actions. Each action can have multiple mouse actions assigned. Uses format like `"LeftClick"`, `"WheelUp"`, `"Ctrl+MiddleClick"`. If not specified, defaults are used.
+- **mouse_settings**: Mouse behavior configuration:
+  - `wheel_sensitivity`: Mouse wheel scroll sensitivity (default: 1.0)
+  - `double_click_time`: Double-click detection time in milliseconds (default: 300)
+  - `drag_threshold`: Minimum pixel movement to start drag operation (default: 5)
+  - `enable_mouse`: Enable/disable all mouse input (default: true)
+  - `wheel_inverted`: Invert mouse wheel direction (default: false)
+  - `enable_drag_pan`: Enable drag-to-pan functionality (default: true)
+  - `drag_sensitivity`: Drag movement sensitivity multiplier (default: 1.0)
 
 ## File Sorting Strategy
 

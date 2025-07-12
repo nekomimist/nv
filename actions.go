@@ -29,13 +29,13 @@ var actionDefinitions = []ActionDefinition{
 	{"flip_vertical", []string{"KeyV"}, []string{}, "Flip vertically"},
 	{"cycle_sort", []string{"Shift+KeyS"}, []string{"Alt+MiddleClick"}, "Cycle sort method (Natural/Simple/Entry)"},
 	{"expand_directory", []string{"KeyS"}, []string{}, "Scan directory images (single file mode)"},
-	
+
 	// Zoom and pan actions
 	{"zoom_in", []string{"Equal", "Shift+Equal"}, []string{"Ctrl+WheelUp"}, "Zoom in"},
 	{"zoom_out", []string{"Minus"}, []string{"Ctrl+WheelDown"}, "Zoom out"},
 	{"zoom_reset", []string{"Key0"}, []string{"Shift+MiddleClick"}, "Reset to 100% zoom"},
 	{"zoom_fit", []string{"KeyF"}, []string{"Alt+LeftClick"}, "Toggle fit to window mode"},
-	
+
 	// Pan actions (for manual zoom mode)
 	{"pan_up", []string{"ArrowUp"}, []string{}, "Pan up"},
 	{"pan_down", []string{"ArrowDown"}, []string{}, "Pan down"},
@@ -102,7 +102,7 @@ func (ae *ActionExecutor) ExecuteAction(action string, inputActions InputActions
 		inputActions.CycleSortMethod()
 	case "expand_directory":
 		inputActions.ExpandToDirectory()
-	
+
 	// Zoom and pan actions
 	case "zoom_in":
 		inputActions.ZoomIn()
@@ -120,7 +120,7 @@ func (ae *ActionExecutor) ExecuteAction(action string, inputActions InputActions
 		inputActions.PanLeft()
 	case "pan_right":
 		inputActions.PanRight()
-	
+
 	default:
 		return false
 	}

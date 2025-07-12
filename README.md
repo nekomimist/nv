@@ -7,9 +7,11 @@ A simple image viewer built with Go and Ebiten, featuring seamless archive suppo
 - Multiple Format Support: PNG, JPEG, WebP, BMP, GIF
 - Archive Integration: Direct ZIP, RAR, and 7Z file viewing
 - Book Mode: Side-by-side image display with configurable reading direction
+- Manual Zoom & Pan: Zoom in/out with mouse wheel or keyboard, pan with mouse drag or arrow keys
 - Fullscreen Support: Toggle between windowed and fullscreen modes
 - Page Jump: Direct navigation to specific pages
-- Customizable Keybindings: Configure all keyboard shortcuts via JSON settings
+- Mouse Support: Full mouse navigation with configurable bindings and drag-to-pan
+- Customizable Controls: Configure keyboard shortcuts and mouse bindings via JSON settings
 
 ## Usage
 
@@ -43,8 +45,22 @@ A simple image viewer built with Go and Ebiten, featuring seamless archive suppo
 - `Shift+B` - Toggle reading direction (LTR ↔ RTL)
 - `Enter` - Toggle fullscreen
 
+### Zoom and Pan
+- `=` / `Shift+=` - Zoom in (25%-400%)
+- `-` - Zoom out (25%-400%)
+- `0` - Reset to 100% zoom
+- `F` - Toggle fit-to-window / manual zoom modes
+- `Arrow Keys` - Pan image (manual zoom mode)
+
+### Mouse Controls
+- `Left Click` - Next image (or drag to pan in manual zoom mode)
+- `Right Click` - Previous image
+- `Double Left Click` - Toggle fullscreen
+- `Mouse Wheel` - Navigate images (or zoom with Ctrl modifier)
+- `Mouse Drag` - Pan image (manual zoom mode only)
+
 ### Other
-- `?` - Show/hide help overlay
+- `H` - Show/hide help overlay
 - `Escape` / `Q` - Quit
 
 ## Book Mode
@@ -89,6 +105,7 @@ Settings are automatically saved to `~/.nv.json`:
   "transition_frames": 0,
   "preload_enabled": true,
   "preload_count": 4,
+  "initial_zoom_mode": "fit",
   "keybindings": {
     "exit": ["Escape", "KeyQ"],
     "help": ["Shift+Slash"],
@@ -96,6 +113,16 @@ Settings are automatically saved to `~/.nv.json`:
     "previous": ["Backspace", "KeyP"],
     "fullscreen": ["Enter"],
     "page_input": ["KeyG"]
+  },
+  "mousebindings": {
+    "next": ["LeftClick", "WheelDown"],
+    "previous": ["RightClick", "WheelUp"],
+    "fullscreen": ["DoubleLeftClick"]
+  },
+  "mouse_settings": {
+    "enable_drag_pan": true,
+    "drag_sensitivity": 1.0,
+    "drag_threshold": 5
   }
 }
 ```
@@ -103,10 +130,13 @@ Settings are automatically saved to `~/.nv.json`:
 - `aspect_ratio_threshold` - Controls book mode compatibility (default: 1.5)
 - `right_to_left` - Reading direction for book mode (default: false)
 - `help_font_size` - Font size for help overlay (default: 24.0)
+- `initial_zoom_mode` - Initial zoom mode: `"fit"` (default) or `"actual_size"`
 - `transition_frames` - Force redraw frames after fullscreen transitions (default: 0)
 - `preload_enabled` - Enable automatic image preloading (default: true)
 - `preload_count` - Number of images to preload ahead (1-16, default: 4)
-- `keybindings` - Custom keyboard shortcuts for actions. Each action can have multiple keys. Use format like `"KeyA"`, `"Space"`, `"Shift+KeyB"`. Falls back to defaults if invalid.
+- `keybindings` - Custom keyboard shortcuts for actions. Use format like `"KeyA"`, `"Space"`, `"Shift+KeyB"`
+- `mousebindings` - Custom mouse bindings for actions. Use format like `"LeftClick"`, `"WheelUp"`, `"Ctrl+MiddleClick"`
+- `mouse_settings` - Mouse behavior: drag-to-pan settings, sensitivity, and thresholds
 
 ## License
 

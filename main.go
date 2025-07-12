@@ -42,8 +42,8 @@ const (
 type ZoomMode int
 
 const (
-	ZoomModeFit ZoomMode = iota // Automatic fit to window (default)
-	ZoomModeManual              // Manual zoom level
+	ZoomModeFit    ZoomMode = iota // Automatic fit to window (default)
+	ZoomModeManual                 // Manual zoom level
 )
 
 // ZoomState manages zoom and pan state
@@ -274,6 +274,13 @@ func (g *Game) panRight() {
 	}
 }
 
+func (g *Game) panByDelta(deltaX, deltaY float64) {
+	if g.zoomState.Mode == ZoomModeManual {
+		g.zoomState.PanOffsetX += deltaX
+		g.zoomState.PanOffsetY += deltaY
+	}
+}
+
 func (g *Game) shouldUseBookMode(leftImg, rightImg *ebiten.Image) bool {
 	if leftImg == nil || rightImg == nil {
 		return false // Can't do book mode with only one image
@@ -400,7 +407,7 @@ func (g *Game) jumpToPage(pageNum int) {
 
 	// Start preload after jump (both directions)
 	g.imageManager.StartPreload(g.idx, NavigationJump)
-	
+
 	// Reset zoom state when image changes
 	g.zoomState.Reset()
 }
@@ -550,6 +557,11 @@ func (g *Game) GetPageInputBuffer() string {
 	return g.pageInputBuffer
 }
 
+// GetZoomMode for InputState interface (drag permission checking)
+func (g *Game) GetZoomMode() ZoomMode {
+	return g.zoomState.Mode
+}
+
 func (g *Game) GetOverlayMessage() string {
 	return g.overlayMessage
 }
@@ -559,10 +571,6 @@ func (g *Game) GetOverlayMessageTime() time.Time {
 }
 
 // Zoom and pan state methods for RenderState interface
-func (g *Game) GetZoomMode() ZoomMode {
-	return g.zoomState.Mode
-}
-
 func (g *Game) GetZoomLevel() float64 {
 	return g.zoomState.Level
 }
@@ -723,6 +731,10 @@ func (g *Game) PanRight() {
 	g.panRight()
 }
 
+func (g *Game) PanByDelta(deltaX, deltaY float64) {
+	g.panByDelta(deltaX, deltaY)
+}
+
 func (g *Game) GetCurrentIndex() int {
 	return g.idx
 }
@@ -784,7 +796,7 @@ func (g *Game) navigateNext() {
 	}
 	// Single page mode or Shift+key
 	g.idx++
-	
+
 	// Reset zoom state when image changes
 	g.zoomState.Reset()
 }
@@ -830,7 +842,7 @@ func (g *Game) navigatePrevious() {
 	}
 	// Single page mode or Shift+key
 	g.idx--
-	
+
 	// Reset zoom state when image changes
 	g.zoomState.Reset()
 }
