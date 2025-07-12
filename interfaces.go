@@ -35,6 +35,12 @@ type RenderState interface {
 	GetOverlayMessage() string
 	GetOverlayMessageTime() time.Time
 
+	// Zoom and pan state
+	GetZoomMode() ZoomMode
+	GetZoomLevel() float64
+	GetPanOffsetX() float64
+	GetPanOffsetY() float64
+
 	// Display data
 	GetCurrentPageNumber() string
 	GetTotalPagesCount() int
@@ -137,6 +143,16 @@ type InputActions interface {
 	RotateRight()
 	FlipHorizontal()
 	FlipVertical()
+
+	// Zoom and pan actions
+	ZoomIn()
+	ZoomOut()
+	ZoomReset()
+	ZoomFit()
+	PanUp()
+	PanDown()
+	PanLeft()
+	PanRight()
 
 	// Messages
 	ShowOverlayMessage(message string)

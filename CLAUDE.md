@@ -243,6 +243,7 @@ The application saves settings to `~/.nv.json`:
   "transition_frames": 0,
   "preload_enabled": true,
   "preload_count": 4,
+  "initial_zoom_mode": "fit",
   "keybindings": {
     "exit": ["Escape", "KeyQ"],
     "help": ["Shift+Slash"],
@@ -262,6 +263,7 @@ The application saves settings to `~/.nv.json`:
 - **transition_frames**: Number of frames to force redraw after fullscreen transitions. Helps fix rendering issues on some systems (e.g., WSL/WSLg). `0` = disabled, `1-60` = number of frames. Default: 0
 - **preload_enabled**: Whether to enable automatic image preloading for smoother navigation. `true` = enabled, `false` = disabled. Default: true
 - **preload_count**: Number of images to preload in the navigation direction. Higher values use more memory but provide smoother navigation. Range: 1-16. Default: 4
+- **initial_zoom_mode**: Initial zoom mode when opening images. `"fit"` = fit to window (default), `"actual_size"` = 100% zoom level. Images are reset to this mode when changing images. Default: "fit"
 - **keybindings**: Custom keybinding definitions for actions. Each action can have multiple keys assigned. Uses format like `"KeyA"`, `"Space"`, `"Shift+KeyB"`. If not specified, defaults are used. Invalid configurations fall back to defaults with warnings.
 
 ## File Sorting Strategy

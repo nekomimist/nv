@@ -29,6 +29,18 @@ var actionDefinitions = []ActionDefinition{
 	{"flip_vertical", []string{"KeyV"}, []string{}, "Flip vertically"},
 	{"cycle_sort", []string{"Shift+KeyS"}, []string{"Alt+MiddleClick"}, "Cycle sort method (Natural/Simple/Entry)"},
 	{"expand_directory", []string{"KeyS"}, []string{}, "Scan directory images (single file mode)"},
+	
+	// Zoom and pan actions
+	{"zoom_in", []string{"Equal", "Shift+Equal"}, []string{"Ctrl+WheelUp"}, "Zoom in"},
+	{"zoom_out", []string{"Minus"}, []string{"Ctrl+WheelDown"}, "Zoom out"},
+	{"zoom_reset", []string{"Key0"}, []string{"Shift+MiddleClick"}, "Reset to 100% zoom"},
+	{"zoom_fit", []string{"KeyF"}, []string{"Alt+LeftClick"}, "Toggle fit to window mode"},
+	
+	// Pan actions (for manual zoom mode)
+	{"pan_up", []string{"ArrowUp"}, []string{}, "Pan up"},
+	{"pan_down", []string{"ArrowDown"}, []string{}, "Pan down"},
+	{"pan_left", []string{"ArrowLeft"}, []string{}, "Pan left"},
+	{"pan_right", []string{"ArrowRight"}, []string{}, "Pan right"},
 }
 
 // ActionExecutor provides centralized action execution logic
@@ -90,6 +102,25 @@ func (ae *ActionExecutor) ExecuteAction(action string, inputActions InputActions
 		inputActions.CycleSortMethod()
 	case "expand_directory":
 		inputActions.ExpandToDirectory()
+	
+	// Zoom and pan actions
+	case "zoom_in":
+		inputActions.ZoomIn()
+	case "zoom_out":
+		inputActions.ZoomOut()
+	case "zoom_reset":
+		inputActions.ZoomReset()
+	case "zoom_fit":
+		inputActions.ZoomFit()
+	case "pan_up":
+		inputActions.PanUp()
+	case "pan_down":
+		inputActions.PanDown()
+	case "pan_left":
+		inputActions.PanLeft()
+	case "pan_right":
+		inputActions.PanRight()
+	
 	default:
 		return false
 	}

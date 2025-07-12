@@ -38,6 +38,40 @@ const (
 	maxAspectRatio = 2.5 // Extremely wide images
 )
 
+// ZoomMode represents the current zoom mode
+type ZoomMode int
+
+const (
+	ZoomModeFit ZoomMode = iota // Automatic fit to window (default)
+	ZoomModeManual              // Manual zoom level
+)
+
+// ZoomState manages zoom and pan state
+type ZoomState struct {
+	Mode       ZoomMode // Current zoom mode
+	Level      float64  // Zoom level (1.0 = 100%, 2.0 = 200%, etc.)
+	PanOffsetX float64  // Pan offset X coordinate
+	PanOffsetY float64  // Pan offset Y coordinate
+}
+
+// NewZoomState creates a new zoom state with default values
+func NewZoomState() *ZoomState {
+	return &ZoomState{
+		Mode:       ZoomModeFit,
+		Level:      1.0,
+		PanOffsetX: 0,
+		PanOffsetY: 0,
+	}
+}
+
+// Reset resets zoom state to fit mode (called when switching to fit or changing images)
+func (z *ZoomState) Reset() {
+	z.Mode = ZoomModeFit
+	z.Level = 1.0
+	z.PanOffsetX = 0
+	z.PanOffsetY = 0
+}
+
 func isArchiveExt(path string) bool {
 	ext := strings.ToLower(filepath.Ext(path))
 	switch ext {
@@ -70,6 +104,9 @@ type Game struct {
 	tempSingleMode      bool // Temporary single page mode (return to book mode after navigation)
 	showHelp            bool // Help overlay display
 	showInfo            bool // Info display (page numbers, metadata, etc.)
+
+	// Zoom and pan state
+	zoomState *ZoomState
 
 	// Page input mode state
 	pageInputMode   bool
@@ -150,6 +187,90 @@ func (g *Game) cycleSortMethod() {
 			// Reset to first image
 			g.idx = 0
 		}
+	}
+}
+
+// Zoom and pan implementation methods
+func (g *Game) zoomIn() {
+	if g.zoomState.Mode == ZoomModeFit {
+		// Switch to manual mode and start at 100%
+		g.zoomState.Mode = ZoomModeManual
+		g.zoomState.Level = 1.0
+		g.zoomState.PanOffsetX = 0
+		g.zoomState.PanOffsetY = 0
+		g.showOverlayMessage("100%")
+	} else {
+		// Increase zoom level
+		newLevel := g.zoomState.Level * 1.25
+		if newLevel > 4.0 { // Max zoom 400%
+			// Clamp to exactly 400%
+			g.zoomState.Level = 4.0
+			g.showOverlayMessage("Maximum zoom 400%")
+		} else {
+			g.zoomState.Level = newLevel
+			g.showOverlayMessage(fmt.Sprintf("%.0f%%", g.zoomState.Level*100))
+		}
+	}
+}
+
+func (g *Game) zoomOut() {
+	if g.zoomState.Mode == ZoomModeManual {
+		newLevel := g.zoomState.Level / 1.25
+		if newLevel < 0.25 { // Min zoom 25%
+			// Clamp to exactly 25%
+			g.zoomState.Level = 0.25
+			g.showOverlayMessage("Minimum zoom 25%")
+		} else {
+			g.zoomState.Level = newLevel
+			g.showOverlayMessage(fmt.Sprintf("%.0f%%", g.zoomState.Level*100))
+		}
+	}
+}
+
+func (g *Game) zoomReset() {
+	g.zoomState.Mode = ZoomModeManual
+	g.zoomState.Level = 1.0
+	g.zoomState.PanOffsetX = 0
+	g.zoomState.PanOffsetY = 0
+	g.showOverlayMessage("100%")
+}
+
+func (g *Game) zoomFit() {
+	if g.zoomState.Mode == ZoomModeFit {
+		// Currently in fit mode, switch to 100%
+		g.zoomState.Mode = ZoomModeManual
+		g.zoomState.Level = 1.0
+		g.zoomState.PanOffsetX = 0
+		g.zoomState.PanOffsetY = 0
+		g.showOverlayMessage("100%")
+	} else {
+		// Switch to fit mode
+		g.zoomState.Reset()
+		g.showOverlayMessage("Fit to Window")
+	}
+}
+
+func (g *Game) panUp() {
+	if g.zoomState.Mode == ZoomModeManual {
+		g.zoomState.PanOffsetY -= 50 // Pan step size
+	}
+}
+
+func (g *Game) panDown() {
+	if g.zoomState.Mode == ZoomModeManual {
+		g.zoomState.PanOffsetY += 50
+	}
+}
+
+func (g *Game) panLeft() {
+	if g.zoomState.Mode == ZoomModeManual {
+		g.zoomState.PanOffsetX -= 50
+	}
+}
+
+func (g *Game) panRight() {
+	if g.zoomState.Mode == ZoomModeManual {
+		g.zoomState.PanOffsetX += 50
 	}
 }
 
@@ -279,6 +400,9 @@ func (g *Game) jumpToPage(pageNum int) {
 
 	// Start preload after jump (both directions)
 	g.imageManager.StartPreload(g.idx, NavigationJump)
+	
+	// Reset zoom state when image changes
+	g.zoomState.Reset()
 }
 
 func (g *Game) expandToDirectoryAndJump() {
@@ -434,6 +558,23 @@ func (g *Game) GetOverlayMessageTime() time.Time {
 	return g.overlayMessageTime
 }
 
+// Zoom and pan state methods for RenderState interface
+func (g *Game) GetZoomMode() ZoomMode {
+	return g.zoomState.Mode
+}
+
+func (g *Game) GetZoomLevel() float64 {
+	return g.zoomState.Level
+}
+
+func (g *Game) GetPanOffsetX() float64 {
+	return g.zoomState.PanOffsetX
+}
+
+func (g *Game) GetPanOffsetY() float64 {
+	return g.zoomState.PanOffsetY
+}
+
 func (g *Game) GetCurrentPageNumber() string {
 	return g.getCurrentPageNumber()
 }
@@ -549,6 +690,39 @@ func (g *Game) ShowOverlayMessage(message string) {
 	g.showOverlayMessage(message)
 }
 
+// Zoom and pan actions for InputActions interface
+func (g *Game) ZoomIn() {
+	g.zoomIn()
+}
+
+func (g *Game) ZoomOut() {
+	g.zoomOut()
+}
+
+func (g *Game) ZoomReset() {
+	g.zoomReset()
+}
+
+func (g *Game) ZoomFit() {
+	g.zoomFit()
+}
+
+func (g *Game) PanUp() {
+	g.panUp()
+}
+
+func (g *Game) PanDown() {
+	g.panDown()
+}
+
+func (g *Game) PanLeft() {
+	g.panLeft()
+}
+
+func (g *Game) PanRight() {
+	g.panRight()
+}
+
 func (g *Game) GetCurrentIndex() int {
 	return g.idx
 }
@@ -583,6 +757,7 @@ func (g *Game) navigateNext() {
 		g.idx++
 		g.tempSingleMode = false
 		g.bookMode = true
+		g.zoomState.Reset()
 		return
 	}
 
@@ -602,12 +777,16 @@ func (g *Game) navigateNext() {
 				// Normal 2-page movement
 				g.idx += 2
 			}
+			g.zoomState.Reset()
 			return
 		}
 		// shouldUseBookMode = false means single page movement
 	}
 	// Single page mode or Shift+key
 	g.idx++
+	
+	// Reset zoom state when image changes
+	g.zoomState.Reset()
 }
 
 func (g *Game) navigatePrevious() {
@@ -629,6 +808,7 @@ func (g *Game) navigatePrevious() {
 			g.tempSingleMode = false
 			g.bookMode = true
 		}
+		g.zoomState.Reset()
 		return
 	}
 
@@ -643,12 +823,16 @@ func (g *Game) navigatePrevious() {
 			} else {
 				g.idx -= 2
 			}
+			g.zoomState.Reset()
 			return
 		}
 		// shouldUseBookMode = false means single page movement
 	}
 	// Single page mode or Shift+key
 	g.idx--
+	
+	// Reset zoom state when image changes
+	g.zoomState.Reset()
 }
 
 func (g *Game) toggleFullscreen() {
@@ -766,6 +950,15 @@ func main() {
 		expandedFromSingle: false,
 		originalFileIndex:  -1,
 		configStatus:       configResult,
+		zoomState:          NewZoomState(),
+	}
+
+	// Apply initial zoom mode from config
+	if config.InitialZoomMode == "actual_size" {
+		g.zoomState.Mode = ZoomModeManual
+		g.zoomState.Level = 1.0
+		g.zoomState.PanOffsetX = 0
+		g.zoomState.PanOffsetY = 0
 	}
 
 	// Start initial preload in forward direction

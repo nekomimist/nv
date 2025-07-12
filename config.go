@@ -239,6 +239,7 @@ type Config struct {
 	TransitionFrames     int                 `json:"transition_frames"`
 	PreloadEnabled       bool                `json:"preload_enabled"`
 	PreloadCount         int                 `json:"preload_count"`
+	InitialZoomMode      string              `json:"initial_zoom_mode"`
 	Keybindings          map[string][]string `json:"keybindings"`
 	Mousebindings        map[string][]string `json:"mousebindings"`
 	MouseSettings        MouseSettings       `json:"mouse_settings"`
@@ -274,6 +275,7 @@ func loadConfigFromPath(configPath string) ConfigLoadResult {
 		CacheSize:            16,                        // Default cache size for images
 		TransitionFrames:     0,                         // Default: no forced transition frames
 		PreloadEnabled:       true,                      // Default: enable preloading
+		InitialZoomMode:      "fit",                     // Default: fit to window
 		PreloadCount:         4,                         // Default: preload up to 4 images
 		Keybindings:          getDefaultKeybindings(),   // Default keybindings
 		Mousebindings:        getDefaultMousebindings(), // Default mouse bindings
@@ -346,6 +348,11 @@ func loadConfigFromPath(configPath string) ConfigLoadResult {
 		config.PreloadCount = 4
 	} else if config.PreloadCount > 16 {
 		config.PreloadCount = 16
+	}
+
+	// Validate initial zoom mode
+	if config.InitialZoomMode != "fit" && config.InitialZoomMode != "actual_size" {
+		config.InitialZoomMode = "fit"
 	}
 
 	// Validate keybindings - ensure defaults exist for missing actions
