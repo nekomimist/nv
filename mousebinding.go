@@ -15,8 +15,9 @@ type MouseSettings struct {
 	DragThreshold    int     `json:"drag_threshold"`    // pixels
 	EnableMouse      bool    `json:"enable_mouse"`
 	WheelInverted    bool    `json:"wheel_inverted"`
-	EnableDragPan    bool    `json:"enable_drag_pan"`  // Enable drag to pan
-	DragSensitivity  float64 `json:"drag_sensitivity"` // Drag movement sensitivity
+	EnableDragPan    bool    `json:"enable_drag_pan"`   // Enable drag to pan
+	DragSensitivity  float64 `json:"drag_sensitivity"`  // Drag movement sensitivity
+	DragPanInverted  bool    `json:"drag_pan_inverted"` // Invert drag pan direction (both X and Y axes)
 }
 
 // DoubleClickTracker tracks double-click state
@@ -272,7 +273,8 @@ func GetDefaultMouseSettings() MouseSettings {
 		DragThreshold:    5,   // pixels
 		EnableMouse:      true,
 		WheelInverted:    false,
-		EnableDragPan:    true, // Enable drag to pan by default
-		DragSensitivity:  1.0,  // 1:1 mouse movement to pan ratio
+		EnableDragPan:    true,  // Enable drag to pan by default
+		DragSensitivity:  1.0,   // 1:1 mouse movement to pan ratio
+		DragPanInverted:  false, // false = mouse/trackball style (drag to move image)
 	}
 }

@@ -122,7 +122,8 @@ Settings are automatically saved to `~/.nv.json`:
   "mouse_settings": {
     "enable_drag_pan": true,
     "drag_sensitivity": 1.0,
-    "drag_threshold": 5
+    "drag_threshold": 5,
+    "drag_pan_inverted": false
   }
 }
 ```
@@ -137,6 +138,10 @@ Settings are automatically saved to `~/.nv.json`:
 - `keybindings` - Custom keyboard shortcuts for actions. Use format like `"KeyA"`, `"Space"`, `"Shift+KeyB"`
 - `mousebindings` - Custom mouse bindings for actions. Use format like `"LeftClick"`, `"WheelUp"`, `"Ctrl+MiddleClick"`
 - `mouse_settings` - Mouse behavior: drag-to-pan settings, sensitivity, and thresholds
+  - `enable_drag_pan` - Enable drag-to-pan functionality (default: true)
+  - `drag_sensitivity` - Drag movement sensitivity multiplier (default: 1.0)
+  - `drag_threshold` - Minimum pixel movement to start drag operation (default: 5)
+  - `drag_pan_inverted` - Invert drag pan direction for both X and Y axes (default: false). `false` = mouse/trackball style (drag to move image), `true` = touchpad/touchscreen style (natural scrolling)
 
 ## License
 

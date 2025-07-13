@@ -272,7 +272,8 @@ The application saves settings to `~/.nv.json`:
     "enable_mouse": true,
     "wheel_inverted": false,
     "enable_drag_pan": true,
-    "drag_sensitivity": 1.0
+    "drag_sensitivity": 1.0,
+    "drag_pan_inverted": false
   }
 }
 ```
@@ -296,6 +297,7 @@ The application saves settings to `~/.nv.json`:
   - `wheel_inverted`: Invert mouse wheel direction (default: false)
   - `enable_drag_pan`: Enable drag-to-pan functionality (default: true)
   - `drag_sensitivity`: Drag movement sensitivity multiplier (default: 1.0)
+  - `drag_pan_inverted`: Invert drag pan direction for both X and Y axes (default: false). `false` = mouse/trackball style (drag to move image), `true` = touchpad/touchscreen style (natural scrolling)
 
 ## File Sorting Strategy
 

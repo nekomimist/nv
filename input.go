@@ -287,8 +287,14 @@ func (h *InputHandler) handleMouseDragWithConflictResolution() bool {
 		h.dragState.TotalDeltaX += frameDeltaX
 		h.dragState.TotalDeltaY += frameDeltaY
 
-		// Apply pan movement (invert Y for natural feel, apply sensitivity)
-		h.inputActions.PanByDelta(frameDeltaX*mouseSettings.DragSensitivity, -frameDeltaY*mouseSettings.DragSensitivity)
+		// Apply pan movement with configurable inversion for both axes
+		panDeltaX := frameDeltaX * mouseSettings.DragSensitivity
+		panDeltaY := frameDeltaY * mouseSettings.DragSensitivity
+		if mouseSettings.DragPanInverted {
+			panDeltaX = -panDeltaX
+			panDeltaY = -panDeltaY
+		}
+		h.inputActions.PanByDelta(panDeltaX, panDeltaY)
 
 		return true // Consume the input
 	}
