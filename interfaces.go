@@ -90,9 +90,10 @@ func (s *RenderStateSnapshot) Equals(other *RenderStateSnapshot) bool {
 		sActive := isOverlayActive(s.OverlayMessage, s.OverlayMessageTime)
 		otherActive := isOverlayActive(other.OverlayMessage, other.OverlayMessageTime)
 
-		// If both are inactive, they're equal regardless of time values
+		// If both are inactive, check if the messages are the same
+		// This ensures we detect transitions from active to inactive
 		if !sActive && !otherActive {
-			return true
+			return s.OverlayMessage == other.OverlayMessage
 		}
 
 		// If both are active, compare messages and times
