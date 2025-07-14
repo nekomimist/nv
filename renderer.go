@@ -85,69 +85,8 @@ func (r *Renderer) drawSingleImage(screen *ebiten.Image) {
 	// Apply transformations to the image
 	transformedImg := r.applyTransformations(img)
 
-	iw, ih := transformedImg.Bounds().Dx(), transformedImg.Bounds().Dy()
-	w, h := screen.Bounds().Dx(), screen.Bounds().Dy()
-
-	op := &ebiten.DrawImageOptions{}
-	op.Filter = ebiten.FilterLinear
-
-	// Calculate scale and position based on zoom mode
-	var scale float64
-	var offsetX, offsetY float64
-
-	if r.renderState.GetZoomMode() == ZoomModeFit {
-		// Automatic fit mode (original behavior)
-		deviceScale := ebiten.DeviceScaleFactor()
-		if r.renderState.IsFullscreen() {
-			scale = math.Min(float64(w)/float64(iw), float64(h)/float64(ih))
-		} else {
-			if iw > w || ih > h {
-				scale = math.Min(float64(w)/float64(iw), float64(h)/float64(ih))
-			} else {
-				scale = deviceScale
-			}
-		}
-		// Center the image
-		sw, sh := float64(iw)*scale, float64(ih)*scale
-		offsetX = float64(w)/2 - sw/2
-		offsetY = float64(h)/2 - sh/2
-	} else {
-		// Manual zoom mode
-		scale = r.renderState.GetZoomLevel()
-		sw, sh := float64(iw)*scale, float64(ih)*scale
-
-		// Apply pan offset with boundary clamping
-		panX := r.renderState.GetPanOffsetX()
-		panY := r.renderState.GetPanOffsetY()
-
-		// Calculate boundaries
-		minX := float64(w) - sw
-		maxX := 0.0
-		minY := float64(h) - sh
-		maxY := 0.0
-
-		// Clamp pan offsets to keep image on screen
-		if sw <= float64(w) {
-			// Image is smaller than screen width, center horizontally
-			offsetX = float64(w)/2 - sw/2
-		} else {
-			// Image is larger than screen, apply pan with clamping
-			offsetX = math.Max(minX, math.Min(maxX, float64(w)/2-sw/2+panX))
-		}
-
-		if sh <= float64(h) {
-			// Image is smaller than screen height, center vertically
-			offsetY = float64(h)/2 - sh/2
-		} else {
-			// Image is larger than screen, apply pan with clamping
-			offsetY = math.Max(minY, math.Min(maxY, float64(h)/2-sh/2+panY))
-		}
-	}
-
-	op.GeoM.Scale(scale, scale)
-	op.GeoM.Translate(offsetX, offsetY)
-
-	screen.DrawImage(transformedImg, op)
+	// Use the common drawing logic
+	r.drawTransformedImageCentered(screen, transformedImg)
 }
 
 func (r *Renderer) drawBookMode(screen *ebiten.Image) {
@@ -882,25 +821,64 @@ func (r *Renderer) drawTransformedImageCentered(screen *ebiten.Image, img *ebite
 	iw, ih := img.Bounds().Dx(), img.Bounds().Dy()
 	w, h := screen.Bounds().Dx(), screen.Bounds().Dy()
 
-	// Get device scale factor for hi-DPI support
-	deviceScale := ebiten.DeviceScaleFactor()
+	op := &ebiten.DrawImageOptions{}
+	op.Filter = ebiten.FilterLinear
 
+	// Calculate scale and position based on zoom mode
 	var scale float64
-	if r.renderState.IsFullscreen() {
-		scale = math.Min(float64(w)/float64(iw), float64(h)/float64(ih))
-	} else {
-		if iw > w || ih > h {
+	var offsetX, offsetY float64
+
+	if r.renderState.GetZoomMode() == ZoomModeFit {
+		// Automatic fit mode (original behavior)
+		deviceScale := ebiten.DeviceScaleFactor()
+		if r.renderState.IsFullscreen() {
 			scale = math.Min(float64(w)/float64(iw), float64(h)/float64(ih))
 		} else {
-			scale = deviceScale
+			if iw > w || ih > h {
+				scale = math.Min(float64(w)/float64(iw), float64(h)/float64(ih))
+			} else {
+				scale = deviceScale
+			}
+		}
+		// Center the image
+		sw, sh := float64(iw)*scale, float64(ih)*scale
+		offsetX = float64(w)/2 - sw/2
+		offsetY = float64(h)/2 - sh/2
+	} else {
+		// Manual zoom mode
+		scale = r.renderState.GetZoomLevel()
+		sw, sh := float64(iw)*scale, float64(ih)*scale
+
+		// Apply pan offset with boundary clamping
+		panX := r.renderState.GetPanOffsetX()
+		panY := r.renderState.GetPanOffsetY()
+
+		// Calculate boundaries
+		minX := float64(w) - sw
+		maxX := 0.0
+		minY := float64(h) - sh
+		maxY := 0.0
+
+		// Clamp pan offsets to keep image on screen
+		if sw <= float64(w) {
+			// Image is smaller than screen width, center horizontally
+			offsetX = float64(w)/2 - sw/2
+		} else {
+			// Image is larger than screen, apply pan with clamping
+			offsetX = math.Max(minX, math.Min(maxX, float64(w)/2-sw/2+panX))
+		}
+
+		if sh <= float64(h) {
+			// Image is smaller than screen height, center vertically
+			offsetY = float64(h)/2 - sh/2
+		} else {
+			// Image is larger than screen, apply pan with clamping
+			offsetY = math.Max(minY, math.Min(maxY, float64(h)/2-sh/2+panY))
 		}
 	}
 
-	op := &ebiten.DrawImageOptions{}
-	op.Filter = ebiten.FilterLinear
 	op.GeoM.Scale(scale, scale)
-	sw, sh := float64(iw)*scale, float64(ih)*scale
-	op.GeoM.Translate(float64(w)/2-sw/2, float64(h)/2-sh/2)
+	op.GeoM.Translate(offsetX, offsetY)
 
 	screen.DrawImage(img, op)
 }
