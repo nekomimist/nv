@@ -195,11 +195,7 @@ func (g *Game) cycleSortMethod() {
 func (g *Game) zoomIn() {
 	if g.zoomState.Mode == ZoomModeFit {
 		// Switch to manual mode and start at 100%
-		g.zoomState.Mode = ZoomModeManual
-		g.zoomState.Level = 1.0
-		g.zoomState.PanOffsetX = 0
-		g.zoomState.PanOffsetY = 0
-		g.showOverlayMessage("100%")
+		g.switchToManual100()
 	} else {
 		// Increase zoom level
 		newLevel := g.zoomState.Level * 1.25
@@ -215,7 +211,11 @@ func (g *Game) zoomIn() {
 }
 
 func (g *Game) zoomOut() {
-	if g.zoomState.Mode == ZoomModeManual {
+	if g.zoomState.Mode == ZoomModeFit {
+		// Switch to manual mode and start at 100%
+		g.switchToManual100()
+	} else {
+		// Decrease zoom level
 		newLevel := g.zoomState.Level / 1.25
 		if newLevel < 0.25 { // Min zoom 25%
 			// Clamp to exactly 25%
@@ -229,26 +229,27 @@ func (g *Game) zoomOut() {
 }
 
 func (g *Game) zoomReset() {
-	g.zoomState.Mode = ZoomModeManual
-	g.zoomState.Level = 1.0
-	g.zoomState.PanOffsetX = 0
-	g.zoomState.PanOffsetY = 0
-	g.showOverlayMessage("100%")
+	g.switchToManual100()
 }
 
 func (g *Game) zoomFit() {
 	if g.zoomState.Mode == ZoomModeFit {
 		// Currently in fit mode, switch to 100%
-		g.zoomState.Mode = ZoomModeManual
-		g.zoomState.Level = 1.0
-		g.zoomState.PanOffsetX = 0
-		g.zoomState.PanOffsetY = 0
-		g.showOverlayMessage("100%")
+		g.switchToManual100()
 	} else {
 		// Switch to fit mode
 		g.zoomState.Reset()
 		g.showOverlayMessage("Fit to Window")
 	}
+}
+
+// switchToManual100 sets zoom mode to Manual at 100% scale
+func (g *Game) switchToManual100() {
+	g.zoomState.Mode = ZoomModeManual
+	g.zoomState.Level = 1.0
+	g.zoomState.PanOffsetX = 0
+	g.zoomState.PanOffsetY = 0
+	g.showOverlayMessage("100%")
 }
 
 func (g *Game) panUp() {
