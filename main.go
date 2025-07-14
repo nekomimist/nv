@@ -8,6 +8,7 @@ import (
 	"image"
 	"image/png"
 	"log"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -254,6 +255,7 @@ func (g *Game) panUp() {
 	if g.zoomState.Mode == ZoomModeManual {
 		_, stepY := g.getPanStep()
 		g.zoomState.PanOffsetY += stepY
+		g.clampPanToLimits()
 	}
 }
 
@@ -261,6 +263,7 @@ func (g *Game) panDown() {
 	if g.zoomState.Mode == ZoomModeManual {
 		_, stepY := g.getPanStep()
 		g.zoomState.PanOffsetY -= stepY
+		g.clampPanToLimits()
 	}
 }
 
@@ -268,6 +271,7 @@ func (g *Game) panLeft() {
 	if g.zoomState.Mode == ZoomModeManual {
 		stepX, _ := g.getPanStep()
 		g.zoomState.PanOffsetX += stepX
+		g.clampPanToLimits()
 	}
 }
 
@@ -275,6 +279,7 @@ func (g *Game) panRight() {
 	if g.zoomState.Mode == ZoomModeManual {
 		stepX, _ := g.getPanStep()
 		g.zoomState.PanOffsetX -= stepX
+		g.clampPanToLimits()
 	}
 }
 
@@ -282,6 +287,7 @@ func (g *Game) panByDelta(deltaX, deltaY float64) {
 	if g.zoomState.Mode == ZoomModeManual {
 		g.zoomState.PanOffsetX += deltaX
 		g.zoomState.PanOffsetY += deltaY
+		g.clampPanToLimits()
 	}
 }
 
@@ -297,6 +303,89 @@ func (g *Game) getPanStep() (float64, float64) {
 	stepY *= zoomFactor
 
 	return stepX, stepY
+}
+
+// getTransformedImageSize calculates the size of the currently displayed image after transformations
+func (g *Game) getTransformedImageSize() (int, int) {
+	var w, h int
+
+	if g.tempSingleMode || !g.bookMode {
+		// Single Image Mode
+		img := g.getCurrentImage()
+		if img == nil {
+			return 0, 0
+		}
+		w, h = img.Bounds().Dx(), img.Bounds().Dy()
+	} else {
+		// Book Mode
+		leftImg, rightImg := g.getBookModeImages()
+		if leftImg == nil {
+			return 0, 0
+		}
+
+		if rightImg == nil {
+			w, h = leftImg.Bounds().Dx(), leftImg.Bounds().Dy()
+		} else {
+			leftW, leftH := leftImg.Bounds().Dx(), leftImg.Bounds().Dy()
+			rightW, rightH := rightImg.Bounds().Dx(), rightImg.Bounds().Dy()
+			w = leftW + rightW + imageGap
+			h = int(math.Max(float64(leftH), float64(rightH)))
+		}
+	}
+
+	// Apply transformation size calculation (same as applyTransformations)
+	if g.rotationAngle == 90 || g.rotationAngle == 270 {
+		return h, w // 90°/270° rotation swaps width and height
+	}
+	return w, h
+}
+
+// clampPanToLimits ensures pan offsets stay within valid boundaries
+func (g *Game) clampPanToLimits() {
+	if g.zoomState.Mode != ZoomModeManual {
+		return
+	}
+
+	iw, ih := g.getTransformedImageSize()
+	if iw == 0 || ih == 0 {
+		return
+	}
+
+	w, h := g.savedWinW, g.savedWinH
+	scale := g.zoomState.Level
+	sw, sh := float64(iw)*scale, float64(ih)*scale
+
+	// Calculate X boundaries
+	if sw > float64(w) {
+		// Image is wider than screen, apply pan limits
+		maxPanX := sw/2 - float64(w)/2 // Right limit
+		minPanX := float64(w)/2 - sw/2 // Left limit
+
+		if g.zoomState.PanOffsetX > maxPanX {
+			g.zoomState.PanOffsetX = maxPanX
+		} else if g.zoomState.PanOffsetX < minPanX {
+			g.zoomState.PanOffsetX = minPanX
+		}
+	} else {
+		// Image is narrower than screen, center horizontally
+		g.zoomState.PanOffsetX = 0
+	}
+
+	// Calculate Y boundaries
+	if sh > float64(h) {
+		// Image is taller than screen, apply pan limits
+		maxPanY := sh/2 - float64(h)/2 // Bottom limit
+		minPanY := float64(h)/2 - sh/2 // Top limit
+
+		if g.zoomState.PanOffsetY > maxPanY {
+			g.zoomState.PanOffsetY = maxPanY
+		} else if g.zoomState.PanOffsetY < minPanY {
+			g.zoomState.PanOffsetY = minPanY
+		}
+	} else {
+		// Image is shorter than screen, center vertically
+		g.zoomState.PanOffsetY = 0
+	}
 }
 
 func (g *Game) shouldUseBookMode(leftImg, rightImg *ebiten.Image) bool {
