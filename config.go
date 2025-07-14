@@ -231,7 +231,7 @@ type Config struct {
 	WindowHeight         int                 `json:"window_height"`
 	AspectRatioThreshold float64             `json:"aspect_ratio_threshold"`
 	RightToLeft          bool                `json:"right_to_left"`
-	HelpFontSize         float64             `json:"help_font_size"`
+	FontSize             float64             `json:"font_size"`
 	SortMethod           int                 `json:"sort_method"`
 	BookMode             bool                `json:"book_mode"`
 	Fullscreen           bool                `json:"fullscreen"`
@@ -268,7 +268,7 @@ func loadConfigFromPath(configPath string) ConfigLoadResult {
 		WindowHeight:         defaultHeight,
 		AspectRatioThreshold: 1.5,                       // Default threshold for aspect ratio compatibility
 		RightToLeft:          false,                     // Default to left-to-right reading (Western style)
-		HelpFontSize:         24.0,                      // Default help font size
+		FontSize:             24.0,                      // Default font size
 		SortMethod:           SortNatural,               // Default to natural sort
 		BookMode:             false,                     // Default to single page mode
 		Fullscreen:           false,                     // Default to windowed mode
@@ -319,9 +319,9 @@ func loadConfigFromPath(configPath string) ConfigLoadResult {
 		config.AspectRatioThreshold = 1.5
 	}
 
-	// Validate help font size (minimum 12px for readability)
-	if config.HelpFontSize <= 12.0 {
-		config.HelpFontSize = 24.0
+	// Validate font size (minimum 12px for readability)
+	if config.FontSize <= 12.0 {
+		config.FontSize = 24.0
 	}
 
 	// Validate sort method

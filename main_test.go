@@ -476,8 +476,8 @@ func TestLoadConfigDefaults(t *testing.T) {
 	if config.RightToLeft != false {
 		t.Errorf("Expected RightToLeft false, got %t", config.RightToLeft)
 	}
-	if config.HelpFontSize != 24.0 {
-		t.Errorf("Expected HelpFontSize 24.0, got %f", config.HelpFontSize)
+	if config.FontSize != 24.0 {
+		t.Errorf("Expected FontSize 24.0, got %f", config.FontSize)
 	}
 	if config.SortMethod != SortNatural {
 		t.Errorf("Expected SortMethod %d, got %d", SortNatural, config.SortMethod)

@@ -229,39 +229,10 @@ func (r *Renderer) CalculateHorizontalPosition(x, maxW int, scaledW float64, ali
 func (r *Renderer) drawHelpOverlay(screen *ebiten.Image) {
 	w, h := screen.Bounds().Dx(), screen.Bounds().Dy()
 
-	// Semi-transparent black background (lighter for more image transparency)
-	vector.DrawFilledRect(screen, 0, 0, float32(w), float32(h), color.RGBA{0, 0, 0, 128}, false)
-
-	// Help text area with semi-transparent black background
-	padding := 40
-	textAreaX := float32(padding)
-	textAreaY := float32(padding)
-	textAreaW := float32(w - padding*2)
-	textAreaH := float32(h - padding*2)
-
-	// Semi-transparent black background for text area
-	vector.DrawFilledRect(screen, textAreaX, textAreaY, textAreaW, textAreaH, color.RGBA{0, 0, 0, 160}, false)
-
-	// Create font with size from config
-	helpFont := &text.GoTextFace{
-		Source: r.helpFontSource,
-		Size:   r.renderState.GetHelpFontSize(),
-	}
-
-	// Draw title
-	titleY := float64(padding + 30)
-	titleOp := &text.DrawOptions{}
-	titleOp.GeoM.Translate(float64(padding+20), titleY)
-	titleOp.ColorScale.ScaleWithColor(color.RGBA{255, 255, 255, 255})
-	text.Draw(screen, "HELP:", helpFont, titleOp)
-
-	currentY := titleY + r.renderState.GetHelpFontSize()*2 // Start below title
-	lineHeight := r.renderState.GetHelpFontSize() * 1.5
-
-	// Dynamic input bindings display
+	// Prepare data for dynamic font size calculation
 	keybindings := r.renderState.GetKeybindings()
 	mousebindings := r.renderState.GetMousebindings()
-	actionDescriptions := getActionDescriptions()
+	configStatus := r.renderState.GetConfigStatus()
 
 	// Get sorted action list for consistent display (union of keyboard and mouse actions)
 	actionSet := make(map[string]bool)
@@ -277,6 +248,54 @@ func (r *Renderer) drawHelpOverlay(screen *ebiten.Image) {
 		actions = append(actions, action)
 	}
 	sort.Strings(actions)
+
+	// Calculate available space (accounting for padding)
+	padding := 40
+	availableWidth := float64(w - padding*2)
+	availableHeight := float64(h - padding*2)
+
+	// Calculate optimal font size
+	maxFontSize := r.renderState.GetFontSize()
+	minFontSize := 12.0
+
+	optimalFontSize, canFit := r.calculateOptimalFontSize(availableWidth, availableHeight, actions, keybindings, mousebindings, configStatus, maxFontSize, minFontSize)
+
+	// If cannot fit even with minimum font size, show Fermat's joke
+	if !canFit {
+		r.drawMarginTooSmallMessage(screen)
+		return
+	}
+
+	// Semi-transparent black background (lighter for more image transparency)
+	vector.DrawFilledRect(screen, 0, 0, float32(w), float32(h), color.RGBA{0, 0, 0, 128}, false)
+
+	// Help text area with semi-transparent black background
+	textAreaX := float32(padding)
+	textAreaY := float32(padding)
+	textAreaW := float32(w - padding*2)
+	textAreaH := float32(h - padding*2)
+
+	// Semi-transparent black background for text area
+	vector.DrawFilledRect(screen, textAreaX, textAreaY, textAreaW, textAreaH, color.RGBA{0, 0, 0, 160}, false)
+
+	// Create font with dynamically calculated size
+	helpFont := &text.GoTextFace{
+		Source: r.helpFontSource,
+		Size:   optimalFontSize,
+	}
+
+	// Draw title
+	titleY := float64(padding + 30)
+	titleOp := &text.DrawOptions{}
+	titleOp.GeoM.Translate(float64(padding+20), titleY)
+	titleOp.ColorScale.ScaleWithColor(color.RGBA{255, 255, 255, 255})
+	text.Draw(screen, "HELP:", helpFont, titleOp)
+
+	currentY := titleY + optimalFontSize*2 // Start below title
+	lineHeight := optimalFontSize * 1.5
+
+	// Get action descriptions
+	actionDescriptions := getActionDescriptions()
 
 	// Draw input bindings title
 	inputTitleOp := &text.DrawOptions{}
@@ -403,7 +422,6 @@ func (r *Renderer) drawHelpOverlay(screen *ebiten.Image) {
 	currentY += lineHeight
 
 	// Draw config status section
-	configStatus := r.renderState.GetConfigStatus()
 
 	// Draw section title
 	sectionOp := &text.DrawOptions{}
@@ -445,19 +463,238 @@ func (r *Renderer) drawHelpOverlay(screen *ebiten.Image) {
 
 }
 
+// calculateRequiredDimensions calculates the required width and height for help content at a given font size
+func (r *Renderer) calculateRequiredDimensions(fontSize float64, actions []string, keybindings, mousebindings map[string][]string, configStatus ConfigLoadResult) (float64, float64) {
+	// Create temporary font for measurements
+	tempFont := &text.GoTextFace{
+		Source: r.helpFontSource,
+		Size:   fontSize,
+	}
+
+	padding := 40.0
+	lineHeight := fontSize * 1.5
+
+	// Calculate height
+	height := padding * 2      // Top and bottom padding
+	height += fontSize * 2     // Title
+	height += lineHeight * 1.5 // Controls title spacing
+
+	// Count lines for actions
+	actionLines := 0
+	for _, action := range actions {
+		keys := keybindings[action]
+		mouseActions := mousebindings[action]
+		// Skip if no bindings at all
+		if len(keys) == 0 && len(mouseActions) == 0 {
+			continue
+		}
+		actionLines++
+	}
+	height += float64(actionLines) * lineHeight
+
+	// System section
+	height += lineHeight // Spacing before system section
+	height += lineHeight // "System:" title
+	height += lineHeight // Config status line
+
+	// Add warnings if any (limit to 2 like in original code)
+	warningLines := len(configStatus.Warnings)
+	if warningLines > 2 {
+		warningLines = 2
+	}
+	height += float64(warningLines) * lineHeight
+
+	// Calculate width
+	maxWidth := 0.0
+
+	// Check title width
+	titleWidth, _ := text.Measure("HELP:", tempFont, 0)
+	if titleWidth+padding*2+40 > maxWidth { // 40 for left margin
+		maxWidth = titleWidth + padding*2 + 40
+	}
+
+	// Check controls title width
+	controlsTitleWidth, _ := text.Measure("Controls (Keyboard | Mouse):", tempFont, 0)
+	if controlsTitleWidth+padding*2+40 > maxWidth {
+		maxWidth = controlsTitleWidth + padding*2 + 40
+	}
+
+	// Calculate column widths for actions (similar to original logic)
+	maxActionWidth := 0.0
+	maxInputWidth := 0.0
+	maxDescWidth := 0.0
+
+	actionDescriptions := getActionDescriptions()
+
+	for _, action := range actions {
+		keys := keybindings[action]
+		mouseActions := mousebindings[action]
+
+		// Skip if no bindings at all
+		if len(keys) == 0 && len(mouseActions) == 0 {
+			continue
+		}
+
+		// Measure action name width
+		actionWidth, _ := text.Measure(action, tempFont, 0)
+		if actionWidth > maxActionWidth {
+			maxActionWidth = actionWidth
+		}
+
+		// Build combined input string (keyboard | mouse)
+		var inputParts []string
+		if len(keys) > 0 {
+			inputParts = append(inputParts, strings.Join(keys, ", "))
+		}
+		if len(mouseActions) > 0 {
+			inputParts = append(inputParts, strings.Join(mouseActions, ", "))
+		}
+
+		combinedInput := strings.Join(inputParts, " | ")
+		inputWidth, _ := text.Measure(combinedInput, tempFont, 0)
+		if inputWidth > maxInputWidth {
+			maxInputWidth = inputWidth
+		}
+
+		// Measure description width
+		description := actionDescriptions[action]
+		if description == "" {
+			description = "No description available"
+		}
+		descWidth, _ := text.Measure(description, tempFont, 0)
+		if descWidth > maxDescWidth {
+			maxDescWidth = descWidth
+		}
+	}
+
+	// Calculate total width: left margin + action + spacing + arrow + spacing + input + spacing + description + right margin
+	actionLineWidth := 40 + maxActionWidth + 20 + 30 + 20 + maxInputWidth + 20 + maxDescWidth + padding
+	if actionLineWidth > maxWidth {
+		maxWidth = actionLineWidth
+	}
+
+	// Check system section width
+	systemTitleWidth, _ := text.Measure("System:", tempFont, 0)
+	if systemTitleWidth+padding*2+40 > maxWidth {
+		maxWidth = systemTitleWidth + padding*2 + 40
+	}
+
+	statusText := fmt.Sprintf("Config Status: %s", configStatus.Status)
+	statusWidth, _ := text.Measure(statusText, tempFont, 0)
+	if statusWidth+padding*2+80 > maxWidth { // 80 for indentation
+		maxWidth = statusWidth + padding*2 + 80
+	}
+
+	// Check warning widths
+	for i, warning := range configStatus.Warnings {
+		if i >= 2 {
+			break
+		}
+		shortWarning := warning
+		if len(shortWarning) > 50 {
+			shortWarning = shortWarning[:47] + "..."
+		}
+		warningWidth, _ := text.Measure("• "+shortWarning, tempFont, 0)
+		if warningWidth+padding*2+80 > maxWidth {
+			maxWidth = warningWidth + padding*2 + 80
+		}
+	}
+
+	return maxWidth, height
+}
+
+// calculateOptimalFontSize finds the largest font size that fits within the given dimensions
+func (r *Renderer) calculateOptimalFontSize(availableWidth, availableHeight float64, actions []string, keybindings, mousebindings map[string][]string, configStatus ConfigLoadResult, maxFontSize, minFontSize float64) (float64, bool) {
+	// Quick check: can we fit with minimum font size?
+	minWidth, minHeight := r.calculateRequiredDimensions(minFontSize, actions, keybindings, mousebindings, configStatus)
+	if minWidth > availableWidth || minHeight > availableHeight {
+		return minFontSize, false // Cannot fit even with minimum size
+	}
+
+	// Quick check: can we fit with maximum font size?
+	maxWidth, maxHeight := r.calculateRequiredDimensions(maxFontSize, actions, keybindings, mousebindings, configStatus)
+	if maxWidth <= availableWidth && maxHeight <= availableHeight {
+		return maxFontSize, true // Fits perfectly with maximum size
+	}
+
+	// Binary search for optimal font size
+	low := minFontSize
+	high := maxFontSize
+	bestSize := minFontSize
+	epsilon := 0.5 // Search precision
+
+	for high-low > epsilon {
+		mid := (low + high) / 2.0
+
+		reqWidth, reqHeight := r.calculateRequiredDimensions(mid, actions, keybindings, mousebindings, configStatus)
+
+		if reqWidth <= availableWidth && reqHeight <= availableHeight {
+			// This size fits, try larger
+			bestSize = mid
+			low = mid
+		} else {
+			// This size doesn't fit, try smaller
+			high = mid
+		}
+	}
+
+	return bestSize, true
+}
+
+// drawMarginTooSmallMessage displays Fermat's margin joke when help cannot fit
+func (r *Renderer) drawMarginTooSmallMessage(screen *ebiten.Image) {
+	w, h := screen.Bounds().Dx(), screen.Bounds().Dy()
+
+	// Semi-transparent black background
+	vector.DrawFilledRect(screen, 0, 0, float32(w), float32(h), color.RGBA{0, 0, 0, 128}, false)
+
+	// Create font for the joke (16px should be readable)
+	jokeFont := &text.GoTextFace{
+		Source: r.helpFontSource,
+		Size:   16.0,
+	}
+
+	// The famous quote from Fermat's Last Theorem margin note
+	message := "Hanc marginis exiguitas non caperet."
+	subtitle := "(This margin is too small to contain it.)"
+
+	// Measure text for centering
+	messageWidth, messageHeight := text.Measure(message, jokeFont, 0)
+	subtitleWidth, _ := text.Measure(subtitle, jokeFont, 0)
+
+	// Calculate center positions
+	messageX := float64(w)/2 - messageWidth/2
+	messageY := float64(h)/2 - messageHeight/2
+
+	subtitleX := float64(w)/2 - subtitleWidth/2
+	subtitleY := messageY + messageHeight + 10 // 10px spacing
+
+	// Draw main message
+	messageOp := &text.DrawOptions{}
+	messageOp.GeoM.Translate(messageX, messageY)
+	messageOp.ColorScale.ScaleWithColor(color.RGBA{255, 255, 255, 255})
+	text.Draw(screen, message, jokeFont, messageOp)
+
+	// Draw subtitle in gray
+	subtitleOp := &text.DrawOptions{}
+	subtitleOp.GeoM.Translate(subtitleX, subtitleY)
+	subtitleOp.ColorScale.ScaleWithColor(color.RGBA{180, 180, 180, 255})
+	text.Draw(screen, subtitle, jokeFont, subtitleOp)
+}
+
 func (r *Renderer) drawPageInputOverlay(screen *ebiten.Image) {
 	w, h := screen.Bounds().Dx(), screen.Bounds().Dy()
 
 	// Create font for page input
 	inputFont := &text.GoTextFace{
 		Source: r.helpFontSource,
-		Size:   r.renderState.GetHelpFontSize(),
+		Size:   r.renderState.GetFontSize(),
 	}
 
 	// Create smaller font for range display
 	rangeFont := &text.GoTextFace{
 		Source: r.helpFontSource,
-		Size:   r.renderState.GetHelpFontSize() * 0.8,
+		Size:   r.renderState.GetFontSize() * 0.8,
 	}
 
 	// Get total pages for range display
@@ -505,7 +742,7 @@ func (r *Renderer) drawInfoDisplay(screen *ebiten.Image) {
 	// Create font for info display (same size as help text)
 	infoFont := &text.GoTextFace{
 		Source: r.helpFontSource,
-		Size:   r.renderState.GetHelpFontSize(),
+		Size:   r.renderState.GetFontSize(),
 	}
 
 	// Get page status text
@@ -541,7 +778,7 @@ func (r *Renderer) drawOverlayMessage(screen *ebiten.Image) {
 	// Create font for overlay message
 	messageFont := &text.GoTextFace{
 		Source: r.helpFontSource,
-		Size:   r.renderState.GetHelpFontSize(),
+		Size:   r.renderState.GetFontSize(),
 	}
 
 	// Measure text dimensions

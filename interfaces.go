@@ -44,7 +44,7 @@ type RenderState interface {
 	// Display data
 	GetCurrentPageNumber() string
 	GetTotalPagesCount() int
-	GetHelpFontSize() float64
+	GetFontSize() float64
 	GetConfigStatus() ConfigLoadResult
 	GetKeybindings() map[string][]string
 	GetMousebindings() map[string][]string

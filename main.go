@@ -591,8 +591,8 @@ func (g *Game) GetTotalPagesCount() int {
 	return g.imageManager.GetPathsCount()
 }
 
-func (g *Game) GetHelpFontSize() float64 {
-	return g.config.HelpFontSize
+func (g *Game) GetFontSize() float64 {
+	return g.config.FontSize
 }
 
 func (g *Game) GetConfigStatus() ConfigLoadResult {

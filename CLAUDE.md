@@ -245,7 +245,7 @@ The application saves settings to `~/.nv.json`:
   "window_height": 600,
   "aspect_ratio_threshold": 1.5,
   "right_to_left": false,
-  "help_font_size": 24.0,
+  "font_size": 24.0,
   "sort_method": 0,
   "book_mode": false,
   "transition_frames": 0,
@@ -280,7 +280,7 @@ The application saves settings to `~/.nv.json`:
 
 - **aspect_ratio_threshold**: Controls when to use single page mode in book mode. Higher values allow more different aspect ratios to be displayed side-by-side. Default: 1.5
 - **right_to_left**: Reading direction for book mode. `false` for left-to-right (Western style), `true` for right-to-left (Japanese manga style). Default: false
-- **help_font_size**: Font size for help overlay text. Must be > 12px for readability. Default: 24.0
+- **font_size**: Font size for UI text. Must be > 12px for readability. Default: 24.0
 - **sort_method**: File sorting method for directories and archives. `0` = Natural, `1` = Simple, `2` = Entry Order. Default: 0 (Natural)
 - **book_mode**: Whether to start in book mode (spread view) by default. `false` for single page mode, `true` for book mode. Default: false
 - **transition_frames**: Number of frames to force redraw after fullscreen transitions. Helps fix rendering issues on some systems (e.g., WSL/WSLg). `0` = disabled, `1-60` = number of frames. Default: 0
@@ -337,7 +337,7 @@ The application features an interactive help overlay accessible via the **H** ke
 ### Features
 - **Dark Transparent Overlay**: Semi-transparent black background allowing images to show through
 - **Column-Aligned Layout**: Right-aligned keys with left-aligned descriptions for clean presentation
-- **Configurable Font**: Font size controlled via `help_font_size` setting in config file
+- **Configurable Font**: Font size controlled via `font_size` setting in config file
 - **Lightweight Font**: Uses Go's built-in goregular font for smaller binary size
 - **Organized Sections**: Controls grouped by function (Navigation, Display Modes, Other)
 - **Toggle Interface**: Press H to show, H again to hide
