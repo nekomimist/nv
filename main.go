@@ -252,25 +252,29 @@ func (g *Game) zoomFit() {
 
 func (g *Game) panUp() {
 	if g.zoomState.Mode == ZoomModeManual {
-		g.zoomState.PanOffsetY -= 50 // Pan step size
+		_, stepY := g.getPanStep()
+		g.zoomState.PanOffsetY += stepY
 	}
 }
 
 func (g *Game) panDown() {
 	if g.zoomState.Mode == ZoomModeManual {
-		g.zoomState.PanOffsetY += 50
+		_, stepY := g.getPanStep()
+		g.zoomState.PanOffsetY -= stepY
 	}
 }
 
 func (g *Game) panLeft() {
 	if g.zoomState.Mode == ZoomModeManual {
-		g.zoomState.PanOffsetX -= 50
+		stepX, _ := g.getPanStep()
+		g.zoomState.PanOffsetX += stepX
 	}
 }
 
 func (g *Game) panRight() {
 	if g.zoomState.Mode == ZoomModeManual {
-		g.zoomState.PanOffsetX += 50
+		stepX, _ := g.getPanStep()
+		g.zoomState.PanOffsetX -= stepX
 	}
 }
 
@@ -279,6 +283,20 @@ func (g *Game) panByDelta(deltaX, deltaY float64) {
 		g.zoomState.PanOffsetX += deltaX
 		g.zoomState.PanOffsetY += deltaY
 	}
+}
+
+// getPanStep calculates dynamic pan step size based on screen size and zoom level
+func (g *Game) getPanStep() (float64, float64) {
+	// Base step size as 10% of screen dimensions
+	stepX := float64(g.savedWinW) * 0.1
+	stepY := float64(g.savedWinH) * 0.1
+
+	// Scale by zoom level for more consistent feel
+	zoomFactor := g.zoomState.Level
+	stepX *= zoomFactor
+	stepY *= zoomFactor
+
+	return stepX, stepY
 }
 
 func (g *Game) shouldUseBookMode(leftImg, rightImg *ebiten.Image) bool {
