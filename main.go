@@ -736,6 +736,10 @@ func (g *Game) ToggleFullscreen() {
 	g.toggleFullscreen()
 }
 
+func (g *Game) ResetWindowSize() {
+	g.resetToDefaultWindowSize()
+}
+
 func (g *Game) EnterPageInputMode() {
 	g.pageInputMode = true
 	g.pageInputBuffer = ""
@@ -971,6 +975,40 @@ func (g *Game) toggleFullscreen() {
 	g.config.Fullscreen = g.fullscreen
 
 	// Force redraw for multiple frames to handle slow fullscreen transitions
+	if g.config.TransitionFrames > 0 {
+		g.forceRedrawFrames = g.config.TransitionFrames
+	}
+}
+
+func (g *Game) resetToDefaultWindowSize() {
+	currentWidth, currentHeight := ebiten.WindowSize()
+	defaultWidth := g.config.DefaultWindowWidth
+	defaultHeight := g.config.DefaultWindowHeight
+
+	// Check if current size is already the default size
+	if !g.fullscreen && currentWidth == defaultWidth && currentHeight == defaultHeight {
+		g.showOverlayMessage("Already at default window size")
+		return
+	}
+
+	// If in fullscreen, exit fullscreen first
+	if g.fullscreen {
+		g.fullscreen = false
+		ebiten.SetFullscreen(false)
+		g.config.Fullscreen = false
+		g.showOverlayMessage(fmt.Sprintf("Windowed mode: %dx%d (default)", defaultWidth, defaultHeight))
+	} else {
+		g.showOverlayMessage(fmt.Sprintf("Window size: %dx%d (default)", defaultWidth, defaultHeight))
+	}
+
+	// Set window to default size
+	ebiten.SetWindowSize(defaultWidth, defaultHeight)
+
+	// Save the new size
+	g.savedWinW = defaultWidth
+	g.savedWinH = defaultHeight
+
+	// Force redraw for multiple frames to handle window size transitions
 	if g.config.TransitionFrames > 0 {
 		g.forceRedrawFrames = g.config.TransitionFrames
 	}

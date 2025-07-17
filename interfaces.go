@@ -122,6 +122,7 @@ type InputActions interface {
 	ToggleInfo()
 	ToggleBookMode()
 	ToggleFullscreen()
+	ResetWindowSize()
 
 	// Page input
 	EnterPageInputMode()

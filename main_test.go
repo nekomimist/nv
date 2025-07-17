@@ -69,25 +69,31 @@ func TestIsSupportedExt(t *testing.T) {
 
 func TestConfigValidation(t *testing.T) {
 	tests := []struct {
-		name           string
-		configJSON     string
-		expectedWidth  int
-		expectedHeight int
-		expectedRatio  float64
-		expectedRTL    bool
+		name                  string
+		configJSON            string
+		expectedWidth         int
+		expectedHeight        int
+		expectedDefaultWidth  int
+		expectedDefaultHeight int
+		expectedRatio         float64
+		expectedRTL           bool
 	}{
 		{
 			name: "Valid config",
 			configJSON: `{
 				"window_width": 1000,
 				"window_height": 800,
+				"default_window_width": 1024,
+				"default_window_height": 768,
 				"aspect_ratio_threshold": 2.0,
 				"right_to_left": true
 			}`,
-			expectedWidth:  1000,
-			expectedHeight: 800,
-			expectedRatio:  2.0,
-			expectedRTL:    true,
+			expectedWidth:         1000,
+			expectedHeight:        800,
+			expectedDefaultWidth:  1024,
+			expectedDefaultHeight: 768,
+			expectedRatio:         2.0,
+			expectedRTL:           true,
 		},
 		{
 			name: "Width too small",
@@ -97,10 +103,12 @@ func TestConfigValidation(t *testing.T) {
 				"aspect_ratio_threshold": 1.5,
 				"right_to_left": false
 			}`,
-			expectedWidth:  defaultWidth,
-			expectedHeight: 600,
-			expectedRatio:  1.5,
-			expectedRTL:    false,
+			expectedWidth:         defaultWidth,
+			expectedHeight:        600,
+			expectedDefaultWidth:  defaultWidth,
+			expectedDefaultHeight: defaultHeight,
+			expectedRatio:         1.5,
+			expectedRTL:           false,
 		},
 		{
 			name: "Height too small",
@@ -110,10 +118,12 @@ func TestConfigValidation(t *testing.T) {
 				"aspect_ratio_threshold": 1.5,
 				"right_to_left": false
 			}`,
-			expectedWidth:  800,
-			expectedHeight: defaultHeight,
-			expectedRatio:  1.5,
-			expectedRTL:    false,
+			expectedWidth:         800,
+			expectedHeight:        defaultHeight,
+			expectedDefaultWidth:  defaultWidth,
+			expectedDefaultHeight: defaultHeight,
+			expectedRatio:         1.5,
+			expectedRTL:           false,
 		},
 		{
 			name: "Invalid aspect ratio threshold",
@@ -123,10 +133,29 @@ func TestConfigValidation(t *testing.T) {
 				"aspect_ratio_threshold": 0.5,
 				"right_to_left": false
 			}`,
-			expectedWidth:  800,
-			expectedHeight: 600,
-			expectedRatio:  1.5,
-			expectedRTL:    false,
+			expectedWidth:         800,
+			expectedHeight:        600,
+			expectedDefaultWidth:  defaultWidth,
+			expectedDefaultHeight: defaultHeight,
+			expectedRatio:         1.5,
+			expectedRTL:           false,
+		},
+		{
+			name: "Default window size too small",
+			configJSON: `{
+				"window_width": 800,
+				"window_height": 600,
+				"default_window_width": 200,
+				"default_window_height": 100,
+				"aspect_ratio_threshold": 1.5,
+				"right_to_left": false
+			}`,
+			expectedWidth:         800,
+			expectedHeight:        600,
+			expectedDefaultWidth:  defaultWidth,
+			expectedDefaultHeight: defaultHeight,
+			expectedRatio:         1.5,
+			expectedRTL:           false,
 		},
 	}
 
@@ -150,11 +179,103 @@ func TestConfigValidation(t *testing.T) {
 			if config.WindowHeight != tt.expectedHeight {
 				t.Errorf("Expected height %d, got %d", tt.expectedHeight, config.WindowHeight)
 			}
+			if config.DefaultWindowWidth != tt.expectedDefaultWidth {
+				t.Errorf("Expected default width %d, got %d", tt.expectedDefaultWidth, config.DefaultWindowWidth)
+			}
+			if config.DefaultWindowHeight != tt.expectedDefaultHeight {
+				t.Errorf("Expected default height %d, got %d", tt.expectedDefaultHeight, config.DefaultWindowHeight)
+			}
 			if config.AspectRatioThreshold != tt.expectedRatio {
 				t.Errorf("Expected ratio %.1f, got %.1f", tt.expectedRatio, config.AspectRatioThreshold)
 			}
 			if config.RightToLeft != tt.expectedRTL {
 				t.Errorf("Expected RightToLeft %t, got %t", tt.expectedRTL, config.RightToLeft)
+			}
+		})
+	}
+}
+
+func TestDefaultWindowSizeValidation(t *testing.T) {
+	tests := []struct {
+		name           string
+		configJSON     string
+		expectedWidth  int
+		expectedHeight int
+	}{
+		{
+			name: "Valid default window size",
+			configJSON: `{
+				"window_width": 800,
+				"window_height": 600,
+				"default_window_width": 1024,
+				"default_window_height": 768
+			}`,
+			expectedWidth:  1024,
+			expectedHeight: 768,
+		},
+		{
+			name: "Default width too small",
+			configJSON: `{
+				"window_width": 800,
+				"window_height": 600,
+				"default_window_width": 200,
+				"default_window_height": 600
+			}`,
+			expectedWidth:  defaultWidth,
+			expectedHeight: 600,
+		},
+		{
+			name: "Default height too small",
+			configJSON: `{
+				"window_width": 800,
+				"window_height": 600,
+				"default_window_width": 800,
+				"default_window_height": 200
+			}`,
+			expectedWidth:  800,
+			expectedHeight: defaultHeight,
+		},
+		{
+			name: "Both default sizes too small",
+			configJSON: `{
+				"window_width": 800,
+				"window_height": 600,
+				"default_window_width": 100,
+				"default_window_height": 100
+			}`,
+			expectedWidth:  defaultWidth,
+			expectedHeight: defaultHeight,
+		},
+		{
+			name: "Missing default window size fields",
+			configJSON: `{
+				"window_width": 800,
+				"window_height": 600
+			}`,
+			expectedWidth:  defaultWidth,
+			expectedHeight: defaultHeight,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create temporary config file
+			tempDir := t.TempDir()
+			configPath := filepath.Join(tempDir, ".nv.json")
+
+			err := os.WriteFile(configPath, []byte(tt.configJSON), 0644)
+			if err != nil {
+				t.Fatalf("Failed to write test config: %v", err)
+			}
+
+			configResult := loadConfigFromPath(configPath)
+			config := configResult.Config
+
+			if config.DefaultWindowWidth != tt.expectedWidth {
+				t.Errorf("Expected default width %d, got %d", tt.expectedWidth, config.DefaultWindowWidth)
+			}
+			if config.DefaultWindowHeight != tt.expectedHeight {
+				t.Errorf("Expected default height %d, got %d", tt.expectedHeight, config.DefaultWindowHeight)
 			}
 		})
 	}
@@ -469,6 +590,12 @@ func TestLoadConfigDefaults(t *testing.T) {
 	}
 	if config.WindowHeight != defaultHeight {
 		t.Errorf("Expected WindowHeight %d, got %d", defaultHeight, config.WindowHeight)
+	}
+	if config.DefaultWindowWidth != defaultWidth {
+		t.Errorf("Expected DefaultWindowWidth %d, got %d", defaultWidth, config.DefaultWindowWidth)
+	}
+	if config.DefaultWindowHeight != defaultHeight {
+		t.Errorf("Expected DefaultWindowHeight %d, got %d", defaultHeight, config.DefaultWindowHeight)
 	}
 	if config.AspectRatioThreshold != 1.5 {
 		t.Errorf("Expected AspectRatioThreshold 1.5, got %f", config.AspectRatioThreshold)

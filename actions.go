@@ -20,6 +20,7 @@ var actionDefinitions = []ActionDefinition{
 	{"toggle_book_mode", []string{"KeyB"}, []string{"MiddleClick"}, "Toggle book mode (dual image view)"},
 	{"toggle_reading_direction", []string{"Shift+KeyB"}, []string{"Ctrl+MiddleClick"}, "Toggle reading direction (LTR ↔ RTL)"},
 	{"fullscreen", []string{"Enter"}, []string{"DoubleLeftClick"}, "Toggle fullscreen"},
+	{"reset_window_size", []string{"Ctrl+KeyD"}, []string{}, "Reset to default window size"},
 	{"page_input", []string{"KeyG"}, []string{"Ctrl+LeftClick"}, "Go to page (enter page number)"},
 	{"jump_first", []string{"Home", "Shift+Comma"}, []string{}, "Jump to first page"},
 	{"jump_last", []string{"End", "Shift+Period"}, []string{}, "Jump to last page"},
@@ -79,6 +80,8 @@ func (ae *ActionExecutor) ExecuteAction(action string, inputActions InputActions
 		inputActions.ToggleReadingDirection()
 	case "fullscreen":
 		inputActions.ToggleFullscreen()
+	case "reset_window_size":
+		inputActions.ResetWindowSize()
 	case "page_input":
 		if !inputState.IsInPageInputMode() {
 			inputActions.EnterPageInputMode()

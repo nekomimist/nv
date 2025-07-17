@@ -229,6 +229,8 @@ type ConfigLoadResult struct {
 type Config struct {
 	WindowWidth          int                 `json:"window_width"`
 	WindowHeight         int                 `json:"window_height"`
+	DefaultWindowWidth   int                 `json:"default_window_width"`
+	DefaultWindowHeight  int                 `json:"default_window_height"`
 	AspectRatioThreshold float64             `json:"aspect_ratio_threshold"`
 	RightToLeft          bool                `json:"right_to_left"`
 	FontSize             float64             `json:"font_size"`
@@ -266,6 +268,8 @@ func loadConfigFromPath(configPath string) ConfigLoadResult {
 	config := Config{
 		WindowWidth:          defaultWidth,
 		WindowHeight:         defaultHeight,
+		DefaultWindowWidth:   defaultWidth,              // Default window width
+		DefaultWindowHeight:  defaultHeight,             // Default window height
 		AspectRatioThreshold: 1.5,                       // Default threshold for aspect ratio compatibility
 		RightToLeft:          false,                     // Default to left-to-right reading (Western style)
 		FontSize:             24.0,                      // Default font size
@@ -312,6 +316,14 @@ func loadConfigFromPath(configPath string) ConfigLoadResult {
 	}
 	if config.WindowHeight < minHeight {
 		config.WindowHeight = defaultHeight
+	}
+
+	// Validate default window size
+	if config.DefaultWindowWidth < minWidth {
+		config.DefaultWindowWidth = defaultWidth
+	}
+	if config.DefaultWindowHeight < minHeight {
+		config.DefaultWindowHeight = defaultHeight
 	}
 
 	// Validate aspect ratio threshold
