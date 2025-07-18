@@ -77,30 +77,89 @@ The application is organized into the following main modules for maintainability
 
 ## Development Commands
 
-```bash
-# Build the application
-go build
+### Quick Start with Makefile
 
+```bash
+# Build both Linux and Windows versions
+make
+
+# Build specific platforms
+make linux       # Build Linux version
+make windows     # Build Windows GUI version
+make debug       # Build Windows debug version (with console)
+
+# Version information
+./nv --version   # Show version information
+make info        # Show build information
+
+# Utility commands
+make clean       # Clean build artifacts
+make distclean   # Clean everything including generated files
+make deps        # Install build dependencies (rsrc tool)
+make help        # Show all available targets
+```
+
+### Build Dependencies
+
+The project requires the `rsrc` tool for generating Windows icons:
+
+```bash
+# Install rsrc tool (included in 'make deps')
+go install github.com/akavel/rsrc@latest
+
+# Manual icon generation (handled automatically by Makefile)
+rsrc -ico icon/icon.ico -o nv.syso
+```
+
+### Manual Build Commands
+
+```bash
+# Build with version information (handled automatically by Makefile)
+VERSION=$(date +%Y%m%d)
+BUILD_DATE=$(date)
+LDFLAGS="-X main.version=$VERSION -X main.buildDate=\"$BUILD_DATE\""
+
+# Linux build
+go build -ldflags "$LDFLAGS" -o nv
+
+# Windows GUI build
+GOOS=windows GOARCH=amd64 go build -ldflags "$LDFLAGS -H windowsgui" -o nv.exe
+
+# Windows debug build (with console)
+GOOS=windows GOARCH=amd64 go build -ldflags "$LDFLAGS" -o nv-debug.exe
+```
+
+### Running the Application
+
+```bash
 # Run the application with image files/directories
-go run main.go [image_files_or_directories...]
+./nv [image_files_or_directories...]
 
 # Run with specific images
-go run main.go image1.png image2.jpg
+./nv image1.png image2.jpg
 
 # Run with a directory of images
-go run main.go ./images/
+./nv ./images/
 
 # Run with archive files
-go run main.go images.zip manga.rar
+./nv images.zip manga.rar
 
-# Test the code
-go test ./...
+# Show version
+./nv --version
 
-# Format code
-go fmt
+# Development mode (if built manually)
+go run main.go [image_files_or_directories...]
+```
 
-# Vet code for common mistakes
-go vet
+### Development and Testing
+
+```bash
+# Code quality checks
+make check       # Run all checks (fmt, vet, test, lint)
+make test        # Run tests
+make fmt         # Format code
+make vet         # Vet code for common mistakes
+make lint        # Lint code (requires golangci-lint)
 
 # Get dependencies
 go mod tidy
@@ -109,10 +168,6 @@ go mod tidy
 go test -run TestImageManager     # Test image management
 go test -run TestConfig          # Test configuration
 go test -run TestGameNavigation  # Test navigation logic
-
-# Cross-platform builds
-GOOS=windows GOARCH=amd64 go build -ldflags "-H windowsgui" -o nv.exe  # Windows GUI version (recommended)
-GOOS=windows GOARCH=amd64 go build -o nv-debug.exe                     # Windows console version (for debugging)
 ```
 
 ## Development Notes

@@ -18,6 +18,12 @@ import (
 	"github.com/hajimehoshi/ebiten/v2"
 )
 
+// Build-time variables (set by ldflags)
+var (
+	version   = "dev"
+	buildDate = "unknown"
+)
+
 // Global debug mode flag
 var debugMode bool
 
@@ -1058,6 +1064,14 @@ func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {
 	return int(float64(outsideWidth) * scale), int(float64(outsideHeight) * scale)
 }
 
+// getWindowTitle returns the window title with version information
+func getWindowTitle() string {
+	if version == "dev" {
+		return "Nekomimist's Image Viewer (dev)"
+	}
+	return fmt.Sprintf("Nekomimist's Image Viewer v%s", version)
+}
+
 // debugLog outputs debug messages only when debug mode is enabled
 func debugLog(format string, args ...interface{}) {
 	if debugMode {
@@ -1068,7 +1082,13 @@ func debugLog(format string, args ...interface{}) {
 func main() {
 	var configFile = flag.String("c", "", "config file path (default: ~/.nv.json)")
 	var debug = flag.Bool("d", false, "enable debug logging")
+	var showVersion = flag.Bool("version", false, "show version information")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Printf("nv version v%s (built on %s)\n", version, buildDate)
+		os.Exit(0)
+	}
 
 	debugMode = *debug
 
@@ -1161,7 +1181,7 @@ func main() {
 		}
 	}
 
-	ebiten.SetWindowTitle("Ebiten Image Viewer")
+	ebiten.SetWindowTitle(getWindowTitle())
 	ebiten.SetWindowSize(config.WindowWidth, config.WindowHeight)
 	ebiten.SetWindowResizingMode(ebiten.WindowResizingModeEnabled)
 
