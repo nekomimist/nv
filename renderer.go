@@ -16,6 +16,24 @@ import (
 	"golang.org/x/image/font/gofont/goregular"
 )
 
+// Common colors used in rendering
+var (
+	colorWhite     = color.RGBA{255, 255, 255, 255}
+	colorGray      = color.RGBA{180, 180, 180, 255}
+	colorLightGray = color.RGBA{192, 192, 192, 255}
+	colorYellow    = color.RGBA{255, 255, 100, 255}
+	colorCyan      = color.RGBA{100, 255, 255, 255}
+	colorLightBlue = color.RGBA{200, 200, 255, 255}
+	colorGreen     = color.RGBA{100, 255, 100, 255}
+	colorOrange    = color.RGBA{255, 200, 100, 255}
+	colorLightRed  = color.RGBA{255, 150, 150, 255}
+
+	// Background colors for semi-transparent overlays
+	bgColorLight  = color.RGBA{0, 0, 0, 128} // Light semi-transparent
+	bgColorMedium = color.RGBA{0, 0, 0, 160} // Medium semi-transparent
+	bgColorDark   = color.RGBA{0, 0, 0, 200} // Dark semi-transparent
+)
+
 // Renderer handles all drawing operations
 type Renderer struct {
 	renderState    RenderState
@@ -40,6 +58,41 @@ func NewRenderer(renderState RenderState) *Renderer {
 // getActionDescriptions returns descriptions for each action
 func getActionDescriptions() map[string]string {
 	return GetActionDescriptions()
+}
+
+// getActionsList returns a sorted list of all actions that have bindings
+func (r *Renderer) getActionsList() []string {
+	keybindings := r.renderState.GetKeybindings()
+	mousebindings := r.renderState.GetMousebindings()
+
+	// Get sorted action list for consistent display (union of keyboard and mouse actions)
+	actionSet := make(map[string]bool)
+	for action := range keybindings {
+		actionSet[action] = true
+	}
+	for action := range mousebindings {
+		actionSet[action] = true
+	}
+
+	actions := make([]string, 0, len(actionSet))
+	for action := range actionSet {
+		actions = append(actions, action)
+	}
+	sort.Strings(actions)
+	return actions
+}
+
+// drawText is a helper method to draw text with specified position and color
+func (r *Renderer) drawText(screen *ebiten.Image, textString string, font *text.GoTextFace, x, y float64, textColor color.RGBA) {
+	op := &text.DrawOptions{}
+	op.GeoM.Translate(x, y)
+	op.ColorScale.ScaleWithColor(textColor)
+	text.Draw(screen, textString, font, op)
+}
+
+// drawFilledRect is a helper method to draw filled rectangles with float64 coordinates
+func (r *Renderer) drawFilledRect(screen *ebiten.Image, x, y, w, h float64, bgColor color.RGBA) {
+	vector.DrawFilledRect(screen, float32(x), float32(y), float32(w), float32(h), bgColor, false)
 }
 
 // Draw renders the entire screen
@@ -166,38 +219,15 @@ func (r *Renderer) CalculateHorizontalPosition(x, maxW int, scaledW float64, ali
 }
 
 func (r *Renderer) drawHelpOverlay(screen *ebiten.Image) {
-	w, h := screen.Bounds().Dx(), screen.Bounds().Dy()
-
-	// Prepare data for dynamic font size calculation
-	keybindings := r.renderState.GetKeybindings()
-	mousebindings := r.renderState.GetMousebindings()
-	configStatus := r.renderState.GetConfigStatus()
-
-	// Get sorted action list for consistent display (union of keyboard and mouse actions)
-	actionSet := make(map[string]bool)
-	for action := range keybindings {
-		actionSet[action] = true
-	}
-	for action := range mousebindings {
-		actionSet[action] = true
-	}
-
-	actions := make([]string, 0, len(actionSet))
-	for action := range actionSet {
-		actions = append(actions, action)
-	}
-	sort.Strings(actions)
+	w, h := float64(screen.Bounds().Dx()), float64(screen.Bounds().Dy())
 
 	// Calculate available space (accounting for padding)
-	padding := 40
-	availableWidth := float64(w - padding*2)
-	availableHeight := float64(h - padding*2)
+	padding := 40.0
+	availableWidth := w - padding*2
+	availableHeight := h - padding*2
 
 	// Calculate optimal font size
-	maxFontSize := r.renderState.GetFontSize()
-	minFontSize := 12.0
-
-	optimalFontSize, canFit := r.calculateOptimalFontSize(availableWidth, availableHeight, actions, keybindings, mousebindings, configStatus, maxFontSize, minFontSize)
+	optimalFontSize, canFit := r.calculateOptimalFontSize(availableWidth, availableHeight)
 
 	// If cannot fit even with minimum font size, show Fermat's joke
 	if !canFit {
@@ -205,17 +235,17 @@ func (r *Renderer) drawHelpOverlay(screen *ebiten.Image) {
 		return
 	}
 
+	// Get data needed for rendering
+	actions := r.getActionsList()
+	keybindings := r.renderState.GetKeybindings()
+	mousebindings := r.renderState.GetMousebindings()
+	configStatus := r.renderState.GetConfigStatus()
+
 	// Semi-transparent black background (lighter for more image transparency)
-	vector.DrawFilledRect(screen, 0, 0, float32(w), float32(h), color.RGBA{0, 0, 0, 128}, false)
+	r.drawFilledRect(screen, 0, 0, w, h, bgColorLight)
 
 	// Help text area with semi-transparent black background
-	textAreaX := float32(padding)
-	textAreaY := float32(padding)
-	textAreaW := float32(w - padding*2)
-	textAreaH := float32(h - padding*2)
-
-	// Semi-transparent black background for text area
-	vector.DrawFilledRect(screen, textAreaX, textAreaY, textAreaW, textAreaH, color.RGBA{0, 0, 0, 160}, false)
+	r.drawFilledRect(screen, padding, padding, w-padding*2, h-padding*2, bgColorMedium)
 
 	// Create font with dynamically calculated size
 	helpFont := &text.GoTextFace{
@@ -224,11 +254,8 @@ func (r *Renderer) drawHelpOverlay(screen *ebiten.Image) {
 	}
 
 	// Draw title
-	titleY := float64(padding + 30)
-	titleOp := &text.DrawOptions{}
-	titleOp.GeoM.Translate(float64(padding+20), titleY)
-	titleOp.ColorScale.ScaleWithColor(color.RGBA{255, 255, 255, 255})
-	text.Draw(screen, "HELP:", helpFont, titleOp)
+	titleY := padding + 30
+	r.drawText(screen, "HELP:", helpFont, padding+20, titleY, colorWhite)
 
 	currentY := titleY + optimalFontSize*2 // Start below title
 	lineHeight := optimalFontSize * 1.5
@@ -237,10 +264,7 @@ func (r *Renderer) drawHelpOverlay(screen *ebiten.Image) {
 	actionDescriptions := getActionDescriptions()
 
 	// Draw input bindings title
-	inputTitleOp := &text.DrawOptions{}
-	inputTitleOp.GeoM.Translate(float64(padding+20), currentY)
-	inputTitleOp.ColorScale.ScaleWithColor(color.RGBA{255, 255, 255, 255})
-	text.Draw(screen, "Controls (Keyboard | Mouse):", helpFont, inputTitleOp)
+	r.drawText(screen, "Controls (Keyboard | Mouse):", helpFont, padding+20, currentY, colorWhite)
 	currentY += lineHeight * 1.5
 
 	// Calculate column widths using text measurement
@@ -280,7 +304,7 @@ func (r *Renderer) drawHelpOverlay(screen *ebiten.Image) {
 	}
 
 	// Calculate column positions with proper spacing
-	actionColumnX := float64(padding + 40)
+	actionColumnX := padding + 40
 	arrowColumnX := actionColumnX + maxActionWidth + 20 // 20px spacing
 	inputColumnX := arrowColumnX + 30                   // Arrow width + spacing
 	descColumnX := inputColumnX + maxInputWidth + 20    // 20px spacing after input
@@ -302,16 +326,10 @@ func (r *Renderer) drawHelpOverlay(screen *ebiten.Image) {
 		}
 
 		// Draw action name (left-aligned)
-		actionOp := &text.DrawOptions{}
-		actionOp.GeoM.Translate(actionColumnX, currentY)
-		actionOp.ColorScale.ScaleWithColor(color.RGBA{200, 200, 255, 255}) // Light blue for action names
-		text.Draw(screen, action, helpFont, actionOp)
+		r.drawText(screen, action, helpFont, actionColumnX, currentY, colorLightBlue)
 
 		// Draw arrow
-		arrowOp := &text.DrawOptions{}
-		arrowOp.GeoM.Translate(arrowColumnX, currentY)
-		arrowOp.ColorScale.ScaleWithColor(color.RGBA{255, 255, 255, 255})
-		text.Draw(screen, "→", helpFont, arrowOp)
+		r.drawText(screen, "→", helpFont, arrowColumnX, currentY, colorWhite)
 
 		// Draw combined input bindings with color coding
 		currentInputX := inputColumnX
@@ -319,10 +337,7 @@ func (r *Renderer) drawHelpOverlay(screen *ebiten.Image) {
 		// Draw keyboard bindings in yellow
 		if len(keys) > 0 {
 			keysList := strings.Join(keys, ", ")
-			keysOp := &text.DrawOptions{}
-			keysOp.GeoM.Translate(currentInputX, currentY)
-			keysOp.ColorScale.ScaleWithColor(color.RGBA{255, 255, 100, 255}) // Yellow for keyboard
-			text.Draw(screen, keysList, helpFont, keysOp)
+			r.drawText(screen, keysList, helpFont, currentInputX, currentY, colorYellow)
 
 			keysWidth, _ := text.Measure(keysList, helpFont, 0)
 			currentInputX += keysWidth
@@ -330,10 +345,7 @@ func (r *Renderer) drawHelpOverlay(screen *ebiten.Image) {
 
 		// Draw separator if both keyboard and mouse bindings exist
 		if len(keys) > 0 && len(mouseActions) > 0 {
-			sepOp := &text.DrawOptions{}
-			sepOp.GeoM.Translate(currentInputX, currentY)
-			sepOp.ColorScale.ScaleWithColor(color.RGBA{255, 255, 255, 255}) // White for separator
-			text.Draw(screen, " | ", helpFont, sepOp)
+			r.drawText(screen, " | ", helpFont, currentInputX, currentY, colorWhite)
 
 			sepWidth, _ := text.Measure(" | ", helpFont, 0)
 			currentInputX += sepWidth
@@ -342,17 +354,11 @@ func (r *Renderer) drawHelpOverlay(screen *ebiten.Image) {
 		// Draw mouse bindings in cyan
 		if len(mouseActions) > 0 {
 			mouseList := strings.Join(mouseActions, ", ")
-			mouseOp := &text.DrawOptions{}
-			mouseOp.GeoM.Translate(currentInputX, currentY)
-			mouseOp.ColorScale.ScaleWithColor(color.RGBA{100, 255, 255, 255}) // Cyan for mouse
-			text.Draw(screen, mouseList, helpFont, mouseOp)
+			r.drawText(screen, mouseList, helpFont, currentInputX, currentY, colorCyan)
 		}
 
 		// Draw description on same line
-		descOp := &text.DrawOptions{}
-		descOp.GeoM.Translate(descColumnX, currentY)
-		descOp.ColorScale.ScaleWithColor(color.RGBA{180, 180, 180, 255}) // Gray for descriptions
-		text.Draw(screen, description, helpFont, descOp)
+		r.drawText(screen, description, helpFont, descColumnX, currentY, colorGray)
 
 		currentY += lineHeight
 	}
@@ -363,23 +369,17 @@ func (r *Renderer) drawHelpOverlay(screen *ebiten.Image) {
 	// Draw config status section
 
 	// Draw section title
-	sectionOp := &text.DrawOptions{}
-	sectionOp.GeoM.Translate(float64(padding+20), currentY)
-	sectionOp.ColorScale.ScaleWithColor(color.RGBA{255, 255, 255, 255})
-	text.Draw(screen, "System:", helpFont, sectionOp)
+	r.drawText(screen, "System:", helpFont, padding+20, currentY, colorWhite)
 	currentY += lineHeight
 
 	// Add config status
 	statusText := fmt.Sprintf("Config Status: %s", configStatus.Status)
 
-	descOp := &text.DrawOptions{}
-	descOp.GeoM.Translate(float64(padding+40), currentY)
+	statusColor := colorGreen
 	if configStatus.Status == "Warning" || configStatus.Status == "Error" {
-		descOp.ColorScale.ScaleWithColor(color.RGBA{255, 200, 100, 255}) // Orange for warnings/errors
-	} else {
-		descOp.ColorScale.ScaleWithColor(color.RGBA{100, 255, 100, 255}) // Green for OK
+		statusColor = colorOrange
 	}
-	text.Draw(screen, statusText, helpFont, descOp)
+	r.drawText(screen, statusText, helpFont, padding+40, currentY, statusColor)
 	currentY += lineHeight
 
 	// Add warnings if any
@@ -388,14 +388,11 @@ func (r *Renderer) drawHelpOverlay(screen *ebiten.Image) {
 			if i >= 2 { // Limit to first 2 warnings to avoid clutter
 				break
 			}
-			warningOp := &text.DrawOptions{}
-			warningOp.GeoM.Translate(float64(padding+40), currentY)
-			warningOp.ColorScale.ScaleWithColor(color.RGBA{255, 150, 150, 255}) // Light red for warnings
 			shortWarning := warning
 			if len(shortWarning) > 50 {
 				shortWarning = shortWarning[:47] + "..."
 			}
-			text.Draw(screen, "• "+shortWarning, helpFont, warningOp)
+			r.drawText(screen, "• "+shortWarning, helpFont, padding+40, currentY, colorLightRed)
 			currentY += lineHeight
 		}
 	}
@@ -403,7 +400,11 @@ func (r *Renderer) drawHelpOverlay(screen *ebiten.Image) {
 }
 
 // calculateRequiredDimensions calculates the required width and height for help content at a given font size
-func (r *Renderer) calculateRequiredDimensions(fontSize float64, actions []string, keybindings, mousebindings map[string][]string, configStatus ConfigLoadResult) (float64, float64) {
+func (r *Renderer) calculateRequiredDimensions(fontSize float64) (float64, float64) {
+	actions := r.getActionsList()
+	keybindings := r.renderState.GetKeybindings()
+	mousebindings := r.renderState.GetMousebindings()
+	configStatus := r.renderState.GetConfigStatus()
 	// Create temporary font for measurements
 	tempFont := &text.GoTextFace{
 		Source: r.helpFontSource,
@@ -543,15 +544,18 @@ func (r *Renderer) calculateRequiredDimensions(fontSize float64, actions []strin
 }
 
 // calculateOptimalFontSize finds the largest font size that fits within the given dimensions
-func (r *Renderer) calculateOptimalFontSize(availableWidth, availableHeight float64, actions []string, keybindings, mousebindings map[string][]string, configStatus ConfigLoadResult, maxFontSize, minFontSize float64) (float64, bool) {
+func (r *Renderer) calculateOptimalFontSize(availableWidth, availableHeight float64) (float64, bool) {
+	maxFontSize := r.renderState.GetFontSize()
+	minFontSize := 12.0
+
 	// Quick check: can we fit with minimum font size?
-	minWidth, minHeight := r.calculateRequiredDimensions(minFontSize, actions, keybindings, mousebindings, configStatus)
+	minWidth, minHeight := r.calculateRequiredDimensions(minFontSize)
 	if minWidth > availableWidth || minHeight > availableHeight {
 		return minFontSize, false // Cannot fit even with minimum size
 	}
 
 	// Quick check: can we fit with maximum font size?
-	maxWidth, maxHeight := r.calculateRequiredDimensions(maxFontSize, actions, keybindings, mousebindings, configStatus)
+	maxWidth, maxHeight := r.calculateRequiredDimensions(maxFontSize)
 	if maxWidth <= availableWidth && maxHeight <= availableHeight {
 		return maxFontSize, true // Fits perfectly with maximum size
 	}
@@ -565,7 +569,7 @@ func (r *Renderer) calculateOptimalFontSize(availableWidth, availableHeight floa
 	for high-low > epsilon {
 		mid := (low + high) / 2.0
 
-		reqWidth, reqHeight := r.calculateRequiredDimensions(mid, actions, keybindings, mousebindings, configStatus)
+		reqWidth, reqHeight := r.calculateRequiredDimensions(mid)
 
 		if reqWidth <= availableWidth && reqHeight <= availableHeight {
 			// This size fits, try larger
@@ -585,7 +589,7 @@ func (r *Renderer) drawMarginTooSmallMessage(screen *ebiten.Image) {
 	w, h := screen.Bounds().Dx(), screen.Bounds().Dy()
 
 	// Semi-transparent black background
-	vector.DrawFilledRect(screen, 0, 0, float32(w), float32(h), color.RGBA{0, 0, 0, 128}, false)
+	r.drawFilledRect(screen, 0, 0, float64(w), float64(h), bgColorLight)
 
 	// Create font for the joke (16px should be readable)
 	jokeFont := &text.GoTextFace{
@@ -609,16 +613,10 @@ func (r *Renderer) drawMarginTooSmallMessage(screen *ebiten.Image) {
 	subtitleY := messageY + messageHeight + 10 // 10px spacing
 
 	// Draw main message
-	messageOp := &text.DrawOptions{}
-	messageOp.GeoM.Translate(messageX, messageY)
-	messageOp.ColorScale.ScaleWithColor(color.RGBA{255, 255, 255, 255})
-	text.Draw(screen, message, jokeFont, messageOp)
+	r.drawText(screen, message, jokeFont, messageX, messageY, colorWhite)
 
 	// Draw subtitle in gray
-	subtitleOp := &text.DrawOptions{}
-	subtitleOp.GeoM.Translate(subtitleX, subtitleY)
-	subtitleOp.ColorScale.ScaleWithColor(color.RGBA{180, 180, 180, 255})
-	text.Draw(screen, subtitle, jokeFont, subtitleOp)
+	r.drawText(screen, subtitle, jokeFont, subtitleX, subtitleY, colorGray)
 }
 
 func (r *Renderer) drawPageInputOverlay(screen *ebiten.Image) {
@@ -658,26 +656,18 @@ func (r *Renderer) drawPageInputOverlay(screen *ebiten.Image) {
 	boxY := (float64(h) - boxHeight) / 2
 
 	// Semi-transparent black background
-	vector.DrawFilledRect(screen, float32(boxX), float32(boxY), float32(boxWidth), float32(boxHeight), color.RGBA{0, 0, 0, 200}, false)
+	r.drawFilledRect(screen, boxX, boxY, boxWidth, boxHeight, bgColorDark)
 
 	// Draw input text (centered)
-	inputTextOp := &text.DrawOptions{}
 	inputTextX := boxX + (boxWidth-inputWidth)/2
-	inputTextOp.GeoM.Translate(inputTextX, boxY+float64(padding))
-	inputTextOp.ColorScale.ScaleWithColor(color.RGBA{255, 255, 255, 255})
-	text.Draw(screen, inputText, inputFont, inputTextOp)
+	r.drawText(screen, inputText, inputFont, inputTextX, boxY+float64(padding), colorWhite)
 
 	// Draw range text (centered, below input text)
-	rangeTextOp := &text.DrawOptions{}
 	rangeTextX := boxX + (boxWidth-rangeWidth)/2
-	rangeTextOp.GeoM.Translate(rangeTextX, boxY+float64(padding)+inputHeight+10)
-	rangeTextOp.ColorScale.ScaleWithColor(color.RGBA{192, 192, 192, 255}) // Slightly dimmed
-	text.Draw(screen, rangeText, rangeFont, rangeTextOp)
+	r.drawText(screen, rangeText, rangeFont, rangeTextX, boxY+float64(padding)+inputHeight+10, colorLightGray)
 }
 
 func (r *Renderer) drawInfoDisplay(screen *ebiten.Image) {
-	w, h := screen.Bounds().Dx(), screen.Bounds().Dy()
-
 	// Create font for info display (same size as help text)
 	infoFont := &text.GoTextFace{
 		Source: r.helpFontSource,
@@ -691,29 +681,24 @@ func (r *Renderer) drawInfoDisplay(screen *ebiten.Image) {
 	textWidth, textHeight := text.Measure(infoText, infoFont, 0)
 
 	// Position at bottom right corner
-	padding := 10
-	textX := float64(w) - textWidth - float64(padding)
-	textY := float64(h) - textHeight - float64(padding)
+	padding := 10.0
+	textX := float64(screen.Bounds().Dx()) - textWidth - padding
+	textY := float64(screen.Bounds().Dy()) - textHeight - padding
 
 	// Semi-transparent background
-	bgPadding := 5
-	bgX := textX - float64(bgPadding)
-	bgY := textY - textHeight - float64(bgPadding)
-	bgW := textWidth + float64(bgPadding*2)
-	bgH := textHeight + float64(bgPadding*2)
+	bgPadding := 5.0
+	bgX := textX - bgPadding
+	bgY := textY - textHeight - bgPadding
+	bgW := textWidth + bgPadding*2
+	bgH := textHeight + bgPadding*2
 
-	vector.DrawFilledRect(screen, float32(bgX), float32(bgY), float32(bgW), float32(bgH), color.RGBA{0, 0, 0, 128}, false)
+	r.drawFilledRect(screen, bgX, bgY, bgW, bgH, bgColorLight)
 
 	// Draw text
-	textOp := &text.DrawOptions{}
-	textOp.GeoM.Translate(textX, textY)
-	textOp.ColorScale.ScaleWithColor(color.RGBA{255, 255, 255, 255})
-	text.Draw(screen, infoText, infoFont, textOp)
+	r.drawText(screen, infoText, infoFont, textX, textY, colorWhite)
 }
 
 func (r *Renderer) drawOverlayMessage(screen *ebiten.Image) {
-	w, h := screen.Bounds().Dx(), screen.Bounds().Dy()
-
 	// Create font for overlay message
 	messageFont := &text.GoTextFace{
 		Source: r.helpFontSource,
@@ -724,20 +709,17 @@ func (r *Renderer) drawOverlayMessage(screen *ebiten.Image) {
 	textWidth, textHeight := text.Measure(r.renderState.GetOverlayMessage(), messageFont, 0)
 
 	// Calculate position (center of screen)
-	padding := 20
-	boxWidth := textWidth + float64(padding*2)
-	boxHeight := textHeight + float64(padding*2)
-	boxX := (float64(w) - boxWidth) / 2
-	boxY := (float64(h) - boxHeight) / 2
+	padding := 20.0
+	boxWidth := textWidth + padding*2
+	boxHeight := textHeight + padding*2
+	boxX := (float64(screen.Bounds().Dx()) - boxWidth) / 2
+	boxY := (float64(screen.Bounds().Dy()) - boxHeight) / 2
 
 	// Semi-transparent black background
-	vector.DrawFilledRect(screen, float32(boxX), float32(boxY), float32(boxWidth), float32(boxHeight), color.RGBA{0, 0, 0, 200}, false)
+	r.drawFilledRect(screen, boxX, boxY, boxWidth, boxHeight, bgColorDark)
 
 	// Draw text
-	textOp := &text.DrawOptions{}
-	textOp.GeoM.Translate(boxX+float64(padding), boxY+float64(padding))
-	textOp.ColorScale.ScaleWithColor(color.RGBA{255, 255, 255, 255})
-	text.Draw(screen, r.renderState.GetOverlayMessage(), messageFont, textOp)
+	r.drawText(screen, r.renderState.GetOverlayMessage(), messageFont, boxX+padding, boxY+padding, colorWhite)
 }
 
 func (r *Renderer) applyTransformations(img *ebiten.Image) *ebiten.Image {
@@ -818,8 +800,8 @@ func (r *Renderer) createBookModeImage(leftImg, rightImg *ebiten.Image) *ebiten.
 }
 
 func (r *Renderer) drawTransformedImageCentered(screen *ebiten.Image, img *ebiten.Image) {
-	iw, ih := img.Bounds().Dx(), img.Bounds().Dy()
-	w, h := screen.Bounds().Dx(), screen.Bounds().Dy()
+	iw, ih := float64(img.Bounds().Dx()), float64(img.Bounds().Dy())
+	w, h := float64(screen.Bounds().Dx()), float64(screen.Bounds().Dy())
 
 	op := &ebiten.DrawImageOptions{}
 	op.Filter = ebiten.FilterLinear
@@ -831,48 +813,48 @@ func (r *Renderer) drawTransformedImageCentered(screen *ebiten.Image, img *ebite
 	if r.renderState.GetZoomMode() == ZoomModeFit {
 		// Automatic fit mode (original behavior)
 		if r.renderState.IsFullscreen() {
-			scale = math.Min(float64(w)/float64(iw), float64(h)/float64(ih))
+			scale = math.Min(w/iw, h/ih)
 		} else {
 			if iw > w || ih > h {
-				scale = math.Min(float64(w)/float64(iw), float64(h)/float64(ih))
+				scale = math.Min(w/iw, h/ih)
 			} else {
 				scale = 1
 			}
 		}
 		// Center the image
-		sw, sh := float64(iw)*scale, float64(ih)*scale
-		offsetX = float64(w)/2 - sw/2
-		offsetY = float64(h)/2 - sh/2
+		sw, sh := iw*scale, ih*scale
+		offsetX = w/2 - sw/2
+		offsetY = h/2 - sh/2
 	} else {
 		// Manual zoom mode
 		scale = r.renderState.GetZoomLevel()
-		sw, sh := float64(iw)*scale, float64(ih)*scale
+		sw, sh := iw*scale, ih*scale
 
 		// Apply pan offset with boundary clamping
 		panX := r.renderState.GetPanOffsetX()
 		panY := r.renderState.GetPanOffsetY()
 
 		// Calculate boundaries
-		minX := float64(w) - sw
+		minX := w - sw
 		maxX := 0.0
-		minY := float64(h) - sh
+		minY := h - sh
 		maxY := 0.0
 
 		// Clamp pan offsets to keep image on screen
-		if sw <= float64(w) {
+		if sw <= w {
 			// Image is smaller than screen width, center horizontally
-			offsetX = float64(w)/2 - sw/2
+			offsetX = w/2 - sw/2
 		} else {
 			// Image is larger than screen, apply pan with clamping
-			offsetX = math.Max(minX, math.Min(maxX, float64(w)/2-sw/2+panX))
+			offsetX = math.Max(minX, math.Min(maxX, w/2-sw/2+panX))
 		}
 
-		if sh <= float64(h) {
+		if sh <= h {
 			// Image is smaller than screen height, center vertically
-			offsetY = float64(h)/2 - sh/2
+			offsetY = h/2 - sh/2
 		} else {
 			// Image is larger than screen, apply pan with clamping
-			offsetY = math.Max(minY, math.Min(maxY, float64(h)/2-sh/2+panY))
+			offsetY = math.Max(minY, math.Min(maxY, h/2-sh/2+panY))
 		}
 	}
 
