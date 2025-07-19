@@ -164,18 +164,30 @@ func (g *Game) saveCurrentConfig() {
 
 func (g *Game) rotateLeft() {
 	g.rotationAngle = (g.rotationAngle + 270) % 360
+	g.showOverlayMessage(fmt.Sprintf("Rotation: %d°", g.rotationAngle))
 }
 
 func (g *Game) rotateRight() {
 	g.rotationAngle = (g.rotationAngle + 90) % 360
+	g.showOverlayMessage(fmt.Sprintf("Rotation: %d°", g.rotationAngle))
 }
 
 func (g *Game) flipHorizontal() {
 	g.flipH = !g.flipH
+	status := "OFF"
+	if g.flipH {
+		status = "ON"
+	}
+	g.showOverlayMessage(fmt.Sprintf("Flip Horizontal: %s", status))
 }
 
 func (g *Game) flipVertical() {
 	g.flipV = !g.flipV
+	status := "OFF"
+	if g.flipV {
+		status = "ON"
+	}
+	g.showOverlayMessage(fmt.Sprintf("Flip Vertical: %s", status))
 }
 
 func (g *Game) cycleSortMethod() {
@@ -435,6 +447,7 @@ func (g *Game) toggleBookMode() {
 		// Currently in temp single mode or book mode, switch to single mode
 		g.bookMode = false
 		g.tempSingleMode = false
+		g.showOverlayMessage("Book Mode: OFF")
 	} else {
 		// Currently in single mode, switch to book mode
 		pathsCount := g.imageManager.GetPathsCount()
@@ -460,6 +473,7 @@ func (g *Game) toggleBookMode() {
 			g.bookMode = true
 			g.tempSingleMode = false
 		}
+		g.showOverlayMessage("Book Mode: ON")
 	}
 
 	// Save the book mode preference (true even if in temp single mode)
