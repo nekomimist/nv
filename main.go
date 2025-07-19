@@ -358,15 +358,16 @@ func (g *Game) clampPanToLimits() {
 		return
 	}
 
-	w, h := g.savedWinW, g.savedWinH
+	deviceScale := ebiten.Monitor().DeviceScaleFactor()
+	w, h := float64(g.savedWinW)*deviceScale, float64(g.savedWinH)*deviceScale
 	scale := g.zoomState.Level
 	sw, sh := float64(iw)*scale, float64(ih)*scale
 
 	// Calculate X boundaries
-	if sw > float64(w) {
+	if sw > w {
 		// Image is wider than screen, apply pan limits
-		maxPanX := sw/2 - float64(w)/2 // Right limit
-		minPanX := float64(w)/2 - sw/2 // Left limit
+		maxPanX := sw/2 - w/2 // Right limit
+		minPanX := w/2 - sw/2 // Left limit
 
 		if g.zoomState.PanOffsetX > maxPanX {
 			g.zoomState.PanOffsetX = maxPanX
@@ -379,10 +380,10 @@ func (g *Game) clampPanToLimits() {
 	}
 
 	// Calculate Y boundaries
-	if sh > float64(h) {
+	if sh > h {
 		// Image is taller than screen, apply pan limits
-		maxPanY := sh/2 - float64(h)/2 // Bottom limit
-		minPanY := float64(h)/2 - sh/2 // Top limit
+		maxPanY := sh/2 - h/2 // Bottom limit
+		minPanY := h/2 - sh/2 // Top limit
 
 		if g.zoomState.PanOffsetY > maxPanY {
 			g.zoomState.PanOffsetY = maxPanY
@@ -1060,7 +1061,7 @@ func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {
 	}
 
 	// Hi-DPI support: multiply by device scale factor for sharper rendering
-	scale := ebiten.DeviceScaleFactor()
+	scale := ebiten.Monitor().DeviceScaleFactor()
 	return int(float64(outsideWidth) * scale), int(float64(outsideHeight) * scale)
 }
 

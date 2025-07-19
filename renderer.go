@@ -830,14 +830,13 @@ func (r *Renderer) drawTransformedImageCentered(screen *ebiten.Image, img *ebite
 
 	if r.renderState.GetZoomMode() == ZoomModeFit {
 		// Automatic fit mode (original behavior)
-		deviceScale := ebiten.DeviceScaleFactor()
 		if r.renderState.IsFullscreen() {
 			scale = math.Min(float64(w)/float64(iw), float64(h)/float64(ih))
 		} else {
 			if iw > w || ih > h {
 				scale = math.Min(float64(w)/float64(iw), float64(h)/float64(ih))
 			} else {
-				scale = deviceScale
+				scale = 1
 			}
 		}
 		// Center the image
