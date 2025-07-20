@@ -42,7 +42,7 @@ type RenderState interface {
 	GetPanOffsetY() float64
 
 	// Display data
-	GetCurrentPageNumber() string
+	GetCurrentIndex() int
 	GetTotalPagesCount() int
 	GetFontSize() float64
 	GetConfigStatus() ConfigLoadResult

@@ -586,28 +586,6 @@ func (g *Game) expandToDirectoryAndJump() {
 	g.showOverlayMessage(fmt.Sprintf("Loaded %d images from directory", len(newPaths)))
 }
 
-func (g *Game) getCurrentPageNumber() string {
-	total := g.imageManager.GetPathsCount()
-	if total == 0 {
-		return "0 / 0"
-	}
-
-	if g.bookMode && !g.tempSingleMode {
-		// In book mode, show range of pages
-		leftPage := g.idx + 1
-		rightPage := g.idx + 2
-		if rightPage > total {
-			rightPage = total
-		}
-		if leftPage == rightPage {
-			return fmt.Sprintf("%d / %d", leftPage, total)
-		}
-		return fmt.Sprintf("%d-%d / %d", leftPage, rightPage, total)
-	}
-
-	// Single page mode or temp single mode
-	return fmt.Sprintf("%d / %d", g.idx+1, total)
-}
 
 func (g *Game) saveCurrentWindowSize() {
 	if g.fullscreen {
@@ -712,8 +690,9 @@ func (g *Game) GetPanOffsetY() float64 {
 	return g.zoomState.PanOffsetY
 }
 
-func (g *Game) GetCurrentPageNumber() string {
-	return g.getCurrentPageNumber()
+
+func (g *Game) GetCurrentIndex() int {
+	return g.idx
 }
 
 func (g *Game) GetTotalPagesCount() int {
@@ -739,6 +718,7 @@ func (g *Game) GetMousebindings() map[string][]string {
 func (g *Game) GetMouseSettings() MouseSettings {
 	return g.mousebindingManager.GetSettings()
 }
+
 
 // InputActions interface implementation
 func (g *Game) ToggleHelp() {
@@ -866,10 +846,6 @@ func (g *Game) PanRight() {
 
 func (g *Game) PanByDelta(deltaX, deltaY float64) {
 	g.panByDelta(deltaX, deltaY)
-}
-
-func (g *Game) GetCurrentIndex() int {
-	return g.idx
 }
 
 func (g *Game) Update() error {
