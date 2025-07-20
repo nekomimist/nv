@@ -1,7 +1,6 @@
 package main
 
 import (
-	"github.com/hajimehoshi/ebiten/v2"
 	"time"
 )
 
@@ -16,9 +15,6 @@ type RenderState interface {
 	IsFullscreen() bool
 
 	// Rendering data
-	GetCurrentImage() *ebiten.Image
-	GetBookModeImages() (*ebiten.Image, *ebiten.Image)
-	ShouldUseBookMode(left, right *ebiten.Image) bool
 	GetDisplayContent() *DisplayContent
 
 	// Transformation state
@@ -41,13 +37,11 @@ type RenderState interface {
 	GetPanOffsetY() float64
 
 	// Display data
-	GetCurrentIndex() int
 	GetTotalPagesCount() int
 	GetFontSize() float64
 	GetConfigStatus() ConfigLoadResult
 	GetKeybindings() map[string][]string
 	GetMousebindings() map[string][]string
-	GetMouseSettings() MouseSettings
 }
 
 // RenderStateSnapshot captures a snapshot of render state for comparison
@@ -156,11 +150,7 @@ type InputActions interface {
 	PanRight()
 	PanByDelta(deltaX, deltaY float64) // Mouse drag pan
 
-	// Messages
-	ShowOverlayMessage(message string)
-
 	// Common data access
-	GetCurrentIndex() int
 	GetTotalPagesCount() int
 }
 

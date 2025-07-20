@@ -693,17 +693,6 @@ func (g *Game) IsFullscreen() bool {
 	return g.fullscreen
 }
 
-func (g *Game) GetCurrentImage() *ebiten.Image {
-	return g.getCurrentImage()
-}
-
-func (g *Game) GetBookModeImages() (*ebiten.Image, *ebiten.Image) {
-	return g.getBookModeImages()
-}
-
-func (g *Game) ShouldUseBookMode(left, right *ebiten.Image) bool {
-	return g.shouldUseBookMode(left, right)
-}
 
 func (g *Game) GetRotationAngle() int {
 	return g.rotationAngle
@@ -759,10 +748,6 @@ func (g *Game) GetPanOffsetY() float64 {
 	return g.zoomState.PanOffsetY
 }
 
-func (g *Game) GetCurrentIndex() int {
-	return g.idx
-}
-
 func (g *Game) GetTotalPagesCount() int {
 	return g.imageManager.GetPathsCount()
 }
@@ -781,10 +766,6 @@ func (g *Game) GetKeybindings() map[string][]string {
 
 func (g *Game) GetMousebindings() map[string][]string {
 	return g.mousebindingManager.GetMousebindings()
-}
-
-func (g *Game) GetMouseSettings() MouseSettings {
-	return g.mousebindingManager.GetSettings()
 }
 
 func (g *Game) GetDisplayContent() *DisplayContent {
@@ -876,10 +857,6 @@ func (g *Game) FlipHorizontal() {
 
 func (g *Game) FlipVertical() {
 	g.flipVertical()
-}
-
-func (g *Game) ShowOverlayMessage(message string) {
-	g.showOverlayMessage(message)
 }
 
 // Zoom and pan actions for InputActions interface
