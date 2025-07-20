@@ -100,19 +100,19 @@ func (r *Renderer) Draw(screen *ebiten.Image) {
 	// Clear the screen since SetScreenClearedEveryFrame(false) is enabled
 	screen.Clear()
 
-	var actualDisplayedImages int
-	if r.renderState.IsTempSingleMode() || !r.renderState.IsBookMode() {
-		// Single page mode or temporary single mode
-		r.drawSingleImage(screen)
-		actualDisplayedImages = 1
-	} else {
-		// Book mode
-		actualDisplayedImages = r.drawBookMode(screen)
+	// Get display content - all rendering decisions are already made
+	content := r.renderState.GetDisplayContent()
+	if content == nil || content.LeftImage == nil {
+		// No content to display
+		return
 	}
+
+	// Draw images (unified handling for single and book mode)
+	r.drawImagesDirect(screen, content.LeftImage, content.RightImage)
 
 	// Draw info display (page status, etc.) at bottom of screen if enabled
 	if r.renderState.IsShowingInfo() {
-		r.drawInfoDisplay(screen, actualDisplayedImages)
+		r.drawInfoDisplay(screen)
 	}
 
 	// Draw help overlay if enabled
@@ -129,44 +129,6 @@ func (r *Renderer) Draw(screen *ebiten.Image) {
 	if r.renderState.GetOverlayMessage() != "" && time.Since(r.renderState.GetOverlayMessageTime()) < overlayMessageDuration {
 		r.drawOverlayMessage(screen)
 	}
-}
-
-func (r *Renderer) drawSingleImage(screen *ebiten.Image) {
-	img := r.renderState.GetCurrentImage()
-	if img == nil {
-		return
-	}
-
-	// Apply transformations to the image
-	transformedImg := r.applyTransformations(img)
-
-	// Use the common drawing logic
-	r.drawTransformedImageCentered(screen, transformedImg)
-}
-
-func (r *Renderer) drawBookMode(screen *ebiten.Image) int {
-	leftImg, rightImg := r.renderState.GetBookModeImages()
-	if leftImg == nil && rightImg == nil {
-		return 0
-	}
-
-	// Check if images are compatible for book mode display
-	if !r.renderState.ShouldUseBookMode(leftImg, rightImg) {
-		// Fall back to single page display
-		r.drawSingleImage(screen)
-		return 1
-	}
-
-	// Create a combined image for book mode
-	combinedImg := r.createBookModeImage(leftImg, rightImg)
-
-	// Apply transformations to the combined image
-	transformedImg := r.applyTransformations(combinedImg)
-
-	// Draw the transformed combined image
-	r.drawTransformedImageCentered(screen, transformedImg)
-
-	return 2
 }
 
 func (r *Renderer) drawImageInRegion(screen *ebiten.Image, img *ebiten.Image, x, y, maxW, maxH int) {
@@ -671,7 +633,7 @@ func (r *Renderer) drawPageInputOverlay(screen *ebiten.Image) {
 	r.drawText(screen, rangeText, rangeFont, rangeTextX, boxY+float64(padding)+inputHeight+10, colorLightGray)
 }
 
-func (r *Renderer) drawInfoDisplay(screen *ebiten.Image, actualDisplayedImages int) {
+func (r *Renderer) drawInfoDisplay(screen *ebiten.Image) {
 	// Create font for info display (same size as help text)
 	infoFont := &text.GoTextFace{
 		Source: r.helpFontSource,
@@ -679,7 +641,7 @@ func (r *Renderer) drawInfoDisplay(screen *ebiten.Image, actualDisplayedImages i
 	}
 
 	// Get page status text
-	infoText := r.buildPageNumberString(actualDisplayedImages)
+	infoText := r.buildPageNumberString()
 
 	// Measure text dimensions
 	textWidth, textHeight := text.Measure(infoText, infoFont, 0)
@@ -803,33 +765,27 @@ func (r *Renderer) createBookModeImage(leftImg, rightImg *ebiten.Image) *ebiten.
 	return combinedImg
 }
 
-func (r *Renderer) buildPageNumberString(actualDisplayedImages int) string {
-	total := r.renderState.GetTotalPagesCount()
-	if total == 0 {
+func (r *Renderer) buildPageNumberString() string {
+	content := r.renderState.GetDisplayContent()
+	if content == nil {
 		return "0 / 0"
 	}
 
-	// Get current index from the render state
-	currentIdx := r.renderState.GetCurrentIndex()
+	total := content.Metadata.TotalPages
+	currentPage := content.Metadata.CurrentPage
+	actualImages := content.Metadata.ActualImages
 
-	if r.renderState.IsBookMode() && !r.renderState.IsTempSingleMode() {
-		// In book mode, show range based on actually displayed images
-		leftPage := currentIdx + 1
-		if actualDisplayedImages == 1 {
-			// Only one image was actually displayed
-			return fmt.Sprintf("%d / %d", leftPage, total)
-		} else if actualDisplayedImages == 2 {
-			// Two images were displayed
-			rightPage := currentIdx + 2
-			if rightPage > total {
-				rightPage = total
-			}
-			return fmt.Sprintf("%d-%d / %d", leftPage, rightPage, total)
+	if actualImages == 2 {
+		// 2 images displayed = book mode
+		rightPage := currentPage + 1
+		if rightPage > total {
+			rightPage = total
 		}
+		return fmt.Sprintf("%d-%d / %d", currentPage, rightPage, total)
+	} else {
+		// 1 image displayed = single mode
+		return fmt.Sprintf("%d / %d", currentPage, total)
 	}
-
-	// Single page mode, temp single mode, or no images displayed
-	return fmt.Sprintf("%d / %d", currentIdx+1, total)
 }
 
 func (r *Renderer) drawTransformedImageCentered(screen *ebiten.Image, img *ebiten.Image) {
@@ -895,4 +851,20 @@ func (r *Renderer) drawTransformedImageCentered(screen *ebiten.Image, img *ebite
 	op.GeoM.Translate(offsetX, offsetY)
 
 	screen.DrawImage(img, op)
+}
+
+// drawImagesDirect draws images (single or book mode) without any mode checking
+func (r *Renderer) drawImagesDirect(screen *ebiten.Image, leftImg, rightImg *ebiten.Image) {
+	if leftImg == nil {
+		return
+	}
+
+	// createBookModeImage handles both single (rightImg=nil) and book mode cases
+	finalImg := r.createBookModeImage(leftImg, rightImg)
+
+	// Apply transformations to the final image
+	transformedImg := r.applyTransformations(finalImg)
+
+	// Draw the transformed image
+	r.drawTransformedImageCentered(screen, transformedImg)
 }

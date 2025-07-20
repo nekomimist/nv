@@ -13,14 +13,13 @@ const (
 // RenderState provides read-only access to game state for the renderer
 type RenderState interface {
 	// Display modes
-	IsBookMode() bool
-	IsTempSingleMode() bool
 	IsFullscreen() bool
 
 	// Rendering data
 	GetCurrentImage() *ebiten.Image
 	GetBookModeImages() (*ebiten.Image, *ebiten.Image)
 	ShouldUseBookMode(left, right *ebiten.Image) bool
+	GetDisplayContent() *DisplayContent
 
 	// Transformation state
 	GetRotationAngle() int

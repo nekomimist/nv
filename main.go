@@ -61,6 +61,20 @@ type ZoomState struct {
 	PanOffsetY float64  // Pan offset Y coordinate
 }
 
+// DisplayMetadata contains information about what is being displayed
+type DisplayMetadata struct {
+	CurrentPage  int // Current page number (1-based)
+	TotalPages   int // Total number of pages
+	ActualImages int // Number of images actually being displayed (1 or 2)
+}
+
+// DisplayContent represents what should be displayed on screen
+type DisplayContent struct {
+	LeftImage  *ebiten.Image   // Primary image (always present for single/left side of book)
+	RightImage *ebiten.Image   // Secondary image (only present in book mode, nil for single)
+	Metadata   DisplayMetadata // Display metadata for info overlay
+}
+
 // NewZoomState creates a new zoom state with default values
 func NewZoomState() *ZoomState {
 	return &ZoomState{
@@ -111,6 +125,9 @@ type Game struct {
 	tempSingleMode      bool // Temporary single page mode (return to book mode after navigation)
 	showHelp            bool // Help overlay display
 	showInfo            bool // Info display (page numbers, metadata, etc.)
+
+	// Display content state (what should be rendered)
+	displayContent *DisplayContent
 
 	// Zoom and pan state
 	zoomState *ZoomState
@@ -205,6 +222,7 @@ func (g *Game) cycleSortMethod() {
 			g.imageManager.SetPaths(paths)
 			// Reset to first image
 			g.idx = 0
+			g.calculateDisplayContent()
 		}
 	}
 }
@@ -326,30 +344,22 @@ func (g *Game) getPanStep() (float64, float64) {
 
 // getTransformedImageSize calculates the size of the currently displayed image after transformations
 func (g *Game) getTransformedImageSize() (int, int) {
+	content := g.displayContent
+	if content == nil || content.LeftImage == nil {
+		return 0, 0
+	}
+
 	var w, h int
 
-	if g.tempSingleMode || !g.bookMode {
-		// Single Image Mode
-		img := g.getCurrentImage()
-		if img == nil {
-			return 0, 0
-		}
-		w, h = img.Bounds().Dx(), img.Bounds().Dy()
+	if content.RightImage == nil {
+		// Single image
+		w, h = content.LeftImage.Bounds().Dx(), content.LeftImage.Bounds().Dy()
 	} else {
-		// Book Mode
-		leftImg, rightImg := g.getBookModeImages()
-		if leftImg == nil {
-			return 0, 0
-		}
-
-		if rightImg == nil {
-			w, h = leftImg.Bounds().Dx(), leftImg.Bounds().Dy()
-		} else {
-			leftW, leftH := leftImg.Bounds().Dx(), leftImg.Bounds().Dy()
-			rightW, rightH := rightImg.Bounds().Dx(), rightImg.Bounds().Dy()
-			w = leftW + rightW + imageGap
-			h = int(math.Max(float64(leftH), float64(rightH)))
-		}
+		// Book mode - calculate combined size
+		leftW, leftH := content.LeftImage.Bounds().Dx(), content.LeftImage.Bounds().Dy()
+		rightW, rightH := content.RightImage.Bounds().Dx(), content.RightImage.Bounds().Dy()
+		w = leftW + rightW + imageGap
+		h = int(math.Max(float64(leftH), float64(rightH)))
 	}
 
 	// Apply transformation size calculation (same as applyTransformations)
@@ -433,6 +443,71 @@ func (g *Game) shouldUseBookMode(leftImg, rightImg *ebiten.Image) bool {
 	return aspectRatio <= g.config.AspectRatioThreshold
 }
 
+// calculateDisplayContent determines what should be displayed based on current state
+func (g *Game) calculateDisplayContent() {
+	pathsCount := g.imageManager.GetPathsCount()
+
+	if pathsCount == 0 {
+		g.displayContent = nil
+		return
+	}
+
+	currentPage := g.idx + 1 // Convert to 1-based
+
+	if g.tempSingleMode || !g.bookMode {
+		// Single mode: only left image, right image is nil
+		g.displayContent = &DisplayContent{
+			LeftImage:  g.getCurrentImage(),
+			RightImage: nil,
+			Metadata: DisplayMetadata{
+				CurrentPage:  currentPage,
+				TotalPages:   pathsCount,
+				ActualImages: 1,
+			},
+		}
+	} else {
+		// Book mode: try to get both images
+		leftImg, rightImg := g.getBookModeImages()
+
+		if g.shouldUseBookMode(leftImg, rightImg) {
+			// Book mode: both images
+			g.displayContent = &DisplayContent{
+				LeftImage:  leftImg,
+				RightImage: rightImg,
+				Metadata: DisplayMetadata{
+					CurrentPage:  currentPage,
+					TotalPages:   pathsCount,
+					ActualImages: 2,
+				},
+			}
+		} else {
+			// Book mode not possible: fallback to single
+			// In right-to-left mode, leftImg might be nil and rightImg non-nil (at end)
+			var singleImg *ebiten.Image
+			if leftImg != nil {
+				singleImg = leftImg
+			} else if rightImg != nil {
+				singleImg = rightImg
+			} else {
+				// Both images are nil - this should not happen in normal operation
+				log.Printf("Warning: Both leftImg and rightImg are nil in calculateDisplayContent() at idx=%d, pathsCount=%d, bookMode=%v, tempSingleMode=%v",
+					g.idx, pathsCount, g.bookMode, g.tempSingleMode)
+				singleImg = nil
+			}
+
+			g.displayContent = &DisplayContent{
+				LeftImage:  singleImg,
+				RightImage: nil,
+				Metadata: DisplayMetadata{
+					CurrentPage:  currentPage,
+					TotalPages:   pathsCount,
+					ActualImages: 1,
+				},
+			}
+		}
+	}
+}
+
 func (g *Game) showOverlayMessage(message string) {
 	g.overlayMessage = message
 	if message != "" {
@@ -478,6 +553,7 @@ func (g *Game) toggleBookMode() {
 
 	// Save the book mode preference (true even if in temp single mode)
 	g.config.BookMode = g.bookMode
+	g.calculateDisplayContent()
 }
 
 func (g *Game) processPageInput() {
@@ -539,6 +615,7 @@ func (g *Game) jumpToPage(pageNum int) {
 
 	// Reset zoom state when image changes
 	g.zoomState.Reset()
+	g.calculateDisplayContent()
 }
 
 func (g *Game) expandToDirectoryAndJump() {
@@ -584,8 +661,8 @@ func (g *Game) expandToDirectoryAndJump() {
 
 	// Show success message
 	g.showOverlayMessage(fmt.Sprintf("Loaded %d images from directory", len(newPaths)))
+	g.calculateDisplayContent()
 }
-
 
 func (g *Game) saveCurrentWindowSize() {
 	if g.fullscreen {
@@ -612,14 +689,6 @@ func (g *Game) Exit() {
 }
 
 // RenderState interface implementation
-func (g *Game) IsBookMode() bool {
-	return g.bookMode
-}
-
-func (g *Game) IsTempSingleMode() bool {
-	return g.tempSingleMode
-}
-
 func (g *Game) IsFullscreen() bool {
 	return g.fullscreen
 }
@@ -690,7 +759,6 @@ func (g *Game) GetPanOffsetY() float64 {
 	return g.zoomState.PanOffsetY
 }
 
-
 func (g *Game) GetCurrentIndex() int {
 	return g.idx
 }
@@ -719,6 +787,9 @@ func (g *Game) GetMouseSettings() MouseSettings {
 	return g.mousebindingManager.GetSettings()
 }
 
+func (g *Game) GetDisplayContent() *DisplayContent {
+	return g.displayContent
+}
 
 // InputActions interface implementation
 func (g *Game) ToggleHelp() {
@@ -879,35 +950,35 @@ func (g *Game) navigateNext() {
 		g.tempSingleMode = false
 		g.bookMode = true
 		g.zoomState.Reset()
+		g.calculateDisplayContent()
 		return
 	}
 
-	if g.bookMode && !ebiten.IsKeyPressed(ebiten.KeyShift) {
-		// Check if we can actually display in book mode
-		leftImg, rightImg := g.imageManager.GetBookModeImages(g.idx, g.config.RightToLeft)
-		if g.shouldUseBookMode(leftImg, rightImg) {
-			if g.idx+2 >= pathsCount {
-				// Cannot advance 2 pages = all displayed with current pair
-				g.showOverlayMessage("Last page")
-			} else if g.idx+2+1 >= pathsCount {
-				// Advancing 2 pages would make next pair impossible (=becomes last single page)
-				g.idx += 2
-				g.bookMode = false
-				g.tempSingleMode = true
-			} else {
-				// Normal 2-page movement
-				g.idx += 2
-			}
-			g.zoomState.Reset()
-			return
+	if g.bookMode && !ebiten.IsKeyPressed(ebiten.KeyShift) &&
+		g.displayContent != nil && g.displayContent.RightImage != nil {
+		// Currently displaying 2 images = book mode is possible = 2-page movement
+		if g.idx+2 >= pathsCount {
+			// Cannot advance 2 pages = all displayed with current pair
+			g.showOverlayMessage("Last page")
+		} else if g.idx+2+1 >= pathsCount {
+			// Advancing 2 pages would make next pair impossible (=becomes last single page)
+			g.idx += 2
+			g.bookMode = false
+			g.tempSingleMode = true
+		} else {
+			// Normal 2-page movement
+			g.idx += 2
 		}
-		// shouldUseBookMode = false means single page movement
+		g.zoomState.Reset()
+		g.calculateDisplayContent()
+		return
 	}
 	// Single page mode or Shift+key
 	g.idx++
 
 	// Reset zoom state when image changes
 	g.zoomState.Reset()
+	g.calculateDisplayContent()
 }
 
 func (g *Game) navigatePrevious() {
@@ -930,30 +1001,31 @@ func (g *Game) navigatePrevious() {
 			g.bookMode = true
 		}
 		g.zoomState.Reset()
+		g.calculateDisplayContent()
 		return
 	}
 
-	if g.bookMode && !ebiten.IsKeyPressed(ebiten.KeyShift) {
-		leftImg, rightImg := g.imageManager.GetBookModeImages(g.idx, g.config.RightToLeft)
-		if g.shouldUseBookMode(leftImg, rightImg) {
-			if g.idx < 2 {
-				// g.idx > 0 is guaranteed, so always move to g.idx = 0
-				g.idx = 0
-				g.bookMode = false
-				g.tempSingleMode = true
-			} else {
-				g.idx -= 2
-			}
-			g.zoomState.Reset()
-			return
+	if g.bookMode && !ebiten.IsKeyPressed(ebiten.KeyShift) &&
+		g.displayContent != nil && g.displayContent.RightImage != nil {
+		// Currently displaying 2 images = book mode is possible = 2-page movement
+		if g.idx < 2 {
+			// g.idx > 0 is guaranteed, so always move to g.idx = 0
+			g.idx = 0
+			g.bookMode = false
+			g.tempSingleMode = true
+		} else {
+			g.idx -= 2
 		}
-		// shouldUseBookMode = false means single page movement
+		g.zoomState.Reset()
+		g.calculateDisplayContent()
+		return
 	}
 	// Single page mode or Shift+key
 	g.idx--
 
 	// Reset zoom state when image changes
 	g.zoomState.Reset()
+	g.calculateDisplayContent()
 }
 
 func (g *Game) toggleFullscreen() {
@@ -1171,6 +1243,9 @@ func main() {
 			}
 		}
 	}
+
+	// Calculate initial display content
+	g.calculateDisplayContent()
 
 	ebiten.SetWindowTitle(getWindowTitle())
 	ebiten.SetWindowSize(config.WindowWidth, config.WindowHeight)
