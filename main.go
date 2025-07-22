@@ -693,7 +693,6 @@ func (g *Game) IsFullscreen() bool {
 	return g.fullscreen
 }
 
-
 func (g *Game) GetRotationAngle() int {
 	return g.rotationAngle
 }
@@ -1141,6 +1140,12 @@ func main() {
 		configResult = loadConfig()
 	}
 	config := configResult.Config
+
+	// Initialize graphics system for error image generation
+	if err := InitGraphics(); err != nil {
+		log.Printf("Warning: Failed to initialize graphics system: %v", err)
+		// Continue without graphics - error images will fallback to simple colored rectangles
+	}
 
 	// Check if launched with single image file
 	isSingleImageFile := len(args) == 1 && isSupportedExt(args[0]) && !isArchiveExt(args[0])

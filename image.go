@@ -234,7 +234,9 @@ func (pm *PreloadManager) preloadImage(idx int) {
 		pm.stats.FailedCount++
 		pm.mu.Unlock()
 		debugLog("Preload failed for [%d] %s: %v", idx+1, imagePath.Path, err)
-		return
+
+		// Create error image for cache instead of skipping
+		img = CreateErrorImage(400, 300, imagePath.Path, err.Error())
 	}
 
 	// Add to cache
@@ -376,7 +378,9 @@ func (m *DefaultImageManager) GetImage(idx int) *ebiten.Image {
 	if err != nil {
 		log.Printf("Error: Failed to load image [%d/%d] %s: %v",
 			idx+1, len(m.paths), imagePath.Path, err)
-		return nil
+
+		// Create error image instead of returning nil
+		return CreateErrorImage(400, 300, imagePath.Path, err.Error())
 	}
 
 	// Add to cache

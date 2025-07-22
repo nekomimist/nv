@@ -12,7 +12,6 @@ import (
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/text/v2"
-	"github.com/hajimehoshi/ebiten/v2/vector"
 	"golang.org/x/image/font/gofont/goregular"
 )
 
@@ -80,19 +79,6 @@ func (r *Renderer) getActionsList() []string {
 	}
 	sort.Strings(actions)
 	return actions
-}
-
-// drawText is a helper method to draw text with specified position and color
-func (r *Renderer) drawText(screen *ebiten.Image, textString string, font *text.GoTextFace, x, y float64, textColor color.RGBA) {
-	op := &text.DrawOptions{}
-	op.GeoM.Translate(x, y)
-	op.ColorScale.ScaleWithColor(textColor)
-	text.Draw(screen, textString, font, op)
-}
-
-// drawFilledRect is a helper method to draw filled rectangles with float64 coordinates
-func (r *Renderer) drawFilledRect(screen *ebiten.Image, x, y, w, h float64, bgColor color.RGBA) {
-	vector.DrawFilledRect(screen, float32(x), float32(y), float32(w), float32(h), bgColor, false)
 }
 
 // Draw renders the entire screen
@@ -208,10 +194,10 @@ func (r *Renderer) drawHelpOverlay(screen *ebiten.Image) {
 	configStatus := r.renderState.GetConfigStatus()
 
 	// Semi-transparent black background (lighter for more image transparency)
-	r.drawFilledRect(screen, 0, 0, w, h, bgColorLight)
+	DrawFilledRect(screen, 0, 0, w, h, bgColorLight)
 
 	// Help text area with semi-transparent black background
-	r.drawFilledRect(screen, padding, padding, w-padding*2, h-padding*2, bgColorMedium)
+	DrawFilledRect(screen, padding, padding, w-padding*2, h-padding*2, bgColorMedium)
 
 	// Create font with dynamically calculated size
 	helpFont := &text.GoTextFace{
@@ -221,7 +207,7 @@ func (r *Renderer) drawHelpOverlay(screen *ebiten.Image) {
 
 	// Draw title
 	titleY := padding + 30
-	r.drawText(screen, "HELP:", helpFont, padding+20, titleY, colorWhite)
+	DrawText(screen, "HELP:", helpFont, padding+20, titleY, colorWhite)
 
 	currentY := titleY + optimalFontSize*2 // Start below title
 	lineHeight := optimalFontSize * 1.5
@@ -230,7 +216,7 @@ func (r *Renderer) drawHelpOverlay(screen *ebiten.Image) {
 	actionDescriptions := getActionDescriptions()
 
 	// Draw input bindings title
-	r.drawText(screen, "Controls (Keyboard | Mouse):", helpFont, padding+20, currentY, colorWhite)
+	DrawText(screen, "Controls (Keyboard | Mouse):", helpFont, padding+20, currentY, colorWhite)
 	currentY += lineHeight * 1.5
 
 	// Calculate column widths using text measurement
@@ -292,10 +278,10 @@ func (r *Renderer) drawHelpOverlay(screen *ebiten.Image) {
 		}
 
 		// Draw action name (left-aligned)
-		r.drawText(screen, action, helpFont, actionColumnX, currentY, colorLightBlue)
+		DrawText(screen, action, helpFont, actionColumnX, currentY, colorLightBlue)
 
 		// Draw arrow
-		r.drawText(screen, "→", helpFont, arrowColumnX, currentY, colorWhite)
+		DrawText(screen, "→", helpFont, arrowColumnX, currentY, colorWhite)
 
 		// Draw combined input bindings with color coding
 		currentInputX := inputColumnX
@@ -303,7 +289,7 @@ func (r *Renderer) drawHelpOverlay(screen *ebiten.Image) {
 		// Draw keyboard bindings in yellow
 		if len(keys) > 0 {
 			keysList := strings.Join(keys, ", ")
-			r.drawText(screen, keysList, helpFont, currentInputX, currentY, colorYellow)
+			DrawText(screen, keysList, helpFont, currentInputX, currentY, colorYellow)
 
 			keysWidth, _ := text.Measure(keysList, helpFont, 0)
 			currentInputX += keysWidth
@@ -311,7 +297,7 @@ func (r *Renderer) drawHelpOverlay(screen *ebiten.Image) {
 
 		// Draw separator if both keyboard and mouse bindings exist
 		if len(keys) > 0 && len(mouseActions) > 0 {
-			r.drawText(screen, " | ", helpFont, currentInputX, currentY, colorWhite)
+			DrawText(screen, " | ", helpFont, currentInputX, currentY, colorWhite)
 
 			sepWidth, _ := text.Measure(" | ", helpFont, 0)
 			currentInputX += sepWidth
@@ -320,11 +306,11 @@ func (r *Renderer) drawHelpOverlay(screen *ebiten.Image) {
 		// Draw mouse bindings in cyan
 		if len(mouseActions) > 0 {
 			mouseList := strings.Join(mouseActions, ", ")
-			r.drawText(screen, mouseList, helpFont, currentInputX, currentY, colorCyan)
+			DrawText(screen, mouseList, helpFont, currentInputX, currentY, colorCyan)
 		}
 
 		// Draw description on same line
-		r.drawText(screen, description, helpFont, descColumnX, currentY, colorGray)
+		DrawText(screen, description, helpFont, descColumnX, currentY, colorGray)
 
 		currentY += lineHeight
 	}
@@ -335,7 +321,7 @@ func (r *Renderer) drawHelpOverlay(screen *ebiten.Image) {
 	// Draw config status section
 
 	// Draw section title
-	r.drawText(screen, "System:", helpFont, padding+20, currentY, colorWhite)
+	DrawText(screen, "System:", helpFont, padding+20, currentY, colorWhite)
 	currentY += lineHeight
 
 	// Add config status
@@ -345,7 +331,7 @@ func (r *Renderer) drawHelpOverlay(screen *ebiten.Image) {
 	if configStatus.Status == "Warning" || configStatus.Status == "Error" {
 		statusColor = colorOrange
 	}
-	r.drawText(screen, statusText, helpFont, padding+40, currentY, statusColor)
+	DrawText(screen, statusText, helpFont, padding+40, currentY, statusColor)
 	currentY += lineHeight
 
 	// Add warnings if any
@@ -358,7 +344,7 @@ func (r *Renderer) drawHelpOverlay(screen *ebiten.Image) {
 			if len(shortWarning) > 50 {
 				shortWarning = shortWarning[:47] + "..."
 			}
-			r.drawText(screen, "• "+shortWarning, helpFont, padding+40, currentY, colorLightRed)
+			DrawText(screen, "• "+shortWarning, helpFont, padding+40, currentY, colorLightRed)
 			currentY += lineHeight
 		}
 	}
@@ -555,7 +541,7 @@ func (r *Renderer) drawMarginTooSmallMessage(screen *ebiten.Image) {
 	w, h := screen.Bounds().Dx(), screen.Bounds().Dy()
 
 	// Semi-transparent black background
-	r.drawFilledRect(screen, 0, 0, float64(w), float64(h), bgColorLight)
+	DrawFilledRect(screen, 0, 0, float64(w), float64(h), bgColorLight)
 
 	// Create font for the joke (16px should be readable)
 	jokeFont := &text.GoTextFace{
@@ -579,10 +565,10 @@ func (r *Renderer) drawMarginTooSmallMessage(screen *ebiten.Image) {
 	subtitleY := messageY + messageHeight + 10 // 10px spacing
 
 	// Draw main message
-	r.drawText(screen, message, jokeFont, messageX, messageY, colorWhite)
+	DrawText(screen, message, jokeFont, messageX, messageY, colorWhite)
 
 	// Draw subtitle in gray
-	r.drawText(screen, subtitle, jokeFont, subtitleX, subtitleY, colorGray)
+	DrawText(screen, subtitle, jokeFont, subtitleX, subtitleY, colorGray)
 }
 
 func (r *Renderer) drawPageInputOverlay(screen *ebiten.Image) {
@@ -622,15 +608,15 @@ func (r *Renderer) drawPageInputOverlay(screen *ebiten.Image) {
 	boxY := (float64(h) - boxHeight) / 2
 
 	// Semi-transparent black background
-	r.drawFilledRect(screen, boxX, boxY, boxWidth, boxHeight, bgColorDark)
+	DrawFilledRect(screen, boxX, boxY, boxWidth, boxHeight, bgColorDark)
 
 	// Draw input text (centered)
 	inputTextX := boxX + (boxWidth-inputWidth)/2
-	r.drawText(screen, inputText, inputFont, inputTextX, boxY+float64(padding), colorWhite)
+	DrawText(screen, inputText, inputFont, inputTextX, boxY+float64(padding), colorWhite)
 
 	// Draw range text (centered, below input text)
 	rangeTextX := boxX + (boxWidth-rangeWidth)/2
-	r.drawText(screen, rangeText, rangeFont, rangeTextX, boxY+float64(padding)+inputHeight+10, colorLightGray)
+	DrawText(screen, rangeText, rangeFont, rangeTextX, boxY+float64(padding)+inputHeight+10, colorLightGray)
 }
 
 func (r *Renderer) drawInfoDisplay(screen *ebiten.Image) {
@@ -658,10 +644,10 @@ func (r *Renderer) drawInfoDisplay(screen *ebiten.Image) {
 	bgW := textWidth + bgPadding*2
 	bgH := textHeight + bgPadding*2
 
-	r.drawFilledRect(screen, bgX, bgY, bgW, bgH, bgColorLight)
+	DrawFilledRect(screen, bgX, bgY, bgW, bgH, bgColorLight)
 
 	// Draw text
-	r.drawText(screen, infoText, infoFont, textX, textY, colorWhite)
+	DrawText(screen, infoText, infoFont, textX, textY, colorWhite)
 }
 
 func (r *Renderer) drawOverlayMessage(screen *ebiten.Image) {
@@ -682,10 +668,10 @@ func (r *Renderer) drawOverlayMessage(screen *ebiten.Image) {
 	boxY := (float64(screen.Bounds().Dy()) - boxHeight) / 2
 
 	// Semi-transparent black background
-	r.drawFilledRect(screen, boxX, boxY, boxWidth, boxHeight, bgColorDark)
+	DrawFilledRect(screen, boxX, boxY, boxWidth, boxHeight, bgColorDark)
 
 	// Draw text
-	r.drawText(screen, r.renderState.GetOverlayMessage(), messageFont, boxX+padding, boxY+padding, colorWhite)
+	DrawText(screen, r.renderState.GetOverlayMessage(), messageFont, boxX+padding, boxY+padding, colorWhite)
 }
 
 func (r *Renderer) applyTransformations(img *ebiten.Image) *ebiten.Image {
