@@ -248,11 +248,24 @@ type Config struct {
 }
 
 func getConfigPath() string {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return "nv.json"
+	var configDir string
+
+	// Try to get XDG_CONFIG_HOME on Unix-like systems, APPDATA on Windows
+	if xdgConfig := os.Getenv("XDG_CONFIG_HOME"); xdgConfig != "" {
+		configDir = xdgConfig
+	} else if appData := os.Getenv("APPDATA"); appData != "" {
+		// Windows: use %APPDATA%
+		configDir = appData
+	} else {
+		// Fallback: use ~/.config on Unix-like systems
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return "config.json" // fallback to current directory
+		}
+		configDir = filepath.Join(homeDir, ".config")
 	}
-	return filepath.Join(homeDir, ".nv.json")
+
+	return filepath.Join(configDir, "nekomimist", "nv", "config.json")
 }
 
 func loadConfig() ConfigLoadResult {
@@ -296,9 +309,12 @@ func loadConfigFromPath(configPath string) ConfigLoadResult {
 	data, err := os.ReadFile(configPath)
 	if err != nil {
 		// Config file not found is not an error - use defaults
+		log.Printf("Config file not found at %s, using defaults", configPath)
 		result.Status = "Default"
 		return result
 	}
+
+	log.Printf("Loaded config from: %s", configPath)
 
 	if err := json.Unmarshal(data, &config); err != nil {
 		// Invalid config file - log warning and use defaults
@@ -435,6 +451,13 @@ func saveConfigToPath(config Config, configPath string) {
 		return
 	}
 
+	// Create directory if it doesn't exist
+	configDir := filepath.Dir(configPath)
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		log.Printf("Error: Failed to create config directory %s: %v", configDir, err)
+		return
+	}
+
 	data, err := json.MarshalIndent(config, "", "  ")
 	if err != nil {
 		log.Printf("Error: Failed to marshal config: %v", err)
@@ -443,5 +466,7 @@ func saveConfigToPath(config Config, configPath string) {
 
 	if err := os.WriteFile(configPath, data, 0644); err != nil {
 		log.Printf("Error: Failed to save config to %s: %v", configPath, err)
+	} else {
+		log.Printf("Saved config to: %s", configPath)
 	}
 }
