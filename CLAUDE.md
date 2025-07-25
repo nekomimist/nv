@@ -292,7 +292,9 @@ The application includes embedded window icons for proper display across platfor
 
 ## Configuration
 
-The application saves settings to `~/.nv.json`:
+The application saves settings to OS-standard configuration directories:
+- **Linux**: `~/.config/nekomimist/nv/config.json` (or `$XDG_CONFIG_HOME/nekomimist/nv/config.json`)
+- **Windows**: `%APPDATA%/nekomimist/nv/config.json`
 
 ```json
 {

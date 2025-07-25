@@ -93,7 +93,9 @@ go run main.go [image_files_or_directories...]
 
 ## Configuration
 
-Settings are automatically saved to `~/.nv.json`:
+Settings are automatically saved to OS-standard configuration directories:
+- **Linux**: `~/.config/nekomimist/nv/config.json` (or `$XDG_CONFIG_HOME/nekomimist/nv/config.json`)
+- **Windows**: `%APPDATA%/nekomimist/nv/config.json`
 
 ```json
 {
