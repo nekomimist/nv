@@ -83,19 +83,19 @@ cd nv
 go build
 
 # Or run directly
-go run main.go [image_files_or_directories...]
+go run . [image_files_or_directories...]
 ```
 
 ## Requirements
 
-- Go 1.19 or later
+- Go 1.24 or later
 - Platform support: Windows, Linux (macOS untested)
 
 ## Configuration
 
 Settings are automatically saved to OS-standard configuration directories:
-- **Linux**: `~/.config/nekomimist/nv/config.json` (or `$XDG_CONFIG_HOME/nekomimist/nv/config.json`)
-- **Windows**: `%APPDATA%/nekomimist/nv/config.json`
+- Linux: `~/.config/nekomimist/nv/config.json` (or `$XDG_CONFIG_HOME/nekomimist/nv/config.json`)
+- Windows: `%APPDATA%/nekomimist/nv/config.json`
 
 ```json
 {
@@ -103,7 +103,7 @@ Settings are automatically saved to OS-standard configuration directories:
   "window_height": 600,
   "aspect_ratio_threshold": 1.5,
   "right_to_left": false,
-  "help_font_size": 24.0,
+  "font_size": 24.0,
   "transition_frames": 0,
   "preload_enabled": true,
   "preload_count": 4,
@@ -130,20 +130,23 @@ Settings are automatically saved to OS-standard configuration directories:
 }
 ```
 
-- `aspect_ratio_threshold` - Controls book mode compatibility (default: 1.5)
-- `right_to_left` - Reading direction for book mode (default: false)
-- `help_font_size` - Font size for help overlay (default: 24.0)
-- `initial_zoom_mode` - Initial zoom mode: `"fit"` (default) or `"actual_size"`
-- `transition_frames` - Force redraw frames after fullscreen transitions (default: 0)
-- `preload_enabled` - Enable automatic image preloading (default: true)
-- `preload_count` - Number of images to preload ahead (1-16, default: 4)
-- `keybindings` - Custom keyboard shortcuts for actions. Use format like `"KeyA"`, `"Space"`, `"Shift+KeyB"`
-- `mousebindings` - Custom mouse bindings for actions. Use format like `"LeftClick"`, `"WheelUp"`, `"Ctrl+MiddleClick"`
-- `mouse_settings` - Mouse behavior: drag-to-pan settings, sensitivity, and thresholds
-  - `enable_drag_pan` - Enable drag-to-pan functionality (default: true)
-  - `drag_sensitivity` - Drag movement sensitivity multiplier (default: 1.0)
-  - `drag_threshold` - Minimum pixel movement to start drag operation (default: 5)
-  - `drag_pan_inverted` - Invert drag pan direction for both X and Y axes (default: false). `false` = mouse/trackball style (drag to move image), `true` = touchpad/touchscreen style (natural scrolling)
+- `aspect_ratio_threshold`: Controls book mode compatibility (default: 1.5)
+- `right_to_left`: Reading direction for book mode (default: false)
+- `font_size`: UI/help overlay font size (default: 24.0)
+- `initial_zoom_mode`: `"fit"` (default) or `"actual_size"`
+- `transition_frames`: Force redraw frames after fullscreen transitions (default: 0)
+- `preload_enabled`: Enable automatic image preloading (default: true)
+- `preload_count`: Number of images to preload ahead (1–16, default: 4)
+- `keybindings`: Custom keyboard shortcuts for actions. Use `"KeyA"`, `"Space"`, `"Shift+KeyB"` format
+- `mousebindings`: Custom mouse bindings. Use `"LeftClick"`, `"WheelUp"`, `"Ctrl+MiddleClick"`
+- `mouse_settings`: Mouse behavior (drag-to-pan, sensitivity, thresholds)
+  - `enable_drag_pan`: Enable drag-to-pan (default: true)
+  - `drag_sensitivity`: Drag movement sensitivity multiplier (default: 1.0)
+  - `drag_threshold`: Minimum pixel movement to start drag (default: 5)
+  - `drag_pan_inverted`: Invert drag pan direction (default: false). `false` = mouse/trackball、`true` = natural scrolling
+
+Notes:
+- Default config location can be overridden with `-c <path>`.
 
 ## License
 

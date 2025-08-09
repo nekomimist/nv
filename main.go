@@ -1088,9 +1088,8 @@ func (g *Game) Draw(screen *ebiten.Image) {
 }
 
 func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {
-	// Only force redraw when layout actually changes
+	// Track logical window size changes and trigger redraw
 	if g.savedWinW != outsideWidth || g.savedWinH != outsideHeight {
-		// Don't update saved window size during fullscreen
 		if !g.fullscreen {
 			g.savedWinW = outsideWidth
 			g.savedWinH = outsideHeight
@@ -1119,7 +1118,7 @@ func debugLog(format string, args ...interface{}) {
 }
 
 func main() {
-	var configFile = flag.String("c", "", "config file path (default: ~/.nv.json)")
+	var configFile = flag.String("c", "", "config file path (default: OS config dir)")
 	var debug = flag.Bool("d", false, "enable debug logging")
 	var showVersion = flag.Bool("version", false, "show version information")
 	flag.Parse()
