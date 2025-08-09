@@ -117,9 +117,14 @@ func (pm *PreloadManager) StartPreload(currentIdx int, direction NavigationDirec
 	}
 
 	// Clear the request channel to cancel any pending requests
-	select {
-	case <-pm.requestChan:
-	default:
+drain:
+	for {
+		select {
+		case <-pm.requestChan:
+			// discard pending requests
+		default:
+			break drain
+		}
 	}
 
 	// Send new preload request
@@ -151,7 +156,7 @@ func (pm *PreloadManager) processPreloadRequest(req PreloadRequest) {
 	pm.stats.LastDirection = req.Direction
 	pm.mu.Unlock()
 
-	pathsCount := len(pm.imageManager.paths)
+	pathsCount := pm.imageManager.GetPathsCount()
 	if pathsCount == 0 {
 		return
 	}
@@ -215,11 +220,14 @@ func (pm *PreloadManager) calculatePreloadIndices(currentIdx int, direction Navi
 
 // preloadImage loads a single image into cache if not already cached
 func (pm *PreloadManager) preloadImage(idx int) {
-	if idx < 0 || idx >= len(pm.imageManager.paths) {
+	if idx < 0 || idx >= pm.imageManager.GetPathsCount() {
 		return
 	}
 
-	imagePath := pm.imageManager.paths[idx]
+	imagePath, ok := pm.imageManager.getPath(idx)
+	if !ok {
+		return
+	}
 	cacheKey := imagePath.Path
 
 	// Check if already in cache
@@ -265,15 +273,24 @@ type ImageManager interface {
 type DefaultImageManager struct {
 	paths          []ImagePath
 	cache          *lru.Cache[string, *ebiten.Image]
+	mu             sync.RWMutex
 	preloadManager *PreloadManager
 }
 
 // NewImageManager creates a new DefaultImageManager
 func NewImageManager(cacheSize int) ImageManager {
-	cache, err := lru.New[string, *ebiten.Image](cacheSize)
+	cache, err := lru.NewWithEvict[string, *ebiten.Image](cacheSize, func(_ string, img *ebiten.Image) {
+		if img != nil {
+			img.Deallocate()
+		}
+	})
 	if err != nil {
 		log.Printf("Error: Failed to create LRU cache: %v", err)
-		cache, _ = lru.New[string, *ebiten.Image](16) // fallback to default size
+		cache, _ = lru.NewWithEvict[string, *ebiten.Image](16, func(_ string, img *ebiten.Image) {
+			if img != nil {
+				img.Deallocate()
+			}
+		})
 	}
 
 	manager := &DefaultImageManager{
@@ -286,10 +303,18 @@ func NewImageManager(cacheSize int) ImageManager {
 
 // NewImageManagerWithPreload creates a new DefaultImageManager with preload configuration
 func NewImageManagerWithPreload(cacheSize int, preloadCount int, preloadEnabled bool) ImageManager {
-	cache, err := lru.New[string, *ebiten.Image](cacheSize)
+	cache, err := lru.NewWithEvict[string, *ebiten.Image](cacheSize, func(_ string, img *ebiten.Image) {
+		if img != nil {
+			img.Deallocate()
+		}
+	})
 	if err != nil {
 		log.Printf("Error: Failed to create LRU cache: %v", err)
-		cache, _ = lru.New[string, *ebiten.Image](16) // fallback to default size
+		cache, _ = lru.NewWithEvict[string, *ebiten.Image](16, func(_ string, img *ebiten.Image) {
+			if img != nil {
+				img.Deallocate()
+			}
+		})
 	}
 
 	manager := &DefaultImageManager{
@@ -305,12 +330,16 @@ func NewImageManagerWithPreload(cacheSize int, preloadCount int, preloadEnabled 
 }
 
 func (m *DefaultImageManager) SetPaths(paths []ImagePath) {
+	m.mu.Lock()
 	m.paths = paths
+	m.mu.Unlock()
 	// No need to clear cache since we use file paths as keys
 	debugLog("SetPaths: %d new paths, cache preserved (%d items)", len(paths), m.cache.Len())
 }
 
 func (m *DefaultImageManager) GetPathsCount() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	return len(m.paths)
 }
 
@@ -338,10 +367,6 @@ func (m *DefaultImageManager) GetCurrentImage(idx int) *ebiten.Image {
 }
 
 func (m *DefaultImageManager) GetBookModeImages(idx int, rightToLeft bool) (*ebiten.Image, *ebiten.Image) {
-	if len(m.paths) == 0 {
-		return nil, nil
-	}
-
 	var leftImg, rightImg *ebiten.Image
 
 	if rightToLeft {
@@ -350,25 +375,26 @@ func (m *DefaultImageManager) GetBookModeImages(idx int, rightToLeft bool) (*ebi
 		rightImg = m.GetImage(idx)    // Current image on right
 	} else {
 		// Left-to-right reading (Western style): [current][next]
-		leftImg = m.GetImage(idx) // Current image on left
-		if idx+1 < len(m.paths) {
-			rightImg = m.GetImage(idx + 1) // Next image on right
-		}
+		leftImg = m.GetImage(idx)      // Current image on left
+		rightImg = m.GetImage(idx + 1) // Next image on right (nil if OOB)
 	}
 
 	return leftImg, rightImg
 }
 
 func (m *DefaultImageManager) GetImage(idx int) *ebiten.Image {
+	m.mu.RLock()
 	if idx < 0 || idx >= len(m.paths) {
+		m.mu.RUnlock()
 		return nil
 	}
-
 	imagePath := m.paths[idx]
+	m.mu.RUnlock()
 	cacheKey := imagePath.Path
 
 	// Check if image is already in cache
-	if img, ok := m.cache.Get(cacheKey); ok {
+	img, ok := m.cache.Get(cacheKey)
+	if ok {
 		debugLog("Cache HIT: %s (cache: %d items)", cacheKey, m.cache.Len())
 		return img
 	}
@@ -394,6 +420,18 @@ func (m *DefaultImageManager) GetImage(idx int) *ebiten.Image {
 
 	return img
 }
+
+// getPath safely returns the ImagePath at index if available
+func (m *DefaultImageManager) getPath(idx int) (ImagePath, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if idx < 0 || idx >= len(m.paths) {
+		return ImagePath{}, false
+	}
+	return m.paths[idx], true
+}
+
+// cache operations are goroutine-safe via golang-lru; no extra locking needed
 
 // Image loading functions
 
