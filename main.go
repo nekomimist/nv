@@ -143,10 +143,12 @@ type Game struct {
 	overlayMessage     string
 	overlayMessageTime time.Time
 
-	savedWinW  int
-	savedWinH  int
-	config     Config
-	configPath string // Custom config file path, empty for default
+	savedWinW       int // Window mode size for restoration (config save)
+	savedWinH       int // Window mode size for restoration (config save)
+	currentLogicalW int // Current logical size for zoom/pan calculations
+	currentLogicalH int // Current logical size for zoom/pan calculations
+	config          Config
+	configPath      string // Custom config file path, empty for default
 
 	// Single file expansion mode state
 	originalArgs       []string // Original command line arguments
@@ -348,9 +350,9 @@ func (g *Game) panByDelta(deltaX, deltaY float64) {
 
 // getPanStep calculates dynamic pan step size based on screen size and zoom level
 func (g *Game) getPanStep() (float64, float64) {
-	// Base step size as 10% of screen dimensions
-	stepX := float64(g.savedWinW) * 0.1
-	stepY := float64(g.savedWinH) * 0.1
+	// Base step size as 10% of current logical screen dimensions
+	stepX := float64(g.currentLogicalW) * 0.1
+	stepY := float64(g.currentLogicalH) * 0.1
 
 	// Scale by zoom level for more consistent feel
 	zoomFactor := g.zoomState.Level
@@ -369,9 +371,9 @@ func (g *Game) updateZoomLevelForFitMode() {
 		return
 	}
 
-	// Get window size
-	w := float64(g.savedWinW)
-	h := float64(g.savedWinH)
+	// Get current logical window size (actual display area)
+	w := float64(g.currentLogicalW)
+	h := float64(g.currentLogicalH)
 	fiw := float64(iw)
 	fih := float64(ih)
 
@@ -397,6 +399,7 @@ func (g *Game) updateZoomLevelForFitMode() {
 	default:
 		scale = 1.0
 	}
+	scale *= ebiten.Monitor().DeviceScaleFactor()
 	g.zoomState.Level = scale
 }
 
@@ -471,7 +474,7 @@ func (g *Game) clampPanToLimits() {
 	}
 
 	deviceScale := ebiten.Monitor().DeviceScaleFactor()
-	w, h := float64(g.savedWinW)*deviceScale, float64(g.savedWinH)*deviceScale
+	w, h := float64(g.currentLogicalW)*deviceScale, float64(g.currentLogicalH)*deviceScale
 	scale := g.zoomState.Level
 	sw, sh := float64(iw)*scale, float64(ih)*scale
 
@@ -1189,12 +1192,18 @@ func (g *Game) Draw(screen *ebiten.Image) {
 }
 
 func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {
-	// Track logical window size changes and trigger redraw
+	// Always track current logical size for zoom/pan calculations
+	if g.currentLogicalW != outsideWidth || g.currentLogicalH != outsideHeight {
+		g.currentLogicalW = outsideWidth
+		g.currentLogicalH = outsideHeight
+		g.forceRedrawFrames = 1
+	}
+
+	// Track window mode size changes for restoration (only when not fullscreen)
 	if g.savedWinW != outsideWidth || g.savedWinH != outsideHeight {
 		if !g.fullscreen {
 			g.savedWinW = outsideWidth
 			g.savedWinH = outsideHeight
-			g.forceRedrawFrames = 1
 		}
 	}
 
