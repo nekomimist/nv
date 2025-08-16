@@ -292,7 +292,7 @@ func loadConfigFromPath(configPath string) ConfigLoadResult {
 		CacheSize:            16,                        // Default cache size for images
 		TransitionFrames:     0,                         // Default: no forced transition frames
 		PreloadEnabled:       true,                      // Default: enable preloading
-		InitialZoomMode:      "fit",                     // Default: fit to window
+		InitialZoomMode:      "fit_window",              // Default: fit to window
 		PreloadCount:         4,                         // Default: preload up to 4 images
 		Keybindings:          getDefaultKeybindings(),   // Default keybindings
 		Mousebindings:        getDefaultMousebindings(), // Default mouse bindings
@@ -379,8 +379,16 @@ func loadConfigFromPath(configPath string) ConfigLoadResult {
 	}
 
 	// Validate initial zoom mode
-	if config.InitialZoomMode != "fit" && config.InitialZoomMode != "actual_size" {
-		config.InitialZoomMode = "fit"
+	validZoomModes := []string{"fit_window", "fit_width", "fit_height", "actual_size"}
+	isValid := false
+	for _, mode := range validZoomModes {
+		if config.InitialZoomMode == mode {
+			isValid = true
+			break
+		}
+	}
+	if !isValid {
+		config.InitialZoomMode = "fit_window"
 	}
 
 	// Validate keybindings - ensure defaults exist for missing actions

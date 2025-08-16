@@ -785,8 +785,8 @@ func (r *Renderer) drawTransformedImageCentered(screen *ebiten.Image, img *ebite
 	var scale float64
 	var offsetX, offsetY float64
 
-	if r.renderState.GetZoomMode() == ZoomModeFit {
-		// Automatic fit mode (original behavior)
+	if r.renderState.GetZoomMode() == ZoomModeFitWindow {
+		// Fit to window mode - calculate scale here for centering
 		if r.renderState.IsFullscreen() {
 			scale = math.Min(w/iw, h/ih)
 		} else {
@@ -801,7 +801,7 @@ func (r *Renderer) drawTransformedImageCentered(screen *ebiten.Image, img *ebite
 		offsetX = w/2 - sw/2
 		offsetY = h/2 - sh/2
 	} else {
-		// Manual zoom mode
+		// All other modes (FitWidth, FitHeight, Manual) - use pre-calculated zoom level
 		scale = r.renderState.GetZoomLevel()
 		sw, sh := iw*scale, ih*scale
 

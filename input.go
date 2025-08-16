@@ -190,8 +190,8 @@ func (h *InputHandler) handleMouseInput() bool {
 
 // shouldAllowDrag determines if dragging should be allowed in the current state
 func (h *InputHandler) shouldAllowDrag() bool {
-	// Only allow drag in manual zoom mode (not fit mode)
-	return h.inputState.GetZoomMode() == ZoomModeManual
+	// Allow drag in all modes except fit-to-window mode
+	return h.inputState.GetZoomMode() != ZoomModeFitWindow
 }
 
 // isLeftClickAction determines if an action is bound to LeftClick

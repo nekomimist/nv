@@ -209,9 +209,9 @@ This codebase has been extensively refactored for maintainability:
 - **=, Shift+=**: Zoom in (25%-400% range)
 - **-**: Zoom out (25%-400% range)
 - **0**: Reset to 100% zoom (actual size)
-- **F**: Toggle between fit-to-window and manual zoom modes
-- **Arrow Keys**: Pan image when in manual zoom mode
-- **Mouse Drag**: Pan image by dragging with left mouse button (manual zoom mode only)
+- **F**: Cycle zoom modes (Window/Width/Height/Manual)
+- **Arrow Keys**: Pan image when in width/height/manual zoom modes
+- **Mouse Drag**: Pan image by dragging with left mouse button (width/height/manual zoom modes)
 
 ### Other
 - **H**: Show/hide help overlay with all controls
@@ -308,7 +308,7 @@ The application saves settings to OS-standard configuration directories:
   "transition_frames": 0,
   "preload_enabled": true,
   "preload_count": 4,
-  "initial_zoom_mode": "fit",
+  "initial_zoom_mode": "fit_window",
   "keybindings": {
     "exit": ["Escape", "KeyQ"],
     "help": ["Shift+Slash"],
@@ -343,7 +343,7 @@ The application saves settings to OS-standard configuration directories:
 - **transition_frames**: Number of frames to force redraw after fullscreen transitions. Helps fix rendering issues on some systems (e.g., WSL/WSLg). `0` = disabled, `1-60` = number of frames. Default: 0
 - **preload_enabled**: Whether to enable automatic image preloading for smoother navigation. `true` = enabled, `false` = disabled. Default: true
 - **preload_count**: Number of images to preload in the navigation direction. Higher values use more memory but provide smoother navigation. Range: 1-16. Default: 4
-- **initial_zoom_mode**: Initial zoom mode when opening images. `"fit"` = fit to window (default), `"actual_size"` = 100% zoom level. Images are reset to this mode when changing images. Default: "fit"
+- **initial_zoom_mode**: Initial zoom mode when opening images. `"fit_window"` = fit to window (default), `"fit_width"` = fit to window width, `"fit_height"` = fit to window height, `"actual_size"` = 100% zoom level. Images are reset to this mode when changing images. Default: "fit_window"
 - **keybindings**: Custom keybinding definitions for actions. Each action can have multiple keys assigned. Uses format like `"KeyA"`, `"Space"`, `"Shift+KeyB"`. If not specified, defaults are used. Invalid configurations fall back to defaults with warnings.
 - **mousebindings**: Custom mouse binding definitions for actions. Each action can have multiple mouse actions assigned. Uses format like `"LeftClick"`, `"WheelUp"`, `"Ctrl+MiddleClick"`. If not specified, defaults are used.
 - **mouse_settings**: Mouse behavior configuration:

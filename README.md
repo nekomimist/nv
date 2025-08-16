@@ -49,15 +49,15 @@ A simple image viewer built with Go and Ebiten, featuring seamless archive suppo
 - `=` / `Shift+=` - Zoom in (25%-400%)
 - `-` - Zoom out (25%-400%)
 - `0` - Reset to 100% zoom
-- `F` - Toggle fit-to-window / manual zoom modes
-- `Arrow Keys` - Pan image (manual zoom mode)
+- `F` - Cycle zoom modes (Window/Width/Height/Manual)
+- `Arrow Keys` - Pan image (width/height/manual zoom modes)
 
 ### Mouse Controls
-- `Left Click` - Next image (or drag to pan in manual zoom mode)
+- `Left Click` - Next image (or drag to pan in width/height/manual zoom modes)
 - `Right Click` - Previous image
 - `Double Left Click` - Toggle fullscreen
 - `Mouse Wheel` - Navigate images (or zoom with Ctrl modifier)
-- `Mouse Drag` - Pan image (manual zoom mode only)
+- `Mouse Drag` - Pan image (width/height/manual zoom modes)
 
 ### Other
 - `H` - Show/hide help overlay
@@ -107,7 +107,7 @@ Settings are automatically saved to OS-standard configuration directories:
   "transition_frames": 0,
   "preload_enabled": true,
   "preload_count": 4,
-  "initial_zoom_mode": "fit",
+  "initial_zoom_mode": "fit_window",
   "keybindings": {
     "exit": ["Escape", "KeyQ"],
     "help": ["Shift+Slash"],
@@ -133,7 +133,7 @@ Settings are automatically saved to OS-standard configuration directories:
 - `aspect_ratio_threshold`: Controls book mode compatibility (default: 1.5)
 - `right_to_left`: Reading direction for book mode (default: false)
 - `font_size`: UI/help overlay font size (default: 24.0)
-- `initial_zoom_mode`: `"fit"` (default) or `"actual_size"`
+- `initial_zoom_mode`: `"fit_window"` (default), `"fit_width"`, `"fit_height"`, or `"actual_size"`
 - `transition_frames`: Force redraw frames after fullscreen transitions (default: 0)
 - `preload_enabled`: Enable automatic image preloading (default: true)
 - `preload_count`: Number of images to preload ahead (1–16, default: 4)

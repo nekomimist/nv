@@ -49,8 +49,10 @@ const (
 type ZoomMode int
 
 const (
-	ZoomModeFit    ZoomMode = iota // Automatic fit to window (default)
-	ZoomModeManual                 // Manual zoom level
+	ZoomModeFitWindow ZoomMode = iota // Automatic fit to window (width/height smaller)
+	ZoomModeFitWidth                  // Fit to window width
+	ZoomModeFitHeight                 // Fit to window height
+	ZoomModeManual                    // Manual zoom level
 )
 
 // ZoomState manages zoom and pan state
@@ -78,16 +80,16 @@ type DisplayContent struct {
 // NewZoomState creates a new zoom state with default values
 func NewZoomState() *ZoomState {
 	return &ZoomState{
-		Mode:       ZoomModeFit,
+		Mode:       ZoomModeFitWindow,
 		Level:      1.0,
 		PanOffsetX: 0,
 		PanOffsetY: 0,
 	}
 }
 
-// Reset resets zoom state to fit mode (called when switching to fit or changing images)
+// Reset resets zoom state to fit window mode (legacy method - prefer resetZoomToInitial for image changes)
 func (z *ZoomState) Reset() {
-	z.Mode = ZoomModeFit
+	z.Mode = ZoomModeFitWindow
 	z.Level = 1.0
 	z.PanOffsetX = 0
 	z.PanOffsetY = 0
@@ -130,7 +132,8 @@ type Game struct {
 	displayContent *DisplayContent
 
 	// Zoom and pan state
-	zoomState *ZoomState
+	zoomState              *ZoomState
+	needsInitialZoomUpdate bool // Flag for updating zoom level on first draw
 
 	// Page input mode state
 	pageInputMode   bool
@@ -229,7 +232,7 @@ func (g *Game) cycleSortMethod() {
 
 // Zoom and pan implementation methods
 func (g *Game) zoomIn() {
-	if g.zoomState.Mode == ZoomModeFit {
+	if g.zoomState.Mode != ZoomModeManual {
 		// Switch to manual mode and start at 100%
 		g.switchToManual100()
 	} else {
@@ -247,7 +250,7 @@ func (g *Game) zoomIn() {
 }
 
 func (g *Game) zoomOut() {
-	if g.zoomState.Mode == ZoomModeFit {
+	if g.zoomState.Mode != ZoomModeManual {
 		// Switch to manual mode and start at 100%
 		g.switchToManual100()
 	} else {
@@ -269,12 +272,27 @@ func (g *Game) zoomReset() {
 }
 
 func (g *Game) zoomFit() {
-	if g.zoomState.Mode == ZoomModeFit {
-		// Currently in fit mode, switch to 100%
+	// Cycle through zoom modes: FitWindow -> FitWidth -> FitHeight -> Manual -> FitWindow
+	switch g.zoomState.Mode {
+	case ZoomModeFitWindow:
+		g.zoomState.Mode = ZoomModeFitWidth
+		g.zoomState.PanOffsetX = 0
+		g.zoomState.PanOffsetY = 0
+		g.updateZoomLevelForFitMode()
+		g.showOverlayMessage("Fit to Width")
+	case ZoomModeFitWidth:
+		g.zoomState.Mode = ZoomModeFitHeight
+		g.zoomState.PanOffsetX = 0
+		g.zoomState.PanOffsetY = 0
+		g.updateZoomLevelForFitMode()
+		g.showOverlayMessage("Fit to Height")
+	case ZoomModeFitHeight:
 		g.switchToManual100()
-	} else {
-		// Switch to fit mode
-		g.zoomState.Reset()
+	case ZoomModeManual:
+		g.zoomState.Mode = ZoomModeFitWindow
+		g.zoomState.PanOffsetX = 0
+		g.zoomState.PanOffsetY = 0
+		g.updateZoomLevelForFitMode()
 		g.showOverlayMessage("Fit to Window")
 	}
 }
@@ -289,7 +307,7 @@ func (g *Game) switchToManual100() {
 }
 
 func (g *Game) panUp() {
-	if g.zoomState.Mode == ZoomModeManual {
+	if g.zoomState.Mode != ZoomModeFitWindow {
 		_, stepY := g.getPanStep()
 		g.zoomState.PanOffsetY += stepY
 		g.clampPanToLimits()
@@ -297,7 +315,7 @@ func (g *Game) panUp() {
 }
 
 func (g *Game) panDown() {
-	if g.zoomState.Mode == ZoomModeManual {
+	if g.zoomState.Mode != ZoomModeFitWindow {
 		_, stepY := g.getPanStep()
 		g.zoomState.PanOffsetY -= stepY
 		g.clampPanToLimits()
@@ -305,7 +323,7 @@ func (g *Game) panDown() {
 }
 
 func (g *Game) panLeft() {
-	if g.zoomState.Mode == ZoomModeManual {
+	if g.zoomState.Mode != ZoomModeFitWindow {
 		stepX, _ := g.getPanStep()
 		g.zoomState.PanOffsetX += stepX
 		g.clampPanToLimits()
@@ -313,7 +331,7 @@ func (g *Game) panLeft() {
 }
 
 func (g *Game) panRight() {
-	if g.zoomState.Mode == ZoomModeManual {
+	if g.zoomState.Mode != ZoomModeFitWindow {
 		stepX, _ := g.getPanStep()
 		g.zoomState.PanOffsetX -= stepX
 		g.clampPanToLimits()
@@ -321,7 +339,7 @@ func (g *Game) panRight() {
 }
 
 func (g *Game) panByDelta(deltaX, deltaY float64) {
-	if g.zoomState.Mode == ZoomModeManual {
+	if g.zoomState.Mode != ZoomModeFitWindow {
 		g.zoomState.PanOffsetX += deltaX
 		g.zoomState.PanOffsetY += deltaY
 		g.clampPanToLimits()
@@ -340,6 +358,78 @@ func (g *Game) getPanStep() (float64, float64) {
 	stepY *= zoomFactor
 
 	return stepX, stepY
+}
+
+// updateZoomLevelForFitMode calculates and sets the actual zoom level for fit modes
+func (g *Game) updateZoomLevelForFitMode() {
+	// Get current image size
+	iw, ih := g.getTransformedImageSize()
+	if iw == 0 || ih == 0 {
+		g.zoomState.Level = 1.0
+		return
+	}
+
+	// Get window size
+	w := float64(g.savedWinW)
+	h := float64(g.savedWinH)
+	fiw := float64(iw)
+	fih := float64(ih)
+
+	var scale float64
+	switch g.zoomState.Mode {
+	case ZoomModeFitWindow:
+		// Fit to window (same logic as renderer.go)
+		if g.fullscreen {
+			scale = math.Min(w/fiw, h/fih)
+		} else {
+			if fiw > w || fih > h {
+				scale = math.Min(w/fiw, h/fih)
+			} else {
+				scale = 1.0
+			}
+		}
+	case ZoomModeFitWidth:
+		// Fit to window width
+		scale = w / fiw
+	case ZoomModeFitHeight:
+		// Fit to window height
+		scale = h / fih
+	default:
+		scale = 1.0
+	}
+	g.zoomState.Level = scale
+}
+
+// resetZoomToInitial resets zoom state to the configured initial mode
+func (g *Game) resetZoomToInitial() {
+	// Reset pan offsets
+	g.zoomState.PanOffsetX = 0
+	g.zoomState.PanOffsetY = 0
+
+	// Set mode based on config
+	switch g.config.InitialZoomMode {
+	case "fit_window":
+		g.zoomState.Mode = ZoomModeFitWindow
+		g.zoomState.Level = 1.0
+		g.needsInitialZoomUpdate = false
+	case "fit_width":
+		g.zoomState.Mode = ZoomModeFitWidth
+		g.zoomState.Level = 1.0 // Will be updated in first Draw()
+		g.needsInitialZoomUpdate = true
+	case "fit_height":
+		g.zoomState.Mode = ZoomModeFitHeight
+		g.zoomState.Level = 1.0 // Will be updated in first Draw()
+		g.needsInitialZoomUpdate = true
+	case "actual_size":
+		g.zoomState.Mode = ZoomModeManual
+		g.zoomState.Level = 1.0
+		g.needsInitialZoomUpdate = false
+	default:
+		// Fallback to fit window
+		g.zoomState.Mode = ZoomModeFitWindow
+		g.zoomState.Level = 1.0
+		g.needsInitialZoomUpdate = false
+	}
 }
 
 // getTransformedImageSize calculates the size of the currently displayed image after transformations
@@ -371,7 +461,7 @@ func (g *Game) getTransformedImageSize() (int, int) {
 
 // clampPanToLimits ensures pan offsets stay within valid boundaries
 func (g *Game) clampPanToLimits() {
-	if g.zoomState.Mode != ZoomModeManual {
+	if g.zoomState.Mode == ZoomModeFitWindow {
 		return
 	}
 
@@ -506,6 +596,11 @@ func (g *Game) calculateDisplayContent() {
 			}
 		}
 	}
+
+	// Update zoom level for fit modes after content is calculated (except during initial load)
+	if g.zoomState.Mode != ZoomModeManual && !g.needsInitialZoomUpdate {
+		g.updateZoomLevelForFitMode()
+	}
 }
 
 func (g *Game) showOverlayMessage(message string) {
@@ -614,7 +709,7 @@ func (g *Game) jumpToPage(pageNum int) {
 	g.imageManager.StartPreload(g.idx, NavigationJump)
 
 	// Reset zoom state when image changes
-	g.zoomState.Reset()
+	g.resetZoomToInitial()
 	g.calculateDisplayContent()
 }
 
@@ -925,7 +1020,7 @@ func (g *Game) navigateNext() {
 		g.idx++
 		g.tempSingleMode = false
 		g.bookMode = true
-		g.zoomState.Reset()
+		g.resetZoomToInitial()
 		g.calculateDisplayContent()
 		return
 	}
@@ -945,7 +1040,7 @@ func (g *Game) navigateNext() {
 			// Normal 2-page movement
 			g.idx += 2
 		}
-		g.zoomState.Reset()
+		g.resetZoomToInitial()
 		g.calculateDisplayContent()
 		return
 	}
@@ -953,7 +1048,7 @@ func (g *Game) navigateNext() {
 	g.idx++
 
 	// Reset zoom state when image changes
-	g.zoomState.Reset()
+	g.resetZoomToInitial()
 	g.calculateDisplayContent()
 }
 
@@ -976,7 +1071,7 @@ func (g *Game) navigatePrevious() {
 			g.tempSingleMode = false
 			g.bookMode = true
 		}
-		g.zoomState.Reset()
+		g.resetZoomToInitial()
 		g.calculateDisplayContent()
 		return
 	}
@@ -992,7 +1087,7 @@ func (g *Game) navigatePrevious() {
 		} else {
 			g.idx -= 2
 		}
-		g.zoomState.Reset()
+		g.resetZoomToInitial()
 		g.calculateDisplayContent()
 		return
 	}
@@ -1000,7 +1095,7 @@ func (g *Game) navigatePrevious() {
 	g.idx--
 
 	// Reset zoom state when image changes
-	g.zoomState.Reset()
+	g.resetZoomToInitial()
 	g.calculateDisplayContent()
 }
 
@@ -1060,6 +1155,12 @@ func (g *Game) resetToDefaultWindowSize() {
 }
 
 func (g *Game) Draw(screen *ebiten.Image) {
+	// Handle initial zoom level update for fit modes
+	if g.needsInitialZoomUpdate {
+		g.updateZoomLevelForFitMode()
+		g.needsInitialZoomUpdate = false
+	}
+
 	// Get current window size
 	w, h := screen.Bounds().Dx(), screen.Bounds().Dy()
 
@@ -1176,12 +1277,7 @@ func main() {
 	}
 
 	// Apply initial zoom mode from config
-	if config.InitialZoomMode == "actual_size" {
-		g.zoomState.Mode = ZoomModeManual
-		g.zoomState.Level = 1.0
-		g.zoomState.PanOffsetX = 0
-		g.zoomState.PanOffsetY = 0
-	}
+	g.resetZoomToInitial()
 
 	// Start initial preload in forward direction
 	imageManager.StartPreload(0, NavigationForward)

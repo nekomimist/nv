@@ -35,7 +35,7 @@ var actionDefinitions = []ActionDefinition{
 	{"zoom_in", []string{"Equal", "Shift+Equal"}, []string{"Ctrl+WheelUp"}, "Zoom in"},
 	{"zoom_out", []string{"Minus"}, []string{"Ctrl+WheelDown"}, "Zoom out"},
 	{"zoom_reset", []string{"Key0"}, []string{"Shift+MiddleClick"}, "Reset to 100% zoom"},
-	{"zoom_fit", []string{"KeyF"}, []string{"Alt+LeftClick"}, "Toggle fit to window mode"},
+	{"zoom_fit", []string{"KeyF"}, []string{"Alt+LeftClick"}, "Cycle zoom modes (Window/Width/Height/Manual)"},
 
 	// Pan actions (for manual zoom mode)
 	{"pan_up", []string{"ArrowUp"}, []string{}, "Pan up"},
