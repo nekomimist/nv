@@ -108,6 +108,8 @@ Settings are automatically saved to OS-standard configuration directories:
   "preload_enabled": true,
   "preload_count": 4,
   "initial_zoom_mode": "fit_window",
+  "fit_width_align_top": false,
+  "fit_height_align_left": false,
   "keybindings": {
     "exit": ["Escape", "KeyQ"],
     "help": ["Shift+Slash"],
@@ -134,6 +136,8 @@ Settings are automatically saved to OS-standard configuration directories:
 - `right_to_left`: Reading direction for book mode (default: false)
 - `font_size`: UI/help overlay font size (default: 24.0)
 - `initial_zoom_mode`: `"fit_window"` (default), `"fit_width"`, `"fit_height"`, or `"actual_size"`
+- `fit_width_align_top`: When `true`, FitWidth shows the image's top edge (align top) instead of center
+- `fit_height_align_left`: When `true`, FitHeight shows the image's left edge (align left) instead of center
 - `transition_frames`: Force redraw frames after fullscreen transitions (default: 0)
 - `preload_enabled`: Enable automatic image preloading (default: true)
 - `preload_count`: Number of images to preload ahead (1–16, default: 4)

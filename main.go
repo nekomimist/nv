@@ -134,6 +134,7 @@ type Game struct {
 	// Zoom and pan state
 	zoomState              *ZoomState
 	needsInitialZoomUpdate bool // Flag for updating zoom level on first draw
+	needsInitialPanAlign   bool // Flag for applying initial pan alignment after zoom update
 
 	// Page input mode state
 	pageInputMode   bool
@@ -281,12 +282,16 @@ func (g *Game) zoomFit() {
 		g.zoomState.PanOffsetX = 0
 		g.zoomState.PanOffsetY = 0
 		g.updateZoomLevelForFitMode()
+		g.alignPanForCurrentFitModeIfConfigured()
+		g.clampPanToLimits()
 		g.showOverlayMessage("Fit to Width")
 	case ZoomModeFitWidth:
 		g.zoomState.Mode = ZoomModeFitHeight
 		g.zoomState.PanOffsetX = 0
 		g.zoomState.PanOffsetY = 0
 		g.updateZoomLevelForFitMode()
+		g.alignPanForCurrentFitModeIfConfigured()
+		g.clampPanToLimits()
 		g.showOverlayMessage("Fit to Height")
 	case ZoomModeFitHeight:
 		g.switchToManual100()
@@ -419,10 +424,12 @@ func (g *Game) resetZoomToInitial() {
 		g.zoomState.Mode = ZoomModeFitWidth
 		g.zoomState.Level = 1.0 // Will be updated in first Draw()
 		g.needsInitialZoomUpdate = true
+		g.needsInitialPanAlign = true
 	case "fit_height":
 		g.zoomState.Mode = ZoomModeFitHeight
 		g.zoomState.Level = 1.0 // Will be updated in first Draw()
 		g.needsInitialZoomUpdate = true
+		g.needsInitialPanAlign = true
 	case "actual_size":
 		g.zoomState.Mode = ZoomModeManual
 		g.zoomState.Level = 1.0
@@ -432,6 +439,25 @@ func (g *Game) resetZoomToInitial() {
 		g.zoomState.Mode = ZoomModeFitWindow
 		g.zoomState.Level = 1.0
 		g.needsInitialZoomUpdate = false
+	}
+}
+
+// alignPanForCurrentFitModeIfConfigured nudges pan offsets to extremes and lets
+// clampPanToLimits snap them to the correct edges.
+// - FitWidth + config: aim for top edge (positive extreme Y)
+// - FitHeight + config: aim for left edge (positive extreme X)
+func (g *Game) alignPanForCurrentFitModeIfConfigured() {
+	switch g.zoomState.Mode {
+	case ZoomModeFitWidth:
+		if g.config.FitWidthAlignTop {
+			// Push to top extreme; clampPanToLimits will snap to exact edge if overflow
+			g.zoomState.PanOffsetY = 1e12
+		}
+	case ZoomModeFitHeight:
+		if g.config.FitHeightAlignLeft {
+			// Push to left extreme; clampPanToLimits will snap to exact edge if overflow
+			g.zoomState.PanOffsetX = 1e12
+		}
 	}
 }
 
@@ -1162,6 +1188,11 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	if g.needsInitialZoomUpdate {
 		g.updateZoomLevelForFitMode()
 		g.needsInitialZoomUpdate = false
+		if g.needsInitialPanAlign {
+			g.alignPanForCurrentFitModeIfConfigured()
+			g.clampPanToLimits()
+			g.needsInitialPanAlign = false
+		}
 	}
 
 	// Get current window size

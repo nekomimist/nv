@@ -242,6 +242,8 @@ type Config struct {
 	PreloadEnabled       bool                `json:"preload_enabled"`
 	PreloadCount         int                 `json:"preload_count"`
 	InitialZoomMode      string              `json:"initial_zoom_mode"`
+	FitWidthAlignTop     bool                `json:"fit_width_align_top"`
+	FitHeightAlignLeft   bool                `json:"fit_height_align_left"`
 	Keybindings          map[string][]string `json:"keybindings"`
 	Mousebindings        map[string][]string `json:"mousebindings"`
 	MouseSettings        MouseSettings       `json:"mouse_settings"`
@@ -281,18 +283,20 @@ func loadConfigFromPath(configPath string) ConfigLoadResult {
 	config := Config{
 		WindowWidth:          defaultWidth,
 		WindowHeight:         defaultHeight,
-		DefaultWindowWidth:   defaultWidth,              // Default window width
-		DefaultWindowHeight:  defaultHeight,             // Default window height
-		AspectRatioThreshold: 1.5,                       // Default threshold for aspect ratio compatibility
-		RightToLeft:          false,                     // Default to left-to-right reading (Western style)
-		FontSize:             24.0,                      // Default font size
-		SortMethod:           SortNatural,               // Default to natural sort
-		BookMode:             false,                     // Default to single page mode
-		Fullscreen:           false,                     // Default to windowed mode
-		CacheSize:            16,                        // Default cache size for images
-		TransitionFrames:     0,                         // Default: no forced transition frames
-		PreloadEnabled:       true,                      // Default: enable preloading
-		InitialZoomMode:      "fit_window",              // Default: fit to window
+		DefaultWindowWidth:   defaultWidth,  // Default window width
+		DefaultWindowHeight:  defaultHeight, // Default window height
+		AspectRatioThreshold: 1.5,           // Default threshold for aspect ratio compatibility
+		RightToLeft:          false,         // Default to left-to-right reading (Western style)
+		FontSize:             24.0,          // Default font size
+		SortMethod:           SortNatural,   // Default to natural sort
+		BookMode:             false,         // Default to single page mode
+		Fullscreen:           false,         // Default to windowed mode
+		CacheSize:            16,            // Default cache size for images
+		TransitionFrames:     0,             // Default: no forced transition frames
+		PreloadEnabled:       true,          // Default: enable preloading
+		InitialZoomMode:      "fit_window",  // Default: fit to window
+		FitWidthAlignTop:     false,
+		FitHeightAlignLeft:   false,
 		PreloadCount:         4,                         // Default: preload up to 4 images
 		Keybindings:          getDefaultKeybindings(),   // Default keybindings
 		Mousebindings:        getDefaultMousebindings(), // Default mouse bindings

@@ -309,6 +309,8 @@ The application saves settings to OS-standard configuration directories:
   "preload_enabled": true,
   "preload_count": 4,
   "initial_zoom_mode": "fit_window",
+  "fit_width_align_top": false,
+  "fit_height_align_left": false,
   "keybindings": {
     "exit": ["Escape", "KeyQ"],
     "help": ["Shift+Slash"],
@@ -344,6 +346,8 @@ The application saves settings to OS-standard configuration directories:
 - **preload_enabled**: Whether to enable automatic image preloading for smoother navigation. `true` = enabled, `false` = disabled. Default: true
 - **preload_count**: Number of images to preload in the navigation direction. Higher values use more memory but provide smoother navigation. Range: 1-16. Default: 4
 - **initial_zoom_mode**: Initial zoom mode when opening images. `"fit_window"` = fit to window (default), `"fit_width"` = fit to window width, `"fit_height"` = fit to window height, `"actual_size"` = 100% zoom level. Images are reset to this mode when changing images. Default: "fit_window"
+- **fit_width_align_top**: When `true`, FitWidth aligns to top (show top edge) instead of centering vertically. Default: `false`
+- **fit_height_align_left**: When `true`, FitHeight aligns to left (show left edge) instead of centering horizontally. Default: `false`
 - **keybindings**: Custom keybinding definitions for actions. Each action can have multiple keys assigned. Uses format like `"KeyA"`, `"Space"`, `"Shift+KeyB"`. If not specified, defaults are used. Invalid configurations fall back to defaults with warnings.
 - **mousebindings**: Custom mouse binding definitions for actions. Each action can have multiple mouse actions assigned. Uses format like `"LeftClick"`, `"WheelUp"`, `"Ctrl+MiddleClick"`. If not specified, defaults are used.
 - **mouse_settings**: Mouse behavior configuration:

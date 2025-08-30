@@ -34,3 +34,6 @@ Thumbs.db
 
 # Test fixtures
 test_images/
+
+# Go build cache
+.gocache/
