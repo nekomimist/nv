@@ -111,9 +111,59 @@ func (r *Renderer) Draw(screen *ebiten.Image) {
 		r.drawPageInputOverlay(screen)
 	}
 
+	// Draw settings overlay if active (only when base was redrawn)
+	if r.renderState.IsShowingSettings() {
+		r.drawSettingsOverlay(screen)
+	}
+
 	// Draw overlay message if active
 	if r.renderState.GetOverlayMessage() != "" && time.Since(r.renderState.GetOverlayMessageTime()) < overlayMessageDuration {
 		r.drawOverlayMessage(screen)
+	}
+}
+
+// drawSettingsOverlay renders the settings panel
+func (r *Renderer) drawSettingsOverlay(screen *ebiten.Image) {
+	w, h := float64(screen.Bounds().Dx()), float64(screen.Bounds().Dy())
+
+	// Fonts
+	titleFont := &text.GoTextFace{Source: r.helpFontSource, Size: 22}
+	itemFont := &text.GoTextFace{Source: r.helpFontSource, Size: 18}
+	hintFont := &text.GoTextFace{Source: r.helpFontSource, Size: 14}
+
+	// Dim background and panel
+	DrawFilledRect(screen, 0, 0, w, h, bgColorLight)
+
+	panelW := math.Min(700, w*0.9)
+	panelH := math.Min(0.9*h, 60+float64(len(settingsListOrder()))*28+40)
+	panelX := (w - panelW) / 2
+	panelY := (h - panelH) / 2
+	DrawFilledRect(screen, panelX, panelY, panelW, panelH, bgColorDark)
+
+	// Title and hints
+	DrawText(screen, "Settings", titleFont, panelX+16, panelY+20, colorWhite)
+	hint := "↑/↓: select  ←/→: change  Enter: toggle  Ctrl+S: save  Esc: cancel"
+	hw, hh := text.Measure(hint, hintFont, 0)
+	DrawText(screen, hint, hintFont, panelX+panelW-hw-16, panelY+20+(22-hh)/2, colorLightGray)
+
+	// List items
+	items := settingsListOrder()
+	startY := panelY + 60
+	rowH := 26.0
+	nameX := panelX + 24
+	valX := panelX + panelW - 260
+	selColor := color.RGBA{60, 60, 60, 200}
+
+	cfg := r.renderState.GetPendingConfig()
+	sel := r.renderState.GetSettingsIndex()
+	for i, name := range items {
+		y := startY + float64(i)*rowH
+		if i == sel {
+			DrawFilledRect(screen, panelX+8, y-4, panelW-16, rowH, selColor)
+		}
+		val := getSettingValueStringFromConfig(cfg, i)
+		DrawText(screen, name, itemFont, nameX, y, colorWhite)
+		DrawText(screen, val, itemFont, valX, y, colorCyan)
 	}
 }
 

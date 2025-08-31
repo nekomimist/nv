@@ -30,6 +30,7 @@ var actionDefinitions = []ActionDefinition{
 	{"flip_vertical", []string{"KeyV"}, []string{}, "Flip vertically"},
 	{"cycle_sort", []string{"Shift+KeyS"}, []string{"Alt+MiddleClick"}, "Cycle sort method (Natural/Simple/Entry)"},
 	{"expand_directory", []string{"KeyS"}, []string{}, "Scan directory images (single file mode)"},
+	{"toggle_settings", []string{"KeyO"}, []string{}, "Open/close settings"},
 
 	// Zoom and pan actions
 	{"zoom_in", []string{"Equal", "Shift+Equal"}, []string{"Ctrl+WheelUp"}, "Zoom in"},
@@ -105,6 +106,8 @@ func (ae *ActionExecutor) ExecuteAction(action string, inputActions InputActions
 		inputActions.CycleSortMethod()
 	case "expand_directory":
 		inputActions.ExpandToDirectory()
+	case "toggle_settings":
+		inputActions.ToggleSettings()
 
 	// Zoom and pan actions
 	case "zoom_in":

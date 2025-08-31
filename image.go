@@ -91,6 +91,16 @@ func (pm *PreloadManager) SetEnabled(enabled bool) {
 	pm.enabled = enabled
 }
 
+// SetMaxPreload updates the max number of images to preload
+func (pm *PreloadManager) SetMaxPreload(n int) {
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+	if n < 0 {
+		n = 0
+	}
+	pm.maxPreload = n
+}
+
 // IsEnabled returns whether preloading is enabled
 func (pm *PreloadManager) IsEnabled() bool {
 	pm.mu.RLock()

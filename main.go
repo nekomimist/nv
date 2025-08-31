@@ -167,6 +167,11 @@ type Game struct {
 
 	// Config status for help display
 	configStatus ConfigLoadResult
+
+	// Settings UI state
+	showSettings  bool
+	settingsIndex int
+	pendingConfig Config
 }
 
 func (g *Game) getCurrentImage() *ebiten.Image {
@@ -871,6 +876,14 @@ func (g *Game) GetPanOffsetY() float64 {
 	return g.zoomState.PanOffsetY
 }
 
+// Settings/InputState method
+func (g *Game) IsInSettingsMode() bool { return g.showSettings }
+
+// RenderState additions for settings overlay
+func (g *Game) IsShowingSettings() bool  { return g.showSettings }
+func (g *Game) GetPendingConfig() Config { return g.pendingConfig }
+func (g *Game) GetSettingsIndex() int    { return g.settingsIndex }
+
 func (g *Game) GetTotalPagesCount() int {
 	return g.imageManager.GetPathsCount()
 }
@@ -902,6 +915,105 @@ func (g *Game) ToggleHelp() {
 
 func (g *Game) ToggleInfo() {
 	g.showInfo = !g.showInfo
+}
+
+// Settings UI actions
+func (g *Game) ToggleSettings() {
+	g.showSettings = !g.showSettings
+	if g.showSettings {
+		g.pendingConfig = g.config
+		g.settingsIndex = 0
+		// No overlay when opening settings to avoid covering the panel
+	} else {
+		g.showOverlayMessage("")
+	}
+}
+
+func (g *Game) SettingsMoveUp() {
+	if g.settingsIndex > 0 {
+		g.settingsIndex--
+	}
+}
+func (g *Game) SettingsMoveDown() {
+	if g.settingsIndex < len(settingsListOrder())-1 {
+		g.settingsIndex++
+	}
+}
+func (g *Game) SettingsLeft()  { g.settingsAdjust(true) }
+func (g *Game) SettingsRight() { g.settingsAdjust(false) }
+func (g *Game) SettingsEnter() { g.settingsToggleOrEnter() }
+
+func (g *Game) SettingsCancel() {
+	g.showSettings = false
+	g.showOverlayMessage("Settings canceled")
+}
+
+func (g *Game) SettingsSave() {
+	// Save pendingConfig to file, then reload to apply validation
+	if g.configPath != "" {
+		saveConfigToPath(g.pendingConfig, g.configPath)
+		res := loadConfigFromPath(g.configPath)
+		g.applyNewConfig(res.Config)
+	} else {
+		saveConfig(g.pendingConfig)
+		res := loadConfig()
+		g.applyNewConfig(res.Config)
+	}
+	g.showSettings = false
+	g.showOverlayMessage("Settings saved")
+}
+
+// applyNewConfig applies runtime-affecting changes and updates dependent systems
+func (g *Game) applyNewConfig(newCfg Config) {
+	old := g.config
+	g.config = newCfg
+
+	// Fullscreen/window size
+	if g.fullscreen != g.config.Fullscreen {
+		g.toggleFullscreen()
+	}
+	if !g.fullscreen {
+		// Apply window size
+		ebiten.SetWindowSize(g.config.WindowWidth, g.config.WindowHeight)
+		g.savedWinW = g.config.WindowWidth
+		g.savedWinH = g.config.WindowHeight
+	}
+
+	// Book mode
+	g.bookMode = g.config.BookMode
+
+	// Sort method: re-collect
+	if old.SortMethod != g.config.SortMethod {
+		args := flag.Args()
+		if len(args) > 0 {
+			if paths, err := collectImages(args, g.config.SortMethod); err == nil && len(paths) > 0 {
+				g.imageManager.SetPaths(paths)
+				g.idx = 0
+			}
+		}
+	}
+
+	// Preload settings
+	g.updatePreloadConfig(g.config.PreloadCount, g.config.PreloadEnabled)
+
+	// Mouse settings
+	if g.mousebindingManager != nil {
+		g.mousebindingManager.UpdateSettings(g.config.MouseSettings)
+	}
+
+	// Initial zoom mode
+	g.resetZoomToInitial()
+	g.calculateDisplayContent()
+}
+
+// updatePreloadConfig updates preload manager (no effect on cache size; restart needed for cache resize)
+func (g *Game) updatePreloadConfig(maxPreload int, enabled bool) {
+	if dm, ok := g.imageManager.(*DefaultImageManager); ok {
+		if dm.preloadManager != nil {
+			dm.preloadManager.SetMaxPreload(maxPreload)
+			dm.preloadManager.SetEnabled(enabled)
+		}
+	}
 }
 
 func (g *Game) ToggleBookMode() {
@@ -1209,6 +1321,8 @@ func (g *Game) Draw(screen *ebiten.Image) {
 
 		// State has changed, perform actual drawing
 		g.renderer.Draw(screen)
+
+		// Settings overlay is drawn inside renderer.Draw when active
 
 		// Save current snapshot for next frame
 		g.renderer.lastSnapshot = currentSnapshot

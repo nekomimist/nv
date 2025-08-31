@@ -96,6 +96,11 @@ func (h *InputHandler) handleKeyboardInput() bool {
 		return h.handlePageInputModeKeys()
 	}
 
+	// Settings mode: intercept keys and avoid other actions
+	if h.inputState.IsInSettingsMode() {
+		return h.handleSettingsModeKeys()
+	}
+
 	// Normal input processing uses the action system
 	for _, actionDef := range actionDefinitions {
 		if h.keybindingManager.ExecuteAction(actionDef.Name, h.inputActions, h.inputState) {

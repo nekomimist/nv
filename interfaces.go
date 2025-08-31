@@ -42,6 +42,11 @@ type RenderState interface {
 	GetConfigStatus() ConfigLoadResult
 	GetKeybindings() map[string][]string
 	GetMousebindings() map[string][]string
+
+	// Settings overlay state
+	IsShowingSettings() bool
+	GetPendingConfig() Config
+	GetSettingsIndex() int
 }
 
 // RenderStateSnapshot captures a snapshot of render state for comparison
@@ -123,6 +128,15 @@ type InputActions interface {
 	ProcessPageInput()
 	UpdatePageInputBuffer(buffer string)
 
+	// Settings UI
+	ToggleSettings()
+	SettingsMoveUp()
+	SettingsMoveDown()
+	SettingsLeft()
+	SettingsRight()
+	SettingsEnter()
+	SettingsSave()
+	SettingsCancel()
 	// Settings
 	ToggleReadingDirection()
 	CycleSortMethod()
@@ -159,4 +173,5 @@ type InputState interface {
 	IsInPageInputMode() bool
 	GetPageInputBuffer() string
 	GetZoomMode() ZoomMode // For drag permission checking
+	IsInSettingsMode() bool
 }
