@@ -25,6 +25,7 @@ func settingsListOrder() []string {
 		"InitialZoomMode",
 		"FitWidthAlignTop",
 		"FitHeightAlignLeft",
+		"MaxImageDimension",
 		"CacheSize (restart)",
 		"TransitionFrames",
 		"PreloadEnabled",
@@ -88,6 +89,11 @@ func getSettingValueStringFromConfig(c Config, i int) string {
 			return "ON"
 		}
 		return "OFF"
+	case "MaxImageDimension":
+		if c.MaxImageDimension == 0 {
+			return fmt.Sprintf("Auto (%d)", defaultMaxImageDimension)
+		}
+		return fmt.Sprintf("%d", c.MaxImageDimension)
 	case "CacheSize (restart)":
 		return fmt.Sprintf("%d", c.CacheSize)
 	case "TransitionFrames":
@@ -225,6 +231,22 @@ func (g *Game) settingsAdjust(left bool) {
 		c.FitWidthAlignTop = !c.FitWidthAlignTop
 	case "FitHeightAlignLeft":
 		c.FitHeightAlignLeft = !c.FitHeightAlignLeft
+	case "MaxImageDimension":
+		const minMaxImageDimension = 512
+		const maxMaxImageDimension = 16383
+		if c.MaxImageDimension == 0 {
+			if left {
+				break
+			}
+			c.MaxImageDimension = defaultMaxImageDimension
+			break
+		}
+		newValue := c.MaxImageDimension + stepSign*intStep
+		if newValue <= minMaxImageDimension {
+			c.MaxImageDimension = 0
+		} else {
+			c.MaxImageDimension = clampInt(newValue, minMaxImageDimension, maxMaxImageDimension)
+		}
 	case "CacheSize (restart)":
 		c.CacheSize = clampInt(c.CacheSize+stepSign*1, 1, 64)
 	case "TransitionFrames":

@@ -238,6 +238,7 @@ type Config struct {
 	BookMode             bool                `json:"book_mode"`
 	Fullscreen           bool                `json:"fullscreen"`
 	CacheSize            int                 `json:"cache_size"`
+	MaxImageDimension    int                 `json:"max_image_dimension"`
 	TransitionFrames     int                 `json:"transition_frames"`
 	PreloadEnabled       bool                `json:"preload_enabled"`
 	PreloadCount         int                 `json:"preload_count"`
@@ -292,6 +293,7 @@ func loadConfigFromPath(configPath string) ConfigLoadResult {
 		BookMode:             false,         // Default to single page mode
 		Fullscreen:           false,         // Default to windowed mode
 		CacheSize:            16,            // Default cache size for images
+		MaxImageDimension:    0,             // Default: rely on Ebiten/config-driven detection
 		TransitionFrames:     0,             // Default: no forced transition frames
 		PreloadEnabled:       true,          // Default: enable preloading
 		InitialZoomMode:      "fit_window",  // Default: fit to window
@@ -366,6 +368,11 @@ func loadConfigFromPath(configPath string) ConfigLoadResult {
 		config.CacheSize = 16
 	} else if config.CacheSize > 64 {
 		config.CacheSize = 64
+	}
+
+	// Validate max image dimension (0 disables limit, otherwise positive)
+	if config.MaxImageDimension < 0 {
+		config.MaxImageDimension = 0
 	}
 
 	// Validate transition frames (minimum 0, maximum 60)

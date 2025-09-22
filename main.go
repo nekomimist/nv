@@ -995,6 +995,9 @@ func (g *Game) applyNewConfig(newCfg Config) {
 
 	// Preload settings
 	g.updatePreloadConfig(g.config.PreloadCount, g.config.PreloadEnabled)
+	if dm, ok := g.imageManager.(*DefaultImageManager); ok {
+		dm.SetMaxImageDimension(g.config.MaxImageDimension)
+	}
 
 	// Mouse settings
 	if g.mousebindingManager != nil {
@@ -1413,6 +1416,9 @@ func main() {
 	}
 
 	imageManager := NewImageManagerWithPreload(config.CacheSize, config.PreloadCount, config.PreloadEnabled)
+	if dm, ok := imageManager.(*DefaultImageManager); ok {
+		dm.SetMaxImageDimension(config.MaxImageDimension)
+	}
 	imageManager.SetPaths(paths)
 
 	g := &Game{

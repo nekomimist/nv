@@ -11,17 +11,20 @@ import (
 	_ "image/png"
 	"io"
 	"log"
+	"math"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/bodgit/sevenzip"
 	"github.com/hajimehoshi/ebiten/v2"
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/nwaples/rardecode"
 	_ "golang.org/x/image/bmp"
+	"golang.org/x/image/draw"
 	_ "golang.org/x/image/webp"
 )
 
@@ -53,6 +56,8 @@ type PreloadStats struct {
 	FailedCount   int
 	LastDirection NavigationDirection
 }
+
+const defaultMaxImageDimension = 8192
 
 // PreloadManager manages asynchronous image preloading
 type PreloadManager struct {
@@ -246,7 +251,7 @@ func (pm *PreloadManager) preloadImage(idx int) {
 	}
 
 	// Load image
-	img, err := loadImage(imagePath)
+	img, err := pm.imageManager.loadImage(imagePath)
 	if err != nil {
 		pm.mu.Lock()
 		pm.stats.FailedCount++
@@ -281,10 +286,11 @@ type ImageManager interface {
 
 // DefaultImageManager implements ImageManager
 type DefaultImageManager struct {
-	paths          []ImagePath
-	cache          *lru.Cache[string, *ebiten.Image]
-	mu             sync.RWMutex
-	preloadManager *PreloadManager
+	paths             []ImagePath
+	cache             *lru.Cache[string, *ebiten.Image]
+	mu                sync.RWMutex
+	preloadManager    *PreloadManager
+	maxImageDimension atomic.Int64
 }
 
 // NewImageManager creates a new DefaultImageManager
@@ -337,6 +343,15 @@ func NewImageManagerWithPreload(cacheSize int, preloadCount int, preloadEnabled 
 	manager.preloadManager.SetEnabled(preloadEnabled)
 
 	return manager
+}
+
+// SetMaxImageDimension updates the maximum permitted decoded image dimension before handing to Ebiten.
+// A value of 0 disables pre-scaling and relies on Ebiten's own limits.
+func (m *DefaultImageManager) SetMaxImageDimension(limit int) {
+	if limit < 0 {
+		limit = 0
+	}
+	m.maxImageDimension.Store(int64(limit))
 }
 
 func (m *DefaultImageManager) SetPaths(paths []ImagePath) {
@@ -410,7 +425,7 @@ func (m *DefaultImageManager) GetImage(idx int) *ebiten.Image {
 	}
 
 	// Load image on demand
-	img, err := loadImage(imagePath)
+	img, err := m.loadImage(imagePath)
 	if err != nil {
 		log.Printf("Error: Failed to load image [%d/%d] %s: %v",
 			idx+1, len(m.paths), imagePath.Path, err)
@@ -445,16 +460,16 @@ func (m *DefaultImageManager) getPath(idx int) (ImagePath, bool) {
 
 // Image loading functions
 
-func loadImageFromBytes(data []byte, path string) (*ebiten.Image, error) {
+func (m *DefaultImageManager) loadImageFromBytes(data []byte, path string) (*ebiten.Image, error) {
 	reader := bytes.NewReader(data)
-	img, _, err := image.Decode(reader)
+	decoded, _, err := image.Decode(reader)
 	if err != nil {
 		return nil, fmt.Errorf("decoding %s: %v", path, err)
 	}
-	return ebiten.NewImageFromImage(img), nil
+	return m.createEbitenImageFromDecoded(decoded, path)
 }
 
-func loadImageFromZip(archivePath, entryPath string) (*ebiten.Image, error) {
+func (m *DefaultImageManager) loadImageFromZip(archivePath, entryPath string) (*ebiten.Image, error) {
 	r, err := zip.OpenReader(archivePath)
 	if err != nil {
 		return nil, err
@@ -474,13 +489,13 @@ func loadImageFromZip(archivePath, entryPath string) (*ebiten.Image, error) {
 				return nil, err
 			}
 
-			return loadImageFromBytes(data, entryPath)
+			return m.loadImageFromBytes(data, entryPath)
 		}
 	}
 	return nil, fmt.Errorf("entry %s not found in %s", entryPath, archivePath)
 }
 
-func loadImageFromRar(archivePath, entryPath string) (*ebiten.Image, error) {
+func (m *DefaultImageManager) loadImageFromRar(archivePath, entryPath string) (*ebiten.Image, error) {
 	f, err := os.Open(archivePath)
 	if err != nil {
 		return nil, err
@@ -506,13 +521,13 @@ func loadImageFromRar(archivePath, entryPath string) (*ebiten.Image, error) {
 			if err != nil {
 				return nil, err
 			}
-			return loadImageFromBytes(data, entryPath)
+			return m.loadImageFromBytes(data, entryPath)
 		}
 	}
 	return nil, fmt.Errorf("entry %s not found in %s", entryPath, archivePath)
 }
 
-func loadImageFrom7z(archivePath, entryPath string) (*ebiten.Image, error) {
+func (m *DefaultImageManager) loadImageFrom7z(archivePath, entryPath string) (*ebiten.Image, error) {
 	r, err := sevenzip.OpenReader(archivePath)
 	if err != nil {
 		return nil, err
@@ -532,40 +547,105 @@ func loadImageFrom7z(archivePath, entryPath string) (*ebiten.Image, error) {
 				return nil, err
 			}
 
-			return loadImageFromBytes(data, entryPath)
+			return m.loadImageFromBytes(data, entryPath)
 		}
 	}
 	return nil, fmt.Errorf("entry %s not found in %s", entryPath, archivePath)
 }
 
-func loadImage(imagePath ImagePath) (*ebiten.Image, error) {
+func (m *DefaultImageManager) loadImage(imagePath ImagePath) (*ebiten.Image, error) {
 	if imagePath.ArchivePath == "" {
-		// Regular file
 		f, err := os.Open(imagePath.Path)
 		if err != nil {
 			return nil, err
 		}
 		defer f.Close()
 
-		img, _, err := image.Decode(f)
+		decoded, _, err := image.Decode(f)
 		if err != nil {
 			return nil, fmt.Errorf("decoding %s: %v", imagePath.Path, err)
 		}
-		return ebiten.NewImageFromImage(img), nil
-	} else {
-		// Archive entry
-		ext := strings.ToLower(filepath.Ext(imagePath.ArchivePath))
-		switch ext {
-		case ".zip":
-			return loadImageFromZip(imagePath.ArchivePath, imagePath.EntryPath)
-		case ".rar":
-			return loadImageFromRar(imagePath.ArchivePath, imagePath.EntryPath)
-		case ".7z":
-			return loadImageFrom7z(imagePath.ArchivePath, imagePath.EntryPath)
-		default:
-			return nil, fmt.Errorf("unsupported archive format: %s", ext)
+		return m.createEbitenImageFromDecoded(decoded, imagePath.Path)
+	}
+
+	ext := strings.ToLower(filepath.Ext(imagePath.ArchivePath))
+	switch ext {
+	case ".zip":
+		return m.loadImageFromZip(imagePath.ArchivePath, imagePath.EntryPath)
+	case ".rar":
+		return m.loadImageFromRar(imagePath.ArchivePath, imagePath.EntryPath)
+	case ".7z":
+		return m.loadImageFrom7z(imagePath.ArchivePath, imagePath.EntryPath)
+	default:
+		return nil, fmt.Errorf("unsupported archive format: %s", ext)
+	}
+}
+
+func (m *DefaultImageManager) createEbitenImageFromDecoded(src image.Image, origin string) (*ebiten.Image, error) {
+	if src == nil {
+		return nil, fmt.Errorf("decoded image is nil for %s", origin)
+	}
+
+	limit := m.preferredMaxDimension()
+	if limit > 0 {
+		bounds := src.Bounds()
+		width := bounds.Dx()
+		height := bounds.Dy()
+		if width > limit || height > limit {
+			resized, changed := resizeImageToFit(src, limit)
+			if changed {
+				newBounds := resized.Bounds()
+				log.Printf("Info: downscaled large image %s from %dx%d to %dx%d (limit %d)", origin, width, height, newBounds.Dx(), newBounds.Dy(), limit)
+				src = resized
+			}
 		}
 	}
+
+	return ebiten.NewImageFromImage(src), nil
+}
+
+func (m *DefaultImageManager) preferredMaxDimension() int {
+	if cfg := int(m.maxImageDimension.Load()); cfg > 0 {
+		return cfg
+	}
+	if size, ok := queryEbitenMaxImageSize(); ok && size > 0 {
+		return size
+	}
+	return defaultMaxImageDimension
+}
+
+func resizeImageToFit(src image.Image, limit int) (image.Image, bool) {
+	if limit <= 0 {
+		return src, false
+	}
+
+	bounds := src.Bounds()
+	width := bounds.Dx()
+	height := bounds.Dy()
+	if width <= limit && height <= limit {
+		return src, false
+	}
+
+	scale := float64(limit) / float64(width)
+	if height > width {
+		scale = float64(limit) / float64(height)
+	}
+	if scale >= 1.0 {
+		return src, false
+	}
+
+	newW := int(math.Max(1, math.Round(float64(width)*scale)))
+	newH := int(math.Max(1, math.Round(float64(height)*scale)))
+
+	dst := image.NewRGBA(image.Rect(0, 0, newW, newH))
+	draw.ApproxBiLinear.Scale(dst, dst.Bounds(), src, bounds, draw.Over, nil)
+	return dst, true
+}
+
+func queryEbitenMaxImageSize() (int, bool) {
+	// Current Ebiten stable releases do not expose the texture limit.
+	// Return false so that callers fall back to configuration-driven limits.
+	return 0, false
 }
 
 // File collection functions
