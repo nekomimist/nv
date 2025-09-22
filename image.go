@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"image"
+	"image/color"
 	_ "image/gif"
 	_ "image/jpeg"
 	_ "image/png"
@@ -282,15 +283,27 @@ type ImageManager interface {
 	StartPreload(currentIdx int, direction NavigationDirection)
 	StopPreload()
 	GetPreloadStats() PreloadStats
+	ConsumeAsyncRefresh() bool
 }
 
 // DefaultImageManager implements ImageManager
 type DefaultImageManager struct {
-	paths             []ImagePath
-	cache             *lru.Cache[string, *ebiten.Image]
-	mu                sync.RWMutex
-	preloadManager    *PreloadManager
-	maxImageDimension atomic.Int64
+	paths              []ImagePath
+	cache              *lru.Cache[string, *ebiten.Image]
+	mu                 sync.RWMutex
+	preloadManager     *PreloadManager
+	maxImageDimension  atomic.Int64
+	loadRequests       chan loadRequest
+	inflight           map[string]struct{}
+	inflightMu         sync.Mutex
+	loadWorkerOnce     sync.Once
+	loadingPlaceholder *ebiten.Image
+	asyncRefresh       atomic.Bool
+}
+
+type loadRequest struct {
+	path     ImagePath
+	cacheKey string
 }
 
 // NewImageManager creates a new DefaultImageManager
@@ -309,12 +322,7 @@ func NewImageManager(cacheSize int) ImageManager {
 		})
 	}
 
-	manager := &DefaultImageManager{
-		paths: []ImagePath{},
-		cache: cache,
-	}
-
-	return manager
+	return newDefaultImageManager(cache)
 }
 
 // NewImageManagerWithPreload creates a new DefaultImageManager with preload configuration
@@ -333,15 +341,24 @@ func NewImageManagerWithPreload(cacheSize int, preloadCount int, preloadEnabled 
 		})
 	}
 
-	manager := &DefaultImageManager{
-		paths: []ImagePath{},
-		cache: cache,
-	}
+	manager := newDefaultImageManager(cache)
 
 	// Initialize preload manager with configuration
 	manager.preloadManager = NewPreloadManager(manager, preloadCount)
 	manager.preloadManager.SetEnabled(preloadEnabled)
 
+	return manager
+}
+
+func newDefaultImageManager(cache *lru.Cache[string, *ebiten.Image]) *DefaultImageManager {
+	manager := &DefaultImageManager{
+		paths:              []ImagePath{},
+		cache:              cache,
+		loadRequests:       make(chan loadRequest, 8),
+		inflight:           make(map[string]struct{}),
+		loadingPlaceholder: createLoadingPlaceholder(),
+	}
+	manager.startLoadWorker()
 	return manager
 }
 
@@ -352,6 +369,73 @@ func (m *DefaultImageManager) SetMaxImageDimension(limit int) {
 		limit = 0
 	}
 	m.maxImageDimension.Store(int64(limit))
+}
+
+func (m *DefaultImageManager) startLoadWorker() {
+	m.loadWorkerOnce.Do(func() {
+		go m.asyncLoadWorker()
+	})
+}
+
+func (m *DefaultImageManager) asyncLoadWorker() {
+	for req := range m.loadRequests {
+		m.processLoadRequest(req)
+	}
+}
+
+func (m *DefaultImageManager) processLoadRequest(req loadRequest) {
+	defer func() {
+		m.inflightMu.Lock()
+		delete(m.inflight, req.cacheKey)
+		m.inflightMu.Unlock()
+	}()
+
+	img, err := m.loadImage(req.path)
+	if err != nil {
+		log.Printf("Error: Failed to load image %s: %v", req.path.Path, err)
+		errorImg := CreateErrorImage(400, 300, req.path.Path, err.Error())
+		m.cache.Add(req.cacheKey, errorImg)
+		m.asyncRefresh.Store(true)
+		return
+	}
+
+	m.cache.Add(req.cacheKey, img)
+	m.asyncRefresh.Store(true)
+
+	var mem runtime.MemStats
+	runtime.ReadMemStats(&mem)
+	debugLog("Cache MISS (async): %s, loaded and cached (cache: %d items, memory: %dMB)", req.cacheKey, m.cache.Len(), mem.Alloc/1024/1024)
+}
+
+func (m *DefaultImageManager) requestAsyncLoad(imagePath ImagePath) {
+	cacheKey := imagePath.Path
+	m.inflightMu.Lock()
+	if _, exists := m.inflight[cacheKey]; exists {
+		m.inflightMu.Unlock()
+		return
+	}
+	m.inflight[cacheKey] = struct{}{}
+	m.inflightMu.Unlock()
+
+	req := loadRequest{path: imagePath, cacheKey: cacheKey}
+
+	go func() {
+		select {
+		case m.loadRequests <- req:
+		default:
+			m.processLoadRequest(req)
+		}
+	}()
+}
+
+func createLoadingPlaceholder() *ebiten.Image {
+	img := ebiten.NewImage(200, 150)
+	img.Fill(color.RGBA{45, 45, 45, 255})
+	return img
+}
+
+func (m *DefaultImageManager) ConsumeAsyncRefresh() bool {
+	return m.asyncRefresh.Swap(false)
 }
 
 func (m *DefaultImageManager) SetPaths(paths []ImagePath) {
@@ -424,26 +508,9 @@ func (m *DefaultImageManager) GetImage(idx int) *ebiten.Image {
 		return img
 	}
 
-	// Load image on demand
-	img, err := m.loadImage(imagePath)
-	if err != nil {
-		log.Printf("Error: Failed to load image [%d/%d] %s: %v",
-			idx+1, len(m.paths), imagePath.Path, err)
-
-		// Create error image instead of returning nil
-		return CreateErrorImage(400, 300, imagePath.Path, err.Error())
-	}
-
-	// Add to cache
-	m.cache.Add(cacheKey, img)
-
-	// Log cache miss with memory info
-	var mem runtime.MemStats
-	runtime.ReadMemStats(&mem)
-	debugLog("Cache MISS: %s, loaded and cached (cache: %d items, memory: %dMB)",
-		cacheKey, m.cache.Len(), mem.Alloc/1024/1024)
-
-	return img
+	m.startLoadWorker()
+	m.requestAsyncLoad(imagePath)
+	return m.loadingPlaceholder
 }
 
 // getPath safely returns the ImagePath at index if available

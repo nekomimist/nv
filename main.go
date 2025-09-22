@@ -1147,6 +1147,11 @@ func (g *Game) Update() error {
 		g.overlayMessageTime = time.Time{}
 	}
 
+	if g.imageManager.ConsumeAsyncRefresh() {
+		g.calculateDisplayContent()
+		g.renderer.lastSnapshot = nil
+	}
+
 	return nil
 }
 
