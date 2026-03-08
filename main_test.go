@@ -9,6 +9,50 @@ import (
 	"github.com/hajimehoshi/ebiten/v2"
 )
 
+type stubImageManager struct {
+	paths []ImagePath
+}
+
+func (m *stubImageManager) GetImage(idx int) *ebiten.Image {
+	return nil
+}
+
+func (m *stubImageManager) GetCurrentImage(idx int) *ebiten.Image {
+	return nil
+}
+
+func (m *stubImageManager) GetBookModeImages(idx int, rightToLeft bool) (*ebiten.Image, *ebiten.Image) {
+	return nil, nil
+}
+
+func (m *stubImageManager) GetPath(idx int) (ImagePath, bool) {
+	if idx < 0 || idx >= len(m.paths) {
+		return ImagePath{}, false
+	}
+	return m.paths[idx], true
+}
+
+func (m *stubImageManager) SetPaths(paths []ImagePath) {
+	m.paths = make([]ImagePath, len(paths))
+	copy(m.paths, paths)
+}
+
+func (m *stubImageManager) GetPathsCount() int {
+	return len(m.paths)
+}
+
+func (m *stubImageManager) StartPreload(currentIdx int, direction NavigationDirection) {}
+
+func (m *stubImageManager) StopPreload() {}
+
+func (m *stubImageManager) GetPreloadStats() PreloadStats {
+	return PreloadStats{}
+}
+
+func (m *stubImageManager) ConsumeAsyncRefresh() bool {
+	return false
+}
+
 func TestIsArchiveExt(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -420,6 +464,176 @@ func TestCollectImages(t *testing.T) {
 	}
 	if len(result) != 1 || !reflect.DeepEqual(result[0], expectedSingle) {
 		t.Errorf("Expected [%+v], got %v", expectedSingle, result)
+	}
+}
+
+func TestExpandToDirectorySwitchesCollectionSource(t *testing.T) {
+	tempDir := t.TempDir()
+	originalFile := filepath.Join(tempDir, "page2.jpg")
+	otherFile := filepath.Join(tempDir, "page10.jpg")
+
+	for _, path := range []string{originalFile, otherFile} {
+		if err := os.WriteFile(path, []byte("test"), 0644); err != nil {
+			t.Fatalf("Failed to create file %s: %v", path, err)
+		}
+	}
+
+	initialPaths := []ImagePath{{Path: originalFile}}
+	imageManager := &stubImageManager{}
+	imageManager.SetPaths(initialPaths)
+
+	g := &Game{
+		imageManager:     imageManager,
+		config:           Config{SortMethod: SortNatural},
+		collectionSource: newArgsCollectionSource([]string{originalFile}),
+		launchSingleFile: originalFile,
+		zoomState:        NewZoomState(),
+		bookMode:         false,
+		fullscreen:       true,
+		currentLogicalW:  800,
+		currentLogicalH:  600,
+	}
+
+	g.expandToDirectoryAndJump()
+
+	if g.collectionSource.Mode != CollectionSourceExpandedSingleDirectory {
+		t.Fatalf("expected expanded directory source, got %v", g.collectionSource.Mode)
+	}
+
+	if got := g.imageManager.GetPathsCount(); got != 2 {
+		t.Fatalf("expected 2 paths after expansion, got %d", got)
+	}
+
+	currentPath, ok := g.imageManager.GetPath(g.idx)
+	if !ok {
+		t.Fatal("expected current path after expansion")
+	}
+	if currentPath.Path != originalFile {
+		t.Fatalf("expected current file %s after expansion, got %s", originalFile, currentPath.Path)
+	}
+}
+
+func TestReloadPathsForCurrentSourceKeepsExpandedDirectorySelection(t *testing.T) {
+	tempDir := t.TempDir()
+	originalFile := filepath.Join(tempDir, "page2.jpg")
+	files := []string{
+		filepath.Join(tempDir, "page01.jpg"),
+		originalFile,
+		filepath.Join(tempDir, "page10.jpg"),
+	}
+
+	for _, path := range files {
+		if err := os.WriteFile(path, []byte("test"), 0644); err != nil {
+			t.Fatalf("Failed to create file %s: %v", path, err)
+		}
+	}
+
+	initialPaths, err := collectImagesFromSameDirectory(originalFile, SortNatural)
+	if err != nil {
+		t.Fatalf("collectImagesFromSameDirectory failed: %v", err)
+	}
+
+	imageManager := &stubImageManager{}
+	imageManager.SetPaths(initialPaths)
+
+	originalIdx := findImagePathIndex(initialPaths, originalFile)
+	if originalIdx < 0 {
+		t.Fatalf("expected to find original file in initial paths")
+	}
+
+	g := &Game{
+		imageManager:     imageManager,
+		idx:              originalIdx,
+		config:           Config{SortMethod: SortSimple},
+		collectionSource: newExpandedDirectorySource(originalFile),
+		launchSingleFile: originalFile,
+		zoomState:        NewZoomState(),
+		bookMode:         false,
+		fullscreen:       true,
+		currentLogicalW:  800,
+		currentLogicalH:  600,
+	}
+
+	if ok := g.reloadPathsForCurrentSource(); !ok {
+		t.Fatal("expected reloadPathsForCurrentSource to succeed")
+	}
+
+	if got := g.imageManager.GetPathsCount(); got != 3 {
+		t.Fatalf("expected 3 paths after reload, got %d", got)
+	}
+
+	currentPath, ok := g.imageManager.GetPath(g.idx)
+	if !ok {
+		t.Fatal("expected current path after reload")
+	}
+	if currentPath.Path != originalFile {
+		t.Fatalf("expected current file %s after sort reload, got %s", originalFile, currentPath.Path)
+	}
+}
+
+func TestApplyNewConfigReloadsFromCurrentSource(t *testing.T) {
+	tempDir := t.TempDir()
+	originalFile := filepath.Join(tempDir, "page2.jpg")
+	files := []string{
+		filepath.Join(tempDir, "page01.jpg"),
+		originalFile,
+		filepath.Join(tempDir, "page10.jpg"),
+	}
+
+	for _, path := range files {
+		if err := os.WriteFile(path, []byte("test"), 0644); err != nil {
+			t.Fatalf("Failed to create file %s: %v", path, err)
+		}
+	}
+
+	initialPaths, err := collectImagesFromSameDirectory(originalFile, SortNatural)
+	if err != nil {
+		t.Fatalf("collectImagesFromSameDirectory failed: %v", err)
+	}
+
+	imageManager := &stubImageManager{}
+	imageManager.SetPaths(initialPaths)
+
+	originalIdx := findImagePathIndex(initialPaths, originalFile)
+	if originalIdx < 0 {
+		t.Fatalf("expected to find original file in initial paths")
+	}
+
+	g := &Game{
+		imageManager: imageManager,
+		idx:          originalIdx,
+		bookMode:     false,
+		fullscreen:   true,
+		config: Config{
+			SortMethod: SortNatural,
+			Fullscreen: true,
+		},
+		collectionSource: newExpandedDirectorySource(originalFile),
+		launchSingleFile: originalFile,
+		zoomState:        NewZoomState(),
+		currentLogicalW:  800,
+		currentLogicalH:  600,
+	}
+
+	newCfg := g.config
+	newCfg.SortMethod = SortSimple
+
+	g.applyNewConfig(newCfg)
+
+	if g.collectionSource.Mode != CollectionSourceExpandedSingleDirectory {
+		t.Fatalf("expected expanded directory source after config apply, got %v", g.collectionSource.Mode)
+	}
+
+	if got := g.imageManager.GetPathsCount(); got != 3 {
+		t.Fatalf("expected 3 paths after config apply reload, got %d", got)
+	}
+
+	currentPath, ok := g.imageManager.GetPath(g.idx)
+	if !ok {
+		t.Fatal("expected current path after config apply")
+	}
+	if currentPath.Path != originalFile {
+		t.Fatalf("expected current file %s after config apply, got %s", originalFile, currentPath.Path)
 	}
 }
 

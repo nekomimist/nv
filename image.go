@@ -278,6 +278,7 @@ type ImageManager interface {
 	GetImage(idx int) *ebiten.Image
 	GetCurrentImage(idx int) *ebiten.Image
 	GetBookModeImages(idx int, rightToLeft bool) (*ebiten.Image, *ebiten.Image)
+	GetPath(idx int) (ImagePath, bool)
 	SetPaths(paths []ImagePath)
 	GetPathsCount() int
 	StartPreload(currentIdx int, direction NavigationDirection)
@@ -473,6 +474,10 @@ func (m *DefaultImageManager) GetPreloadStats() PreloadStats {
 
 func (m *DefaultImageManager) GetCurrentImage(idx int) *ebiten.Image {
 	return m.GetImage(idx)
+}
+
+func (m *DefaultImageManager) GetPath(idx int) (ImagePath, bool) {
+	return m.getPath(idx)
 }
 
 func (m *DefaultImageManager) GetBookModeImages(idx int, rightToLeft bool) (*ebiten.Image, *ebiten.Image) {

@@ -115,6 +115,44 @@ func isSupportedExt(path string) bool {
 	}
 }
 
+type CollectionSourceMode int
+
+const (
+	CollectionSourceArgs CollectionSourceMode = iota
+	CollectionSourceExpandedSingleDirectory
+)
+
+type CollectionSource struct {
+	Mode             CollectionSourceMode
+	Args             []string
+	ExpandedFilePath string
+}
+
+func newArgsCollectionSource(args []string) CollectionSource {
+	clonedArgs := make([]string, len(args))
+	copy(clonedArgs, args)
+	return CollectionSource{
+		Mode: CollectionSourceArgs,
+		Args: clonedArgs,
+	}
+}
+
+func newExpandedDirectorySource(filePath string) CollectionSource {
+	return CollectionSource{
+		Mode:             CollectionSourceExpandedSingleDirectory,
+		ExpandedFilePath: filePath,
+	}
+}
+
+func (s CollectionSource) collect(sortMethod int) ([]ImagePath, error) {
+	switch s.Mode {
+	case CollectionSourceExpandedSingleDirectory:
+		return collectImagesFromSameDirectory(s.ExpandedFilePath, sortMethod)
+	default:
+		return collectImages(s.Args, sortMethod)
+	}
+}
+
 type Game struct {
 	imageManager        ImageManager
 	inputHandler        *InputHandler
@@ -151,10 +189,9 @@ type Game struct {
 	config          Config
 	configPath      string // Custom config file path, empty for default
 
-	// Single file expansion mode state
-	originalArgs       []string // Original command line arguments
-	expandedFromSingle bool     // Whether the current file list was expanded from a single file
-	originalFileIndex  int      // Index of the original file in the expanded list
+	// Image collection source state
+	collectionSource CollectionSource
+	launchSingleFile string // Original launch file path when started from a single regular image
 
 	// Image transformation state
 	rotationAngle int  // 0, 90, 180, 270 degrees
@@ -188,6 +225,90 @@ func (g *Game) saveCurrentConfig() {
 	} else {
 		saveConfig(g.config)
 	}
+}
+
+func (g *Game) getCurrentImagePath() string {
+	imagePath, ok := g.imageManager.GetPath(g.idx)
+	if !ok {
+		return ""
+	}
+	return imagePath.Path
+}
+
+func findImagePathIndex(paths []ImagePath, targetPath string) int {
+	if targetPath == "" {
+		return -1
+	}
+
+	for i, imagePath := range paths {
+		if imagePath.Path == targetPath {
+			return i
+		}
+	}
+
+	return -1
+}
+
+func (g *Game) setCurrentIndex(targetIdx int) {
+	pathsCount := g.imageManager.GetPathsCount()
+	if pathsCount == 0 {
+		g.idx = 0
+		g.tempSingleMode = false
+		return
+	}
+
+	if targetIdx < 0 {
+		targetIdx = 0
+	}
+	if targetIdx >= pathsCount {
+		targetIdx = pathsCount - 1
+	}
+
+	if g.bookMode && targetIdx == pathsCount-1 {
+		if targetIdx > 0 {
+			prevImg, finalImg := g.imageManager.GetBookModeImages(targetIdx-1, g.config.RightToLeft)
+
+			if g.shouldUseBookMode(prevImg, finalImg) {
+				g.idx = targetIdx - 1
+				g.tempSingleMode = false
+			} else {
+				g.idx = targetIdx
+				g.bookMode = false
+				g.tempSingleMode = true
+			}
+		} else {
+			g.idx = targetIdx
+			g.bookMode = false
+			g.tempSingleMode = true
+		}
+		return
+	}
+
+	g.idx = targetIdx
+	g.tempSingleMode = false
+}
+
+func (g *Game) reloadPathsForCurrentSource() bool {
+	currentPath := g.getCurrentImagePath()
+
+	paths, err := g.collectionSource.collect(g.config.SortMethod)
+	if err != nil || len(paths) == 0 {
+		return false
+	}
+
+	g.imageManager.SetPaths(paths)
+
+	targetIdx := findImagePathIndex(paths, currentPath)
+	if targetIdx < 0 && g.collectionSource.Mode == CollectionSourceExpandedSingleDirectory {
+		targetIdx = findImagePathIndex(paths, g.collectionSource.ExpandedFilePath)
+	}
+	if targetIdx < 0 {
+		targetIdx = 0
+	}
+
+	g.setCurrentIndex(targetIdx)
+	g.calculateDisplayContent()
+	return true
 }
 
 func (g *Game) rotateLeft() {
@@ -225,17 +346,7 @@ func (g *Game) cycleSortMethod() {
 	// Show message
 	g.showOverlayMessage("Sort: " + getSortMethodName(g.config.SortMethod))
 
-	// Re-collect and sort images
-	args := flag.Args()
-	if len(args) > 0 {
-		paths, err := collectImages(args, g.config.SortMethod)
-		if err == nil && len(paths) > 0 {
-			g.imageManager.SetPaths(paths)
-			// Reset to first image
-			g.idx = 0
-			g.calculateDisplayContent()
-		}
-	}
+	g.reloadPathsForCurrentSource()
 }
 
 // Zoom and pan implementation methods
@@ -711,33 +822,7 @@ func (g *Game) jumpToPage(pageNum int) {
 		return
 	}
 
-	if g.bookMode && targetIdx == pathsCount-1 {
-		// Special handling for jumping to the final page in book mode
-		if targetIdx > 0 {
-			// Check if final page can be paired with previous page
-			prevImg, finalImg := g.imageManager.GetBookModeImages(targetIdx-1, g.config.RightToLeft)
-
-			if g.shouldUseBookMode(prevImg, finalImg) {
-				// Use book mode with previous page and final page
-				g.idx = targetIdx - 1
-				g.tempSingleMode = false
-			} else {
-				// Use temp single mode for final page only
-				g.idx = targetIdx
-				g.bookMode = false
-				g.tempSingleMode = true
-			}
-		} else {
-			// Only one page total, use temp single mode
-			g.idx = targetIdx
-			g.bookMode = false
-			g.tempSingleMode = true
-		}
-	} else {
-		// Normal jump logic - let regular book mode logic handle pairing
-		g.idx = targetIdx
-		g.tempSingleMode = false // Reset temp single mode
-	}
+	g.setCurrentIndex(targetIdx)
 
 	// Start preload after jump (both directions)
 	g.imageManager.StartPreload(g.idx, NavigationJump)
@@ -748,12 +833,12 @@ func (g *Game) jumpToPage(pageNum int) {
 }
 
 func (g *Game) expandToDirectoryAndJump() {
-	// Only work if not already expanded and original file index is valid
-	if g.expandedFromSingle || g.originalFileIndex < 0 || len(g.originalArgs) != 1 {
+	// Only work when launched with a single regular image and not yet expanded.
+	if g.launchSingleFile == "" || g.collectionSource.Mode == CollectionSourceExpandedSingleDirectory {
 		return
 	}
 
-	originalFilePath := g.originalArgs[0]
+	originalFilePath := g.launchSingleFile
 
 	// Collect images from the same directory
 	newPaths, err := collectImagesFromSameDirectory(originalFilePath, g.config.SortMethod)
@@ -783,10 +868,10 @@ func (g *Game) expandToDirectoryAndJump() {
 
 	// Update the image manager with new paths
 	g.imageManager.SetPaths(newPaths)
+	g.collectionSource = newExpandedDirectorySource(originalFilePath)
 
 	// Jump to the original file
 	g.idx = originalFileIndex
-	g.expandedFromSingle = true
 
 	// Show success message
 	g.showOverlayMessage(fmt.Sprintf("Loaded %d images from directory", len(newPaths)))
@@ -984,13 +1069,7 @@ func (g *Game) applyNewConfig(newCfg Config) {
 
 	// Sort method: re-collect
 	if old.SortMethod != g.config.SortMethod {
-		args := flag.Args()
-		if len(args) > 0 {
-			if paths, err := collectImages(args, g.config.SortMethod); err == nil && len(paths) > 0 {
-				g.imageManager.SetPaths(paths)
-				g.idx = 0
-			}
-		}
+		g.reloadPathsForCurrentSource()
 	}
 
 	// Preload settings
@@ -1427,18 +1506,17 @@ func main() {
 	imageManager.SetPaths(paths)
 
 	g := &Game{
-		imageManager:       imageManager,
-		idx:                0,
-		bookMode:           config.BookMode,
-		fullscreen:         config.Fullscreen,
-		config:             config,
-		configPath:         *configFile,
-		showInfo:           false, // Hide info display by default
-		originalArgs:       args,
-		expandedFromSingle: false,
-		originalFileIndex:  -1,
-		configStatus:       configResult,
-		zoomState:          NewZoomState(),
+		imageManager:     imageManager,
+		idx:              0,
+		bookMode:         config.BookMode,
+		fullscreen:       config.Fullscreen,
+		config:           config,
+		configPath:       *configFile,
+		showInfo:         false, // Hide info display by default
+		collectionSource: newArgsCollectionSource(args),
+		launchSingleFile: "",
+		configStatus:     configResult,
+		zoomState:        NewZoomState(),
 	}
 
 	// Apply initial zoom mode from config
@@ -1468,7 +1546,7 @@ func main() {
 
 	// Set up single file expansion mode if applicable
 	if isSingleImageFile {
-		g.originalFileIndex = 0 // The single file is at index 0
+		g.launchSingleFile = args[0]
 	}
 
 	// Handle book mode initialization for single image or incompatible images
