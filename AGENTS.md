@@ -51,16 +51,14 @@ A quick orientation for humans and AI agents working on this repo. Short, factua
 - Workflow: plan → small patch → checks. Use `update_plan` when it clarifies intent.
 - Edit files via minimal diffs using `apply_patch`. Ask for approval for destructive ops or network actions.
  - Commit messages: write commit messages in English.
- - Commit style: follow conventional Git hygiene.
-   - Subject line: max 50 characters, imperative mood.
-   - Blank line after subject (i.e., an empty second line).
-   - Body lines: wrap at 72 characters; explain what and why, not just how.
-   - Body content should reflect the diff from the previous commit
-     (what changed), not a narrative of the development process.
-   - Reference related issues/PRs when relevant.
- - Newline handling in quoted text: when the user requests line breaks
-   inside quoted content, insert actual newline characters (not the
-   literal sequence `\n`).
+   - Use Conventional Commits for the subject line.
+   - Format the subject as `<type>[optional scope]: <description>`.
+   - Choose the type based on the actual intent of the change.
+   - Keep the subject concise, clear, and specific.
+   - Add a body only when it provides useful context.
+   - Never include the literal characters `\n` in the commit message.
+   - If the message has multiple paragraphs, preserve actual newlines in the final commit.
+   - Avoid vague subjects such as `update`, `changes`, or `fix stuff`.
 
 ## Troubleshooting
 - Double-check relative paths to `test_images/`.
