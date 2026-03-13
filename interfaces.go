@@ -144,6 +144,8 @@ type InputActions interface {
 	// Navigation
 	NavigateNext()
 	NavigatePrevious()
+	NavigateNextSingle()
+	NavigatePreviousSingle()
 	JumpToPage(page int)
 	ExpandToDirectory()
 

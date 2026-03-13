@@ -5,6 +5,34 @@
 This file tracks technical follow-up items discovered during repository
 inspection and cross-review comparison on March 12, 2026.
 
+## Completed
+
+- March 14, 2026: Removed the action-semantics mismatch in single-page
+  navigation.
+  - Result: `next_single` and `previous_single` now select single-page
+    movement by action semantics instead of physical `Shift` state.
+
+- March 14, 2026: Eliminated steady-state per-frame image composition and
+  transformation allocations in the renderer.
+  - Result: book-mode composition and rotation/flip redraws now reuse
+    cached intermediate images instead of allocating new textures every
+    frame.
+
+- March 14, 2026: Restored bounded ownership in async image loading.
+  - Result: cache misses and preload requests now flow through bounded
+    manager-owned queues instead of spawning ad-hoc goroutines that can
+    bypass backpressure.
+
+- March 14, 2026: Refresh config status consistently after settings
+  save/reload.
+  - Result: config warnings and status shown in-app now track the most
+    recent reload result.
+
+- March 14, 2026: Replaced `os.Exit(0)` gameplay shutdown with an
+  Ebiten-native termination path.
+  - Result: exit requests now terminate through the game loop after normal
+    shutdown work runs.
+
 ## High Priority
 
 - Decouple headless-testable logic from Ebiten initialization and runtime
@@ -19,26 +47,6 @@ inspection and cross-review comparison on March 12, 2026.
     stale wrap-around expectations that no longer match the app.
   - Done when: regression tests call production navigation/display logic
     directly and assert current boundary behavior.
-
-- Remove the action-semantics mismatch in single-page navigation.
-  - Why: `next_single` and `previous_single` exist as actions, but the
-    implementation still depends on physical `Shift` state.
-  - Done when: single-page navigation is selected by action semantics,
-    not by hard-coded modifier checks.
-
-- Eliminate per-frame image composition and transformation allocations in
-  the renderer.
-  - Why: book-mode composition and rotation/flip currently build
-    temporary `ebiten.Image` values during redraws, which adds avoidable
-    GPU memory churn and render cost.
-  - Done when: redraws reuse cached or persistent intermediate images
-    instead of allocating new textures for steady-state rendering.
-
-- Restore real backpressure and ownership in async image loading.
-  - Why: cache misses currently spawn ad-hoc goroutines and can bypass the
-    intended worker queue under load.
-  - Done when: image decode/upload concurrency is bounded and overload
-    does not fan out into uncontrolled parallel work.
 
 - Extract enough of `Game`'s responsibilities to enable headless testing.
   - Why: the headless-testing and test-quality items above both require
@@ -59,18 +67,6 @@ inspection and cross-review comparison on March 12, 2026.
     places, which makes drift easy when new bindings are added.
   - Done when: input validation and runtime parsing derive from one
     shared definition.
-
-- Refresh config status consistently after settings save/reload.
-  - Why: settings reload currently reapplies config values without
-    preserving the latest warning/error status for the UI.
-  - Done when: config warnings shown in-app always reflect the most recent
-    load/validation result.
-
-- Replace `os.Exit(0)` with an Ebiten-native termination path.
-  - Why: the current shutdown path bypasses normal return-based game
-    termination and makes cleanup ownership harder to reason about.
-  - Done when: exit requests are expressed through the game loop and the
-    application can shut down without calling `os.Exit` from gameplay code.
 
 - Clarify test strategy for GUI-dependent code.
   - Why: current tests mix pure logic with Ebiten-dependent constructs.

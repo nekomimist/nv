@@ -209,6 +209,9 @@ type Game struct {
 	showSettings  bool
 	settingsIndex int
 	pendingConfig Config
+
+	exitRequested bool
+	didShutdown   bool
 }
 
 func (g *Game) getCurrentImage() *ebiten.Image {
@@ -894,12 +897,7 @@ func (g *Game) saveCurrentWindowSize() {
 }
 
 func (g *Game) Exit() {
-	// Save all current settings before exiting
-	g.saveCurrentWindowSize()
-	g.saveCurrentConfig()
-	// Stop preload manager
-	g.imageManager.StopPreload()
-	os.Exit(0)
+	g.exitRequested = true
 }
 
 // RenderState interface implementation
@@ -1038,14 +1036,19 @@ func (g *Game) SettingsSave() {
 	if g.configPath != "" {
 		saveConfigToPath(g.pendingConfig, g.configPath)
 		res := loadConfigFromPath(g.configPath)
-		g.applyNewConfig(res.Config)
+		g.applyConfigResult(res)
 	} else {
 		saveConfig(g.pendingConfig)
 		res := loadConfig()
-		g.applyNewConfig(res.Config)
+		g.applyConfigResult(res)
 	}
 	g.showSettings = false
 	g.showOverlayMessage("Settings saved")
+}
+
+func (g *Game) applyConfigResult(res ConfigLoadResult) {
+	g.configStatus = res
+	g.applyNewConfig(res.Config)
 }
 
 // applyNewConfig applies runtime-affecting changes and updates dependent systems
@@ -1142,12 +1145,22 @@ func (g *Game) CycleSortMethod() {
 }
 
 func (g *Game) NavigateNext() {
-	g.navigateNext()
+	g.navigateNext(false)
 	g.imageManager.StartPreload(g.idx, NavigationForward)
 }
 
 func (g *Game) NavigatePrevious() {
-	g.navigatePrevious()
+	g.navigatePrevious(false)
+	g.imageManager.StartPreload(g.idx, NavigationBackward)
+}
+
+func (g *Game) NavigateNextSingle() {
+	g.navigateNext(true)
+	g.imageManager.StartPreload(g.idx, NavigationForward)
+}
+
+func (g *Game) NavigatePreviousSingle() {
+	g.navigatePrevious(true)
 	g.imageManager.StartPreload(g.idx, NavigationBackward)
 }
 
@@ -1231,10 +1244,25 @@ func (g *Game) Update() error {
 		g.renderer.lastSnapshot = nil
 	}
 
+	if g.exitRequested {
+		g.shutdown()
+		return ebiten.Termination
+	}
+
 	return nil
 }
 
-func (g *Game) navigateNext() {
+func (g *Game) shutdown() {
+	if g.didShutdown {
+		return
+	}
+	g.didShutdown = true
+	g.saveCurrentWindowSize()
+	g.saveCurrentConfig()
+	g.imageManager.StopPreload()
+}
+
+func (g *Game) navigateNext(singleStep bool) {
 	pathsCount := g.imageManager.GetPathsCount()
 
 	// Common boundary check - cannot proceed to next
@@ -1253,7 +1281,7 @@ func (g *Game) navigateNext() {
 		return
 	}
 
-	if g.bookMode && !ebiten.IsKeyPressed(ebiten.KeyShift) &&
+	if g.bookMode && !singleStep &&
 		g.displayContent != nil && g.displayContent.RightImage != nil {
 		// Currently displaying 2 images = book mode is possible = 2-page movement
 		if g.idx+2 >= pathsCount {
@@ -1280,7 +1308,7 @@ func (g *Game) navigateNext() {
 	g.calculateDisplayContent()
 }
 
-func (g *Game) navigatePrevious() {
+func (g *Game) navigatePrevious(singleStep bool) {
 	// Common boundary check - cannot go back
 	if g.idx <= 0 {
 		g.showOverlayMessage("First page")
@@ -1304,7 +1332,7 @@ func (g *Game) navigatePrevious() {
 		return
 	}
 
-	if g.bookMode && !ebiten.IsKeyPressed(ebiten.KeyShift) &&
+	if g.bookMode && !singleStep &&
 		g.displayContent != nil && g.displayContent.RightImage != nil {
 		// Currently displaying 2 images = book mode is possible = 2-page movement
 		if g.idx < 2 {
@@ -1583,7 +1611,7 @@ func main() {
 		ebiten.SetFullscreen(true)
 	}
 
-	if err := ebiten.RunGame(g); err != nil {
+	if err := ebiten.RunGame(g); err != nil && err != ebiten.Termination {
 		log.Fatal(err)
 	}
 }

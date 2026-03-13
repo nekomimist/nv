@@ -70,11 +70,9 @@ func (ae *ActionExecutor) ExecuteAction(action string, inputActions InputActions
 	case "previous":
 		inputActions.NavigatePrevious()
 	case "next_single":
-		// Single page navigation (overrides book mode temporarily)
-		inputActions.NavigateNext()
+		inputActions.NavigateNextSingle()
 	case "previous_single":
-		// Single page navigation (overrides book mode temporarily)
-		inputActions.NavigatePrevious()
+		inputActions.NavigatePreviousSingle()
 	case "toggle_book_mode":
 		inputActions.ToggleBookMode()
 	case "toggle_reading_direction":

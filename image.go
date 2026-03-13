@@ -121,6 +121,23 @@ func (pm *PreloadManager) GetStats() PreloadStats {
 	return pm.stats
 }
 
+func (pm *PreloadManager) updateQueueSize(queueSize int) {
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+	pm.stats.QueueSize = queueSize
+}
+
+func (pm *PreloadManager) recordResult(success bool, queueSize int) {
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+	pm.stats.QueueSize = queueSize
+	if success {
+		pm.stats.LoadedCount++
+		return
+	}
+	pm.stats.FailedCount++
+}
+
 // Stop stops the preload manager
 func (pm *PreloadManager) Stop() {
 	pm.cancel()
@@ -251,26 +268,8 @@ func (pm *PreloadManager) preloadImage(idx int) {
 		return // Already cached
 	}
 
-	// Load image
-	img, err := pm.imageManager.loadImage(imagePath)
-	if err != nil {
-		pm.mu.Lock()
-		pm.stats.FailedCount++
-		pm.mu.Unlock()
-		debugLog("Preload failed for [%d] %s: %v", idx+1, imagePath.Path, err)
-
-		// Create error image for cache instead of skipping
-		img = CreateErrorImage(400, 300, imagePath.Path, err.Error())
-	}
-
-	// Add to cache
-	pm.imageManager.cache.Add(cacheKey, img)
-
-	pm.mu.Lock()
-	pm.stats.LoadedCount++
-	pm.mu.Unlock()
-
-	debugLog("Preloaded [%d] %s (cache: %d items)", idx+1, imagePath.Path, pm.imageManager.cache.Len())
+	pm.imageManager.requestPreload(imagePath)
+	pm.updateQueueSize(len(pm.imageManager.preloadRequests))
 }
 
 // ImageManager interface for managing image loading and caching
@@ -295,8 +294,11 @@ type DefaultImageManager struct {
 	preloadManager     *PreloadManager
 	maxImageDimension  atomic.Int64
 	loadRequests       chan loadRequest
+	preloadRequests    chan loadRequest
 	inflight           map[string]struct{}
 	inflightMu         sync.Mutex
+	loadCtx            context.Context
+	loadCancel         context.CancelFunc
 	loadWorkerOnce     sync.Once
 	loadingPlaceholder *ebiten.Image
 	asyncRefresh       atomic.Bool
@@ -305,6 +307,7 @@ type DefaultImageManager struct {
 type loadRequest struct {
 	path     ImagePath
 	cacheKey string
+	preload  bool
 }
 
 // NewImageManager creates a new DefaultImageManager
@@ -352,11 +355,15 @@ func NewImageManagerWithPreload(cacheSize int, preloadCount int, preloadEnabled 
 }
 
 func newDefaultImageManager(cache *lru.Cache[string, *ebiten.Image]) *DefaultImageManager {
+	loadCtx, loadCancel := context.WithCancel(context.Background())
 	manager := &DefaultImageManager{
 		paths:              []ImagePath{},
 		cache:              cache,
 		loadRequests:       make(chan loadRequest, 8),
+		preloadRequests:    make(chan loadRequest, 8),
 		inflight:           make(map[string]struct{}),
+		loadCtx:            loadCtx,
+		loadCancel:         loadCancel,
 		loadingPlaceholder: createLoadingPlaceholder(),
 	}
 	manager.startLoadWorker()
@@ -379,8 +386,26 @@ func (m *DefaultImageManager) startLoadWorker() {
 }
 
 func (m *DefaultImageManager) asyncLoadWorker() {
-	for req := range m.loadRequests {
-		m.processLoadRequest(req)
+	for {
+		select {
+		case <-m.loadCtx.Done():
+			return
+		default:
+		}
+
+		select {
+		case req := <-m.loadRequests:
+			m.processLoadRequest(req)
+		default:
+			select {
+			case <-m.loadCtx.Done():
+				return
+			case req := <-m.loadRequests:
+				m.processLoadRequest(req)
+			case req := <-m.preloadRequests:
+				m.processLoadRequest(req)
+			}
+		}
 	}
 }
 
@@ -397,11 +422,13 @@ func (m *DefaultImageManager) processLoadRequest(req loadRequest) {
 		errorImg := CreateErrorImage(400, 300, req.path.Path, err.Error())
 		m.cache.Add(req.cacheKey, errorImg)
 		m.asyncRefresh.Store(true)
+		m.recordPreloadResult(req.preload, false)
 		return
 	}
 
 	m.cache.Add(req.cacheKey, img)
 	m.asyncRefresh.Store(true)
+	m.recordPreloadResult(req.preload, true)
 
 	var mem runtime.MemStats
 	runtime.ReadMemStats(&mem)
@@ -409,7 +436,19 @@ func (m *DefaultImageManager) processLoadRequest(req loadRequest) {
 }
 
 func (m *DefaultImageManager) requestAsyncLoad(imagePath ImagePath) {
+	m.enqueueLoadRequest(imagePath, false)
+}
+
+func (m *DefaultImageManager) requestPreload(imagePath ImagePath) {
+	m.enqueueLoadRequest(imagePath, true)
+}
+
+func (m *DefaultImageManager) enqueueLoadRequest(imagePath ImagePath, preload bool) {
 	cacheKey := imagePath.Path
+	if _, ok := m.cache.Get(cacheKey); ok {
+		return
+	}
+
 	m.inflightMu.Lock()
 	if _, exists := m.inflight[cacheKey]; exists {
 		m.inflightMu.Unlock()
@@ -418,15 +457,43 @@ func (m *DefaultImageManager) requestAsyncLoad(imagePath ImagePath) {
 	m.inflight[cacheKey] = struct{}{}
 	m.inflightMu.Unlock()
 
-	req := loadRequest{path: imagePath, cacheKey: cacheKey}
+	req := loadRequest{path: imagePath, cacheKey: cacheKey, preload: preload}
+	queue := m.loadRequests
+	queueName := "async"
+	if preload {
+		queue = m.preloadRequests
+		queueName = "preload"
+	}
 
-	go func() {
-		select {
-		case m.loadRequests <- req:
-		default:
-			m.processLoadRequest(req)
-		}
-	}()
+	select {
+	case <-m.loadCtx.Done():
+		m.clearInflight(cacheKey)
+	case queue <- req:
+		m.updatePreloadQueueSize()
+	default:
+		m.clearInflight(cacheKey)
+		debugLog("%s load queue full, skipping request for %s", queueName, cacheKey)
+	}
+}
+
+func (m *DefaultImageManager) clearInflight(cacheKey string) {
+	m.inflightMu.Lock()
+	delete(m.inflight, cacheKey)
+	m.inflightMu.Unlock()
+}
+
+func (m *DefaultImageManager) updatePreloadQueueSize() {
+	if m.preloadManager == nil {
+		return
+	}
+	m.preloadManager.updateQueueSize(len(m.preloadRequests))
+}
+
+func (m *DefaultImageManager) recordPreloadResult(preload bool, success bool) {
+	if !preload || m.preloadManager == nil {
+		return
+	}
+	m.preloadManager.recordResult(success, len(m.preloadRequests))
 }
 
 func createLoadingPlaceholder() *ebiten.Image {
@@ -463,6 +530,7 @@ func (m *DefaultImageManager) StopPreload() {
 	if m.preloadManager != nil {
 		m.preloadManager.Stop()
 	}
+	m.loadCancel()
 }
 
 func (m *DefaultImageManager) GetPreloadStats() PreloadStats {

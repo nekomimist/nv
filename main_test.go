@@ -10,19 +10,27 @@ import (
 )
 
 type stubImageManager struct {
-	paths []ImagePath
+	paths             []ImagePath
+	images            []*ebiten.Image
+	preloadDirections []NavigationDirection
 }
 
 func (m *stubImageManager) GetImage(idx int) *ebiten.Image {
-	return nil
+	if idx < 0 || idx >= len(m.images) {
+		return nil
+	}
+	return m.images[idx]
 }
 
 func (m *stubImageManager) GetCurrentImage(idx int) *ebiten.Image {
-	return nil
+	return m.GetImage(idx)
 }
 
 func (m *stubImageManager) GetBookModeImages(idx int, rightToLeft bool) (*ebiten.Image, *ebiten.Image) {
-	return nil, nil
+	if rightToLeft {
+		return m.GetImage(idx + 1), m.GetImage(idx)
+	}
+	return m.GetImage(idx), m.GetImage(idx + 1)
 }
 
 func (m *stubImageManager) GetPath(idx int) (ImagePath, bool) {
@@ -41,7 +49,9 @@ func (m *stubImageManager) GetPathsCount() int {
 	return len(m.paths)
 }
 
-func (m *stubImageManager) StartPreload(currentIdx int, direction NavigationDirection) {}
+func (m *stubImageManager) StartPreload(currentIdx int, direction NavigationDirection) {
+	m.preloadDirections = append(m.preloadDirections, direction)
+}
 
 func (m *stubImageManager) StopPreload() {}
 
@@ -51,6 +61,129 @@ func (m *stubImageManager) GetPreloadStats() PreloadStats {
 
 func (m *stubImageManager) ConsumeAsyncRefresh() bool {
 	return false
+}
+
+func TestNavigateSingleUsesActionSemantics(t *testing.T) {
+	images := []*ebiten.Image{
+		ebiten.NewImage(100, 150),
+		ebiten.NewImage(100, 150),
+		ebiten.NewImage(100, 150),
+		ebiten.NewImage(100, 150),
+	}
+	manager := &stubImageManager{
+		paths: []ImagePath{
+			{Path: "1.png"},
+			{Path: "2.png"},
+			{Path: "3.png"},
+			{Path: "4.png"},
+		},
+		images: images,
+	}
+	g := &Game{
+		imageManager:    manager,
+		bookMode:        true,
+		displayContent:  &DisplayContent{LeftImage: images[0], RightImage: images[1]},
+		zoomState:       NewZoomState(),
+		config:          Config{AspectRatioThreshold: 1.5},
+		currentLogicalW: 800,
+		currentLogicalH: 600,
+	}
+
+	g.NavigateNextSingle()
+
+	if g.idx != 1 {
+		t.Fatalf("NavigateNextSingle moved to %d, want 1", g.idx)
+	}
+	if len(manager.preloadDirections) != 1 || manager.preloadDirections[0] != NavigationForward {
+		t.Fatalf("unexpected preload directions: %v", manager.preloadDirections)
+	}
+}
+
+func TestNavigateNextKeepsSpreadBehavior(t *testing.T) {
+	images := []*ebiten.Image{
+		ebiten.NewImage(100, 150),
+		ebiten.NewImage(100, 150),
+		ebiten.NewImage(100, 150),
+		ebiten.NewImage(100, 150),
+	}
+	manager := &stubImageManager{
+		paths: []ImagePath{
+			{Path: "1.png"},
+			{Path: "2.png"},
+			{Path: "3.png"},
+			{Path: "4.png"},
+		},
+		images: images,
+	}
+	g := &Game{
+		imageManager:    manager,
+		bookMode:        true,
+		displayContent:  &DisplayContent{LeftImage: images[0], RightImage: images[1]},
+		zoomState:       NewZoomState(),
+		config:          Config{AspectRatioThreshold: 1.5},
+		currentLogicalW: 800,
+		currentLogicalH: 600,
+	}
+
+	g.NavigateNext()
+
+	if g.idx != 2 {
+		t.Fatalf("NavigateNext moved to %d, want 2", g.idx)
+	}
+}
+
+func TestApplyConfigResultUpdatesStatus(t *testing.T) {
+	g := &Game{
+		imageManager: &stubImageManager{},
+		zoomState:    NewZoomState(),
+		config: Config{
+			WindowWidth:  800,
+			WindowHeight: 600,
+		},
+	}
+	res := ConfigLoadResult{
+		Config: Config{
+			WindowWidth:  1024,
+			WindowHeight: 768,
+		},
+		Status:   "Warning",
+		Warnings: []string{"normalized value"},
+	}
+
+	g.applyConfigResult(res)
+
+	if g.configStatus.Status != "Warning" {
+		t.Fatalf("config status = %q, want Warning", g.configStatus.Status)
+	}
+	if g.config.WindowWidth != 1024 || g.config.WindowHeight != 768 {
+		t.Fatalf("config not applied: %+v", g.config)
+	}
+}
+
+func TestRendererCachesIntermediateImages(t *testing.T) {
+	g := &Game{}
+	r := NewRenderer(g)
+	left := ebiten.NewImage(100, 150)
+	right := ebiten.NewImage(100, 150)
+
+	book1 := r.createBookModeImage(left, right)
+	book2 := r.createBookModeImage(left, right)
+	if book1 != book2 {
+		t.Fatal("expected book composition cache hit")
+	}
+
+	g.rotationAngle = 90
+	transformed1 := r.applyTransformations(book1)
+	transformed2 := r.applyTransformations(book1)
+	if transformed1 != transformed2 {
+		t.Fatal("expected transformation cache hit")
+	}
+
+	g.rotationAngle = 180
+	transformed3 := r.applyTransformations(book1)
+	if transformed3 == transformed2 {
+		t.Fatal("expected cache invalidation when rotation changes")
+	}
 }
 
 func TestIsArchiveExt(t *testing.T) {

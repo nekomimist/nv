@@ -38,6 +38,22 @@ type Renderer struct {
 	renderState    RenderState
 	helpFontSource *text.GoTextFaceSource
 	lastSnapshot   *RenderStateSnapshot // Previous frame's state for comparison
+	bookCache      rendererBookCache
+	transformCache rendererTransformCache
+}
+
+type rendererBookCache struct {
+	left  *ebiten.Image
+	right *ebiten.Image
+	image *ebiten.Image
+}
+
+type rendererTransformCache struct {
+	source   *ebiten.Image
+	rotation int
+	flipH    bool
+	flipV    bool
+	image    *ebiten.Image
 }
 
 // NewRenderer creates a new Renderer
@@ -729,6 +745,16 @@ func (r *Renderer) applyTransformations(img *ebiten.Image) *ebiten.Image {
 		return img
 	}
 
+	if r.transformCache.image != nil &&
+		r.transformCache.source == img &&
+		r.transformCache.rotation == r.renderState.GetRotationAngle() &&
+		r.transformCache.flipH == r.renderState.IsFlippedH() &&
+		r.transformCache.flipV == r.renderState.IsFlippedV() {
+		return r.transformCache.image
+	}
+
+	r.invalidateTransformCache()
+
 	w, h := img.Bounds().Dx(), img.Bounds().Dy()
 
 	// Calculate final dimensions after rotation
@@ -768,13 +794,30 @@ func (r *Renderer) applyTransformations(img *ebiten.Image) *ebiten.Image {
 	op.GeoM.Translate(float64(finalW)/2, float64(finalH)/2)
 
 	transformedImg.DrawImage(img, op)
+	r.transformCache = rendererTransformCache{
+		source:   img,
+		rotation: r.renderState.GetRotationAngle(),
+		flipH:    r.renderState.IsFlippedH(),
+		flipV:    r.renderState.IsFlippedV(),
+		image:    transformedImg,
+	}
 	return transformedImg
 }
 
 func (r *Renderer) createBookModeImage(leftImg, rightImg *ebiten.Image) *ebiten.Image {
 	if rightImg == nil {
+		r.invalidateBookCache()
 		return leftImg
 	}
+
+	if r.bookCache.image != nil &&
+		r.bookCache.left == leftImg &&
+		r.bookCache.right == rightImg {
+		return r.bookCache.image
+	}
+
+	r.invalidateTransformCache()
+	r.invalidateBookCache()
 
 	leftW, leftH := leftImg.Bounds().Dx(), leftImg.Bounds().Dy()
 	rightW, rightH := rightImg.Bounds().Dx(), rightImg.Bounds().Dy()
@@ -798,7 +841,27 @@ func (r *Renderer) createBookModeImage(leftImg, rightImg *ebiten.Image) *ebiten.
 	rightOp.GeoM.Translate(float64(leftW+imageGap), float64(combinedH)/2-float64(rightH)/2)
 	combinedImg.DrawImage(rightImg, rightOp)
 
+	r.bookCache = rendererBookCache{
+		left:  leftImg,
+		right: rightImg,
+		image: combinedImg,
+	}
+
 	return combinedImg
+}
+
+func (r *Renderer) invalidateBookCache() {
+	if r.bookCache.image != nil {
+		r.bookCache.image.Deallocate()
+	}
+	r.bookCache = rendererBookCache{}
+}
+
+func (r *Renderer) invalidateTransformCache() {
+	if r.transformCache.image != nil {
+		r.transformCache.image.Deallocate()
+	}
+	r.transformCache = rendererTransformCache{}
 }
 
 func (r *Renderer) buildPageNumberString() string {
