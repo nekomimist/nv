@@ -33,6 +33,10 @@ inspection and cross-review comparison on March 12, 2026.
   - Result: exit requests now terminate through the game loop after normal
     shutdown work runs.
 
+- March 14, 2026: Removed verified unused helper and compatibility code.
+  - Result: unreferenced compatibility and wrapper helpers were deleted so
+    the remaining code paths are less noisy ahead of larger refactors.
+
 ## High Priority
 
 - Decouple headless-testable logic from Ebiten initialization and runtime
@@ -92,12 +96,6 @@ inspection and cross-review comparison on March 12, 2026.
     make isolated testing and dependency ownership harder to reason about.
   - Done when: remaining globals are either documented as intentional or
     replaced by explicit dependencies.
-
-- Remove verified unused helper and compatibility code.
-  - Why: unused helpers and compatibility leftovers make maintenance
-    noisier without carrying behavior.
-  - Done when: confirmed unreferenced helpers are removed or documented as
-    intentional extension points.
 
 - Reduce archive-format duplication where it pays off.
   - Why: ZIP, RAR, and 7z handling currently repeat the same control flow

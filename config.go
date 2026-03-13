@@ -275,11 +275,6 @@ func loadConfig() ConfigLoadResult {
 	return loadConfigFromPath(getConfigPath())
 }
 
-func loadConfigCompat() Config {
-	result := loadConfigFromPath(getConfigPath())
-	return result.Config
-}
-
 func loadConfigFromPath(configPath string) ConfigLoadResult {
 	config := Config{
 		WindowWidth:          defaultWidth,

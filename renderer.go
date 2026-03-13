@@ -183,14 +183,6 @@ func (r *Renderer) drawSettingsOverlay(screen *ebiten.Image) {
 	}
 }
 
-func (r *Renderer) drawImageInRegion(screen *ebiten.Image, img *ebiten.Image, x, y, maxW, maxH int) {
-	r.drawImageInRegionWithAlign(screen, img, x, y, maxW, maxH, "center")
-}
-
-func (r *Renderer) drawBookImageInRegion(screen *ebiten.Image, img *ebiten.Image, x, y, maxW, maxH int, align string) {
-	r.drawImageInRegionWithAlign(screen, img, x, y, maxW, maxH, align)
-}
-
 func (r *Renderer) drawImageInRegionWithAlign(screen *ebiten.Image, img *ebiten.Image, x, y, maxW, maxH int, align string) {
 	// Calculate scaling
 	scale := r.calculateImageScale(img, maxW, maxH)

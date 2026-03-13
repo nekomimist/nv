@@ -87,14 +87,6 @@ func NewZoomState() *ZoomState {
 	}
 }
 
-// Reset resets zoom state to fit window mode (legacy method - prefer resetZoomToInitial for image changes)
-func (z *ZoomState) Reset() {
-	z.Mode = ZoomModeFitWindow
-	z.Level = 1.0
-	z.PanOffsetX = 0
-	z.PanOffsetY = 0
-}
-
 func isArchiveExt(path string) bool {
 	ext := strings.ToLower(filepath.Ext(path))
 	switch ext {
