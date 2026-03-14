@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
+	"nv/navlogic"
 )
 
 // Build-time variables (set by ldflags)
@@ -39,10 +40,6 @@ var icon48 []byte
 const (
 	// Book mode layout constants
 	imageGap = 10 // Gap between images in book mode
-
-	// Aspect ratio thresholds
-	minAspectRatio = 0.4 // Extremely tall images
-	maxAspectRatio = 2.5 // Extremely wide images
 )
 
 // ZoomMode represents the current zoom mode
@@ -206,14 +203,6 @@ type Game struct {
 	didShutdown   bool
 }
 
-func (g *Game) getCurrentImage() *ebiten.Image {
-	return g.imageManager.GetCurrentImage(g.idx)
-}
-
-func (g *Game) getBookModeImages() (*ebiten.Image, *ebiten.Image) {
-	return g.imageManager.GetBookModeImages(g.idx, g.config.RightToLeft)
-}
-
 func (g *Game) saveCurrentConfig() {
 	if g.configPath != "" {
 		saveConfigToPath(g.config, g.configPath)
@@ -245,42 +234,7 @@ func findImagePathIndex(paths []ImagePath, targetPath string) int {
 }
 
 func (g *Game) setCurrentIndex(targetIdx int) {
-	pathsCount := g.imageManager.GetPathsCount()
-	if pathsCount == 0 {
-		g.idx = 0
-		g.tempSingleMode = false
-		return
-	}
-
-	if targetIdx < 0 {
-		targetIdx = 0
-	}
-	if targetIdx >= pathsCount {
-		targetIdx = pathsCount - 1
-	}
-
-	if g.bookMode && targetIdx == pathsCount-1 {
-		if targetIdx > 0 {
-			prevImg, finalImg := g.imageManager.GetBookModeImages(targetIdx-1, g.config.RightToLeft)
-
-			if g.shouldUseBookMode(prevImg, finalImg) {
-				g.idx = targetIdx - 1
-				g.tempSingleMode = false
-			} else {
-				g.idx = targetIdx
-				g.bookMode = false
-				g.tempSingleMode = true
-			}
-		} else {
-			g.idx = targetIdx
-			g.bookMode = false
-			g.tempSingleMode = true
-		}
-		return
-	}
-
-	g.idx = targetIdx
-	g.tempSingleMode = false
+	g.applyNavigationState(navlogic.SetCurrentIndex(g.navigationState(), targetIdx, g.pageMetricsAt))
 }
 
 func (g *Game) reloadPathsForCurrentSource() bool {
@@ -648,93 +602,61 @@ func (g *Game) clampPanToLimits() {
 	}
 }
 
-func (g *Game) shouldUseBookMode(leftImg, rightImg *ebiten.Image) bool {
-	if leftImg == nil || rightImg == nil {
-		return false // Can't do book mode with only one image
+func (g *Game) navigationState() navlogic.State {
+	return navlogic.State{
+		Index:                g.idx,
+		PageCount:            g.imageManager.GetPathsCount(),
+		BookMode:             g.bookMode,
+		TempSingleMode:       g.tempSingleMode,
+		RightToLeft:          g.config.RightToLeft,
+		AspectRatioThreshold: g.config.AspectRatioThreshold,
 	}
+}
 
-	// Calculate aspect ratios
-	leftAspect := float64(leftImg.Bounds().Dx()) / float64(leftImg.Bounds().Dy())
-	rightAspect := float64(rightImg.Bounds().Dx()) / float64(rightImg.Bounds().Dy())
+func (g *Game) applyNavigationState(state navlogic.State) {
+	g.idx = state.Index
+	g.bookMode = state.BookMode
+	g.tempSingleMode = state.TempSingleMode
+}
 
-	// Check for extremely tall or wide images (should be single page)
-	if leftAspect < minAspectRatio || leftAspect > maxAspectRatio ||
-		rightAspect < minAspectRatio || rightAspect > maxAspectRatio {
-		return false
+func (g *Game) pageMetricsAt(idx int) navlogic.PageMetrics {
+	if idx < 0 || idx >= g.imageManager.GetPathsCount() {
+		return navlogic.PageMetrics{}
 	}
-
-	// Calculate the ratio between the two aspect ratios
-	aspectRatio := leftAspect / rightAspect
-	if aspectRatio < 1.0 {
-		aspectRatio = 1.0 / aspectRatio // Always use the larger ratio
+	img := g.imageManager.GetImage(idx)
+	if img == nil {
+		return navlogic.PageMetrics{}
 	}
+	bounds := img.Bounds()
+	return navlogic.PageMetrics{
+		Width:  bounds.Dx(),
+		Height: bounds.Dy(),
+	}
+}
 
-	// Use single page if aspect ratios are too different
-	return aspectRatio <= g.config.AspectRatioThreshold
+func (g *Game) displayImageAt(idx int) *ebiten.Image {
+	if idx < 0 {
+		return nil
+	}
+	return g.imageManager.GetImage(idx)
 }
 
 // calculateDisplayContent determines what should be displayed based on current state
 func (g *Game) calculateDisplayContent() {
-	pathsCount := g.imageManager.GetPathsCount()
-
-	if pathsCount == 0 {
+	plan := navlogic.PlanDisplay(g.navigationState(), g.pageMetricsAt)
+	if plan.TotalPages == 0 {
 		g.displayContent = nil
 		return
 	}
 
-	currentPage := g.idx + 1 // Convert to 1-based
-
-	if g.tempSingleMode || !g.bookMode {
-		// Single mode: only left image, right image is nil
-		g.displayContent = &DisplayContent{
-			LeftImage:  g.getCurrentImage(),
-			RightImage: nil,
-			Metadata: DisplayMetadata{
-				CurrentPage:  currentPage,
-				TotalPages:   pathsCount,
-				ActualImages: 1,
-			},
-		}
-	} else {
-		// Book mode: try to get both images
-		leftImg, rightImg := g.getBookModeImages()
-
-		if g.shouldUseBookMode(leftImg, rightImg) {
-			// Book mode: both images
-			g.displayContent = &DisplayContent{
-				LeftImage:  leftImg,
-				RightImage: rightImg,
-				Metadata: DisplayMetadata{
-					CurrentPage:  currentPage,
-					TotalPages:   pathsCount,
-					ActualImages: 2,
-				},
-			}
-		} else {
-			// Book mode not possible: fallback to single
-			// In right-to-left mode, leftImg might be nil and rightImg non-nil (at end)
-			var singleImg *ebiten.Image
-			if leftImg != nil {
-				singleImg = leftImg
-			} else if rightImg != nil {
-				singleImg = rightImg
-			} else {
-				// Both images are nil - this should not happen in normal operation
-				log.Printf("Warning: Both leftImg and rightImg are nil in calculateDisplayContent() at idx=%d, pathsCount=%d, bookMode=%v, tempSingleMode=%v",
-					g.idx, pathsCount, g.bookMode, g.tempSingleMode)
-				singleImg = nil
-			}
-
-			g.displayContent = &DisplayContent{
-				LeftImage:  singleImg,
-				RightImage: nil,
-				Metadata: DisplayMetadata{
-					CurrentPage:  currentPage,
-					TotalPages:   pathsCount,
-					ActualImages: 1,
-				},
-			}
-		}
+	g.displayContent = &DisplayContent{
+		LeftImage:  g.displayImageAt(plan.LeftIndex),
+		RightImage: g.displayImageAt(plan.RightIndex),
+		Metadata: DisplayMetadata{
+			CurrentPage:  plan.CurrentPage,
+			TotalPages:   plan.TotalPages,
+			ActualImages: plan.ActualImages,
+		},
 	}
 
 	// Update zoom level for fit modes after content is calculated (except during initial load)
@@ -753,37 +675,12 @@ func (g *Game) showOverlayMessage(message string) {
 }
 
 func (g *Game) toggleBookMode() {
-	if g.tempSingleMode || g.bookMode {
-		// Currently in temp single mode or book mode, switch to single mode
-		g.bookMode = false
-		g.tempSingleMode = false
-		g.showOverlayMessage("Book Mode: OFF")
-	} else {
-		// Currently in single mode, switch to book mode
-		pathsCount := g.imageManager.GetPathsCount()
-		if pathsCount == 1 {
-			// Only one page, use temp single mode
-			g.bookMode = true
-			g.tempSingleMode = true
-		} else if g.idx == pathsCount-1 {
-			// On final page, check if it can be paired with previous page
-			prevImg, finalImg := g.imageManager.GetBookModeImages(g.idx-1, g.config.RightToLeft)
-
-			if g.shouldUseBookMode(prevImg, finalImg) {
-				// Move to previous page to display final page in book mode
-				g.idx--
-				g.tempSingleMode = false
-			} else {
-				// Keep current position but use temp single mode
-				g.tempSingleMode = true
-			}
-			g.bookMode = true
-		} else {
-			// Not on final page, normal book mode
-			g.bookMode = true
-			g.tempSingleMode = false
-		}
+	nextState := navlogic.ToggleBookMode(g.navigationState(), g.pageMetricsAt)
+	g.applyNavigationState(nextState)
+	if g.bookMode {
 		g.showOverlayMessage("Book Mode: ON")
+	} else {
+		g.showOverlayMessage("Book Mode: OFF")
 	}
 
 	// Save the book mode preference (true even if in temp single mode)
@@ -806,18 +703,12 @@ func (g *Game) processPageInput() {
 }
 
 func (g *Game) jumpToPage(pageNum int) {
-	pathsCount := g.imageManager.GetPathsCount()
-
-	// 1-based -> 0-based conversion
-	targetIdx := pageNum - 1
-
-	// Range check
-	if targetIdx < 0 || targetIdx >= pathsCount {
-		g.showOverlayMessage(fmt.Sprintf("Page %d not found (1-%d)", pageNum, pathsCount))
+	nextState, boundary := navlogic.JumpToPage(g.navigationState(), pageNum, g.pageMetricsAt)
+	if boundary == navlogic.BoundaryPageNotFound {
+		g.showOverlayMessage(fmt.Sprintf("Page %d not found (1-%d)", pageNum, g.imageManager.GetPathsCount()))
 		return
 	}
-
-	g.setCurrentIndex(targetIdx)
+	g.applyNavigationState(nextState)
 
 	// Start preload after jump (both directions)
 	g.imageManager.StartPreload(g.idx, NavigationJump)
@@ -1255,45 +1146,12 @@ func (g *Game) shutdown() {
 }
 
 func (g *Game) navigateNext(singleStep bool) {
-	pathsCount := g.imageManager.GetPathsCount()
-
-	// Common boundary check - cannot proceed to next
-	if g.idx+1 >= pathsCount {
+	nextState, boundary := navlogic.NavigateNext(g.navigationState(), g.pageMetricsAt, singleStep)
+	if boundary == navlogic.BoundaryLastPage {
 		g.showOverlayMessage("Last page")
 		return
 	}
-
-	// From here on, g.idx + 1 < pathsCount is guaranteed, so g.idx++ is safe
-	if g.tempSingleMode {
-		g.idx++
-		g.tempSingleMode = false
-		g.bookMode = true
-		g.resetZoomToInitial()
-		g.calculateDisplayContent()
-		return
-	}
-
-	if g.bookMode && !singleStep &&
-		g.displayContent != nil && g.displayContent.RightImage != nil {
-		// Currently displaying 2 images = book mode is possible = 2-page movement
-		if g.idx+2 >= pathsCount {
-			// Cannot advance 2 pages = all displayed with current pair
-			g.showOverlayMessage("Last page")
-		} else if g.idx+2+1 >= pathsCount {
-			// Advancing 2 pages would make next pair impossible (=becomes last single page)
-			g.idx += 2
-			g.bookMode = false
-			g.tempSingleMode = true
-		} else {
-			// Normal 2-page movement
-			g.idx += 2
-		}
-		g.resetZoomToInitial()
-		g.calculateDisplayContent()
-		return
-	}
-	// Single page mode or Shift+key
-	g.idx++
+	g.applyNavigationState(nextState)
 
 	// Reset zoom state when image changes
 	g.resetZoomToInitial()
@@ -1301,46 +1159,12 @@ func (g *Game) navigateNext(singleStep bool) {
 }
 
 func (g *Game) navigatePrevious(singleStep bool) {
-	// Common boundary check - cannot go back
-	if g.idx <= 0 {
+	nextState, boundary := navlogic.NavigatePrevious(g.navigationState(), g.pageMetricsAt, singleStep)
+	if boundary == navlogic.BoundaryFirstPage {
 		g.showOverlayMessage("First page")
 		return
 	}
-
-	// From here on, g.idx > 0 is guaranteed, so some backward processing is possible
-	if g.tempSingleMode {
-		if g.idx < 2 {
-			// g.idx > 0 is guaranteed, so always move to g.idx = 0
-			g.idx = 0
-			g.tempSingleMode = false
-			g.bookMode = true
-		} else {
-			g.idx -= 2
-			g.tempSingleMode = false
-			g.bookMode = true
-		}
-		g.resetZoomToInitial()
-		g.calculateDisplayContent()
-		return
-	}
-
-	if g.bookMode && !singleStep &&
-		g.displayContent != nil && g.displayContent.RightImage != nil {
-		// Currently displaying 2 images = book mode is possible = 2-page movement
-		if g.idx < 2 {
-			// g.idx > 0 is guaranteed, so always move to g.idx = 0
-			g.idx = 0
-			g.bookMode = false
-			g.tempSingleMode = true
-		} else {
-			g.idx -= 2
-		}
-		g.resetZoomToInitial()
-		g.calculateDisplayContent()
-		return
-	}
-	// Single page mode or Shift+key
-	g.idx--
+	g.applyNavigationState(nextState)
 
 	// Reset zoom state when image changes
 	g.resetZoomToInitial()
@@ -1576,9 +1400,8 @@ func main() {
 			// Only one image, use temp single mode
 			g.tempSingleMode = true
 		} else {
-			// Check if current images are compatible for book mode
-			leftImg, rightImg := g.imageManager.GetBookModeImages(0, g.config.RightToLeft)
-			if !g.shouldUseBookMode(leftImg, rightImg) {
+			plan := navlogic.PlanDisplay(g.navigationState(), g.pageMetricsAt)
+			if plan.ActualImages != 2 {
 				g.tempSingleMode = true
 			}
 		}

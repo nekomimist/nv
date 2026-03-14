@@ -37,27 +37,23 @@ inspection and cross-review comparison on March 12, 2026.
   - Result: unreferenced compatibility and wrapper helpers were deleted so
     the remaining code paths are less noisy ahead of larger refactors.
 
-## High Priority
+- March 15, 2026: Decoupled headless-testable navigation/display logic
+  from Ebiten runtime image types.
+  - Result: navigation/display rules now live in a pure `navlogic`
+    package that can be exercised without constructing `*ebiten.Image`
+    values or entering Ebiten initialization.
 
-- Decouple headless-testable logic from Ebiten initialization and runtime
-  image types.
-  - Why: `go test ./...` currently fails in a headless environment, and
-    display decisions are tightly coupled to `*ebiten.Image`.
-  - Done when: navigation/display rules can be tested without requiring
-    X11 or constructing Ebiten images.
+- March 15, 2026: Replaced logic-mirroring navigation tests with
+  production-behavior tests.
+  - Result: the old arithmetic-only navigation test was removed and
+    replaced with table-driven tests that call the extracted production
+    logic directly.
 
-- Replace logic-mirroring tests with tests that call production behavior.
-  - Why: current navigation tests reimplement behavior manually, including
-    stale wrap-around expectations that no longer match the app.
-  - Done when: regression tests call production navigation/display logic
-    directly and assert current boundary behavior.
-
-- Extract enough of `Game`'s responsibilities to enable headless testing.
-  - Why: the headless-testing and test-quality items above both require
-    navigation and display logic to be separable from `*ebiten.Image` and
-    Ebiten runtime state, which currently live together in `Game`.
-  - Done when: navigation/display decision logic can be instantiated and
-    called without Ebiten initialization.
+- March 15, 2026: Extracted enough of `Game`'s responsibilities to enable
+  headless testing of navigation/display decisions.
+  - Result: `Game` now adapts image lookup and side effects around the
+    pure navigation/display core instead of owning the decision logic
+    directly.
 
 ## Medium Priority
 

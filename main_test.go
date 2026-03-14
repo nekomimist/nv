@@ -22,10 +22,6 @@ func (m *stubImageManager) GetImage(idx int) *ebiten.Image {
 	return m.images[idx]
 }
 
-func (m *stubImageManager) GetCurrentImage(idx int) *ebiten.Image {
-	return m.GetImage(idx)
-}
-
 func (m *stubImageManager) GetBookModeImages(idx int, rightToLeft bool) (*ebiten.Image, *ebiten.Image) {
 	if rightToLeft {
 		return m.GetImage(idx + 1), m.GetImage(idx)
@@ -458,80 +454,6 @@ func TestDefaultWindowSizeValidation(t *testing.T) {
 	}
 }
 
-func TestGameNavigation(t *testing.T) {
-	tests := []struct {
-		name         string
-		initialIdx   int
-		bookMode     bool
-		shiftPressed bool
-		pathsCount   int
-		operation    string
-		expectedIdx  int
-	}{
-		{"Single mode next", 0, false, false, 5, "next", 1},
-		{"Single mode previous", 2, false, false, 5, "prev", 1},
-		{"Single mode wrap around next", 4, false, false, 5, "next", 0},
-		{"Single mode wrap around prev", 0, false, false, 5, "prev", 4},
-		{"Book mode next (by 2)", 0, true, false, 6, "next", 2},
-		{"Book mode previous (by 2)", 4, true, false, 6, "prev", 2},
-		{"Book mode with shift (by 1)", 0, true, true, 6, "next", 1},
-		{"Book mode wrap to last even", 0, true, false, 5, "prev", 4},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Create paths slice
-			paths := make([]ImagePath, tt.pathsCount)
-			for i := 0; i < tt.pathsCount; i++ {
-				paths[i] = ImagePath{
-					Path:        "image" + string(rune('0'+i)) + ".jpg",
-					ArchivePath: "",
-					EntryPath:   "",
-				}
-			}
-
-			imageManager := NewImageManager(4)
-			imageManager.SetPaths(paths)
-
-			g := &Game{
-				imageManager: imageManager,
-				idx:          tt.initialIdx,
-				bookMode:     tt.bookMode,
-			}
-
-			// Simulate shift key state
-			pathsCount := g.imageManager.GetPathsCount()
-			if tt.operation == "next" {
-				if tt.bookMode && !tt.shiftPressed {
-					g.idx = (g.idx + 2) % pathsCount
-				} else {
-					g.idx = (g.idx + 1) % pathsCount
-				}
-			} else { // prev
-				if tt.bookMode && !tt.shiftPressed {
-					g.idx -= 2
-					if g.idx < 0 {
-						lastEvenIdx := pathsCount - 1
-						if lastEvenIdx%2 != 0 {
-							lastEvenIdx--
-						}
-						g.idx = lastEvenIdx
-					}
-				} else {
-					g.idx--
-					if g.idx < 0 {
-						g.idx = pathsCount - 1
-					}
-				}
-			}
-
-			if g.idx != tt.expectedIdx {
-				t.Errorf("Expected idx %d, got %d", tt.expectedIdx, g.idx)
-			}
-		})
-	}
-}
-
 func TestCollectImages(t *testing.T) {
 	tempDir := t.TempDir()
 
@@ -770,40 +692,67 @@ func TestApplyNewConfigReloadsFromCurrentSource(t *testing.T) {
 	}
 }
 
-func TestAspectRatioCompatibility(t *testing.T) {
-	g := &Game{
-		config: Config{AspectRatioThreshold: 1.5},
-	}
-
+func TestCalculateDisplayContentUsesNavigationPlan(t *testing.T) {
 	tests := []struct {
-		name           string
-		leftW, leftH   int
-		rightW, rightH int
-		expected       bool
+		name               string
+		rightToLeft        bool
+		leftW, leftH       int
+		rightW, rightH     int
+		expectedActual     int
+		expectedLeftIndex  int
+		expectedRightIndex int
 	}{
-		{"Same aspect ratio", 100, 150, 100, 150, true},
-		{"Similar aspect ratio", 100, 150, 120, 180, true},
-		{"Very different aspect ratio", 100, 150, 300, 100, false},
-		{"One nil image", 100, 150, 0, 0, false},
-		{"Extremely tall image", 100, 1000, 100, 150, false},
-		{"Extremely wide image", 1000, 100, 100, 150, false},
+		{"Compatible LTR spread", false, 100, 150, 100, 150, 2, 0, 1},
+		{"Compatible RTL spread", true, 100, 150, 100, 150, 2, 1, 0},
+		{"Incompatible fallback to single", false, 100, 150, 300, 100, 1, 0, -1},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var leftImg, rightImg *ebiten.Image
-
-			if tt.leftW > 0 && tt.leftH > 0 {
-				leftImg = ebiten.NewImage(tt.leftW, tt.leftH)
+			images := []*ebiten.Image{
+				ebiten.NewImage(tt.leftW, tt.leftH),
+				ebiten.NewImage(tt.rightW, tt.rightH),
 			}
-			if tt.rightW > 0 && tt.rightH > 0 {
-				rightImg = ebiten.NewImage(tt.rightW, tt.rightH)
+			manager := &stubImageManager{
+				paths: []ImagePath{
+					{Path: "left.png"},
+					{Path: "right.png"},
+				},
+				images: images,
+			}
+			g := &Game{
+				imageManager: manager,
+				bookMode:     true,
+				config: Config{
+					AspectRatioThreshold: 1.5,
+					RightToLeft:          tt.rightToLeft,
+				},
+				zoomState: NewZoomState(),
 			}
 
-			result := g.shouldUseBookMode(leftImg, rightImg)
-			if result != tt.expected {
-				t.Errorf("shouldUseBookMode(%dx%d, %dx%d) = %v, want %v",
-					tt.leftW, tt.leftH, tt.rightW, tt.rightH, result, tt.expected)
+			g.calculateDisplayContent()
+
+			if g.displayContent == nil {
+				t.Fatal("expected display content")
+			}
+			if g.displayContent.Metadata.ActualImages != tt.expectedActual {
+				t.Fatalf("actual images = %d, want %d", g.displayContent.Metadata.ActualImages, tt.expectedActual)
+			}
+
+			expectedLeft := manager.images[tt.expectedLeftIndex]
+			if g.displayContent.LeftImage != expectedLeft {
+				t.Fatalf("unexpected left image index: got %p want %p", g.displayContent.LeftImage, expectedLeft)
+			}
+
+			if tt.expectedRightIndex < 0 {
+				if g.displayContent.RightImage != nil {
+					t.Fatalf("expected nil right image, got %p", g.displayContent.RightImage)
+				}
+			} else {
+				expectedRight := manager.images[tt.expectedRightIndex]
+				if g.displayContent.RightImage != expectedRight {
+					t.Fatalf("unexpected right image index: got %p want %p", g.displayContent.RightImage, expectedRight)
+				}
 			}
 		})
 	}
