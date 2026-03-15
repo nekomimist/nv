@@ -39,7 +39,7 @@ func getExpectedSimpleOrder() []ImagePath {
 	}
 }
 
-func TestNaturalSortStrategy(t *testing.T) {
+func TestPureNaturalSortStrategy(t *testing.T) {
 	strategy := &NaturalSortStrategy{}
 
 	t.Run("Name", func(t *testing.T) {
@@ -86,7 +86,7 @@ func TestNaturalSortStrategy(t *testing.T) {
 	})
 }
 
-func TestSimpleSortStrategy(t *testing.T) {
+func TestPureSimpleSortStrategy(t *testing.T) {
 	strategy := &SimpleSortStrategy{}
 
 	t.Run("Name", func(t *testing.T) {
@@ -126,7 +126,7 @@ func TestSimpleSortStrategy(t *testing.T) {
 	})
 }
 
-func TestEntryOrderSortStrategy(t *testing.T) {
+func TestPureEntryOrderSortStrategy(t *testing.T) {
 	strategy := &EntryOrderSortStrategy{}
 
 	t.Run("Name", func(t *testing.T) {
@@ -166,7 +166,7 @@ func TestEntryOrderSortStrategy(t *testing.T) {
 	})
 }
 
-func TestGetSortStrategy(t *testing.T) {
+func TestPureGetSortStrategy(t *testing.T) {
 	tests := []struct {
 		sortMethod   int
 		expectedID   int
@@ -193,7 +193,7 @@ func TestGetSortStrategy(t *testing.T) {
 	}
 }
 
-func TestGetAllSortStrategies(t *testing.T) {
+func TestPureGetAllSortStrategies(t *testing.T) {
 	strategies := GetAllSortStrategies()
 
 	if len(strategies) != 3 {
@@ -222,7 +222,7 @@ func TestGetAllSortStrategies(t *testing.T) {
 }
 
 // Test edge cases
-func TestSortStrategyEdgeCases(t *testing.T) {
+func TestPureSortStrategyEdgeCases(t *testing.T) {
 	strategies := GetAllSortStrategies()
 
 	t.Run("SingleElement", func(t *testing.T) {

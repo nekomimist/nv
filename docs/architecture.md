@@ -3,19 +3,31 @@
 ## Summary
 
 This repository is a single-package Go application built on Ebiten.
-The current design centers on a large `Game` type in `main.go`, with
-supporting components for rendering, input, image loading, sorting, and
-configuration.
+The current design centers on a still-large `Game` type in
+`game_state.go`, with startup, runtime, navigation, viewport, loop,
+rendering, input, image loading, sorting, and configuration split into
+separate root-level files.
 
-These notes summarize the design as observed on March 8, 2026.
+These notes summarize the design as observed on March 15, 2026.
 
 ## Current Layout
 
-- `main.go`
+- `startup.go`
   - Application entrypoint
-  - Ebiten game loop (`Update`, `Draw`, `Layout`)
+  - Flag parsing
+  - Config load and launch wiring
+- `game_state.go`
   - Main state container (`Game`)
-  - Navigation, zoom/pan, overlays, settings application
+  - Shared display metadata types
+  - Interface implementations that expose state/actions
+- `game_navigation.go`
+  - Navigation/display adaptation around `navlogic`
+- `game_runtime.go`
+  - Settings application, fullscreen/window state, shutdown
+- `game_viewport.go`
+  - Zoom/pan state and viewport calculations
+- `game_loop.go`
+  - Ebiten `Update`, `Draw`, and `Layout`
 - `renderer.go`
   - Rendering implementation
   - Help/info/settings overlays
@@ -40,7 +52,7 @@ These notes summarize the design as observed on March 8, 2026.
 
 ## Startup Flow
 
-The application startup path in `main.go` is:
+The application startup path in `startup.go` is:
 
 1. Parse flags.
 2. Load config from the default path or `-c`.
@@ -55,7 +67,7 @@ The application startup path in `main.go` is:
 
 ## Main Design Boundaries
 
-### `Game` is the orchestration hub
+### `Game` is still the orchestration hub
 
 `Game` owns most runtime state, including:
 
@@ -73,7 +85,8 @@ The application startup path in `main.go` is:
 - `InputState`
 - `RenderState`
 
-This keeps wiring simple, but it also concentrates behavior in one type.
+This keeps wiring simple, but it also leaves ownership concentrated in
+one type even after the `main.go` split.
 
 ### Rendering is read-only
 
@@ -149,34 +162,50 @@ Observed during repository inspection:
 - `gofmt -l *.go`: clean
 - `go vet ./...`: passes when `GOCACHE` is redirected to `/tmp`
 - `go build -o /tmp/nv-testbuild .`: passes
+- `go test ./...`: works when the root package can initialize Ebiten, but
+  fresh root-package runs in this headless shell still fail during
+  GLFW/X11 startup
 
-`go test ./...` does not run cleanly in the current headless environment.
-The failure is caused by Ebiten/GLFW trying to initialize X11 and failing
-to open display `:0`, which prevents package test startup.
+The repo now treats tests in three practical buckets:
+
+- strict pure tests
+  - currently the `navlogic` package
+  - headless-safe because they do not build the Ebiten-backed root package
+- logic-oriented root-package tests
+  - named `TestPure...` in the root package
+  - cover config validation, path collection, sorting, and other
+    behavior that avoids constructing `*ebiten.Image`, but they still
+    build the root package and therefore still need an environment where
+    Ebiten package startup succeeds
+- GUI-dependent root-package tests
+  - named `TestGUI...` in the root package
+  - cover renderer caches, display content using Ebiten images, and
+    image-manager behavior that depends on Ebiten image types
+
+Supported commands:
+
+- `make test`: full suite
+- `make test-pure`: strictly headless-safe pure tests (`navlogic`)
+- `make test-root-pure`: logic-oriented root-package subset
+- `make test-gui`: GUI-dependent tests only
 
 ## Design Risks
 
-### Large `main.go`
+### `Game` remains a broad ownership boundary
 
-`main.go` is currently the largest file and holds several concerns at once:
-
-- app lifecycle
-- runtime state
-- navigation rules
-- zoom/pan rules
-- settings application
-- display content calculation
-
-This makes refactors and regression-focused testing harder.
+The old `main.go` hotspot is gone, but `Game` still owns a wide slice of
+runtime state and still serves as the main interface hub between input,
+navigation, rendering, and runtime settings.
 
 ### Runtime logic is only partially isolated from Ebiten
 
-Some logic is testable, but package-level tests still hit Ebiten startup
-paths in this environment. That limits reliable automated testing in CI or
-headless shells.
+Some logic is cleanly isolated in `navlogic`, sorting, and config/binding
+validation, but the root package still imports Ebiten broadly enough that
+even logic-oriented root tests need a graphics-capable package startup
+path. That keeps the strict-pure / root-pure / GUI distinction important.
 
 ### Some tests mirror logic instead of calling production paths
 
-At least some navigation tests reconstruct expected behavior manually
-instead of exercising the real navigation methods. That lowers their value
-as regression tests.
+The higher-risk cases that used to mirror logic have already been reduced,
+but test categorization is still important so the repo does not drift back
+toward mixed-purpose test files.

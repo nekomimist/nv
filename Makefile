@@ -95,7 +95,22 @@ deps:
 .PHONY: test
 test:
 	@echo "Running tests..."
-	go test ./...
+	GOCACHE=/tmp/nv-go-build-cache go test ./...
+
+.PHONY: test-pure
+test-pure:
+	@echo "Running pure tests..."
+	GOCACHE=/tmp/nv-go-build-cache go test ./navlogic
+
+.PHONY: test-root-pure
+test-root-pure:
+	@echo "Running logic-oriented root-package tests..."
+	GOCACHE=/tmp/nv-go-build-cache go test . -run '^TestPure'
+
+.PHONY: test-gui
+test-gui:
+	@echo "Running GUI-dependent tests..."
+	GOCACHE=/tmp/nv-go-build-cache go test . -run '^TestGUI'
 
 # Format code
 .PHONY: fmt
@@ -107,7 +122,7 @@ fmt:
 .PHONY: vet
 vet:
 	@echo "Vetting code..."
-	go vet ./...
+	GOCACHE=/tmp/nv-go-build-cache go vet ./...
 
 # Lint (requires golangci-lint)
 .PHONY: lint
@@ -140,6 +155,9 @@ help:
 	@echo ""
 	@echo "  make deps      - Install build dependencies"
 	@echo "  make test      - Run tests"
+	@echo "  make test-pure - Run strict pure/headless-safe tests"
+	@echo "  make test-root-pure - Run logic-oriented root-package tests"
+	@echo "  make test-gui  - Run GUI-dependent tests"
 	@echo "  make fmt       - Format code"
 	@echo "  make vet       - Vet code"
 	@echo "  make lint      - Lint code (requires golangci-lint)"

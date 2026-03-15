@@ -5,130 +5,9 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
-
-	"github.com/hajimehoshi/ebiten/v2"
 )
 
-type stubImageManager struct {
-	paths             []ImagePath
-	images            []*ebiten.Image
-	preloadDirections []NavigationDirection
-}
-
-func (m *stubImageManager) GetImage(idx int) *ebiten.Image {
-	if idx < 0 || idx >= len(m.images) {
-		return nil
-	}
-	return m.images[idx]
-}
-
-func (m *stubImageManager) GetBookModeImages(idx int, rightToLeft bool) (*ebiten.Image, *ebiten.Image) {
-	if rightToLeft {
-		return m.GetImage(idx + 1), m.GetImage(idx)
-	}
-	return m.GetImage(idx), m.GetImage(idx + 1)
-}
-
-func (m *stubImageManager) GetPath(idx int) (ImagePath, bool) {
-	if idx < 0 || idx >= len(m.paths) {
-		return ImagePath{}, false
-	}
-	return m.paths[idx], true
-}
-
-func (m *stubImageManager) SetPaths(paths []ImagePath) {
-	m.paths = make([]ImagePath, len(paths))
-	copy(m.paths, paths)
-}
-
-func (m *stubImageManager) GetPathsCount() int {
-	return len(m.paths)
-}
-
-func (m *stubImageManager) StartPreload(currentIdx int, direction NavigationDirection) {
-	m.preloadDirections = append(m.preloadDirections, direction)
-}
-
-func (m *stubImageManager) StopPreload() {}
-
-func (m *stubImageManager) GetPreloadStats() PreloadStats {
-	return PreloadStats{}
-}
-
-func (m *stubImageManager) ConsumeAsyncRefresh() bool {
-	return false
-}
-
-func TestNavigateSingleUsesActionSemantics(t *testing.T) {
-	images := []*ebiten.Image{
-		ebiten.NewImage(100, 150),
-		ebiten.NewImage(100, 150),
-		ebiten.NewImage(100, 150),
-		ebiten.NewImage(100, 150),
-	}
-	manager := &stubImageManager{
-		paths: []ImagePath{
-			{Path: "1.png"},
-			{Path: "2.png"},
-			{Path: "3.png"},
-			{Path: "4.png"},
-		},
-		images: images,
-	}
-	g := &Game{
-		imageManager:    manager,
-		bookMode:        true,
-		displayContent:  &DisplayContent{LeftImage: images[0], RightImage: images[1]},
-		zoomState:       NewZoomState(),
-		config:          Config{AspectRatioThreshold: 1.5},
-		currentLogicalW: 800,
-		currentLogicalH: 600,
-	}
-
-	g.NavigateNextSingle()
-
-	if g.idx != 1 {
-		t.Fatalf("NavigateNextSingle moved to %d, want 1", g.idx)
-	}
-	if len(manager.preloadDirections) != 1 || manager.preloadDirections[0] != NavigationForward {
-		t.Fatalf("unexpected preload directions: %v", manager.preloadDirections)
-	}
-}
-
-func TestNavigateNextKeepsSpreadBehavior(t *testing.T) {
-	images := []*ebiten.Image{
-		ebiten.NewImage(100, 150),
-		ebiten.NewImage(100, 150),
-		ebiten.NewImage(100, 150),
-		ebiten.NewImage(100, 150),
-	}
-	manager := &stubImageManager{
-		paths: []ImagePath{
-			{Path: "1.png"},
-			{Path: "2.png"},
-			{Path: "3.png"},
-			{Path: "4.png"},
-		},
-		images: images,
-	}
-	g := &Game{
-		imageManager:    manager,
-		bookMode:        true,
-		displayContent:  &DisplayContent{LeftImage: images[0], RightImage: images[1]},
-		zoomState:       NewZoomState(),
-		config:          Config{AspectRatioThreshold: 1.5},
-		currentLogicalW: 800,
-		currentLogicalH: 600,
-	}
-
-	g.NavigateNext()
-
-	if g.idx != 2 {
-		t.Fatalf("NavigateNext moved to %d, want 2", g.idx)
-	}
-}
-
-func TestApplyConfigResultUpdatesStatus(t *testing.T) {
+func TestPureApplyConfigResultUpdatesStatus(t *testing.T) {
 	g := &Game{
 		imageManager: &stubImageManager{},
 		zoomState:    NewZoomState(),
@@ -156,33 +35,7 @@ func TestApplyConfigResultUpdatesStatus(t *testing.T) {
 	}
 }
 
-func TestRendererCachesIntermediateImages(t *testing.T) {
-	g := &Game{}
-	r := NewRenderer(g)
-	left := ebiten.NewImage(100, 150)
-	right := ebiten.NewImage(100, 150)
-
-	book1 := r.createBookModeImage(left, right)
-	book2 := r.createBookModeImage(left, right)
-	if book1 != book2 {
-		t.Fatal("expected book composition cache hit")
-	}
-
-	g.rotationAngle = 90
-	transformed1 := r.applyTransformations(book1)
-	transformed2 := r.applyTransformations(book1)
-	if transformed1 != transformed2 {
-		t.Fatal("expected transformation cache hit")
-	}
-
-	g.rotationAngle = 180
-	transformed3 := r.applyTransformations(book1)
-	if transformed3 == transformed2 {
-		t.Fatal("expected cache invalidation when rotation changes")
-	}
-}
-
-func TestIsArchiveExt(t *testing.T) {
+func TestPureIsArchiveExt(t *testing.T) {
 	tests := []struct {
 		name     string
 		path     string
@@ -209,7 +62,7 @@ func TestIsArchiveExt(t *testing.T) {
 	}
 }
 
-func TestIsSupportedExt(t *testing.T) {
+func TestPureIsSupportedExt(t *testing.T) {
 	tests := []struct {
 		name     string
 		path     string
@@ -240,7 +93,7 @@ func TestIsSupportedExt(t *testing.T) {
 	}
 }
 
-func TestConfigValidation(t *testing.T) {
+func TestPureConfigValidation(t *testing.T) {
 	tests := []struct {
 		name                  string
 		configJSON            string
@@ -334,7 +187,6 @@ func TestConfigValidation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Create temporary config file
 			tempDir := t.TempDir()
 			configPath := filepath.Join(tempDir, ".nv.json")
 
@@ -368,7 +220,7 @@ func TestConfigValidation(t *testing.T) {
 	}
 }
 
-func TestDefaultWindowSizeValidation(t *testing.T) {
+func TestPureDefaultWindowSizeValidation(t *testing.T) {
 	tests := []struct {
 		name           string
 		configJSON     string
@@ -432,7 +284,6 @@ func TestDefaultWindowSizeValidation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Create temporary config file
 			tempDir := t.TempDir()
 			configPath := filepath.Join(tempDir, ".nv.json")
 
@@ -454,10 +305,9 @@ func TestDefaultWindowSizeValidation(t *testing.T) {
 	}
 }
 
-func TestCollectImages(t *testing.T) {
+func TestPureCollectImages(t *testing.T) {
 	tempDir := t.TempDir()
 
-	// Create test files
 	testFiles := []struct {
 		name      string
 		shouldAdd bool
@@ -466,7 +316,7 @@ func TestCollectImages(t *testing.T) {
 		{"image2.png", true},
 		{"image3.webp", true},
 		{"document.txt", false},
-		{"Image4.PNG", true}, // uppercase
+		{"Image4.PNG", true},
 		{"backup.bak", false},
 		{"photo.jpeg", true},
 	}
@@ -489,7 +339,6 @@ func TestCollectImages(t *testing.T) {
 		}
 	}
 
-	// Test directory collection
 	result, err := collectImages([]string{tempDir}, SortNatural)
 	if err != nil {
 		t.Fatalf("collectImages failed: %v", err)
@@ -505,7 +354,6 @@ func TestCollectImages(t *testing.T) {
 		}
 	}
 
-	// Test individual file collection
 	singleFile := filepath.Join(tempDir, "image1.jpg")
 	result, err = collectImages([]string{singleFile}, SortNatural)
 	if err != nil {
@@ -522,7 +370,7 @@ func TestCollectImages(t *testing.T) {
 	}
 }
 
-func TestExpandToDirectorySwitchesCollectionSource(t *testing.T) {
+func TestPureExpandToDirectorySwitchesCollectionSource(t *testing.T) {
 	tempDir := t.TempDir()
 	originalFile := filepath.Join(tempDir, "page2.jpg")
 	otherFile := filepath.Join(tempDir, "page10.jpg")
@@ -568,7 +416,7 @@ func TestExpandToDirectorySwitchesCollectionSource(t *testing.T) {
 	}
 }
 
-func TestReloadPathsForCurrentSourceKeepsExpandedDirectorySelection(t *testing.T) {
+func TestPureReloadPathsForCurrentSourceKeepsExpandedDirectorySelection(t *testing.T) {
 	tempDir := t.TempDir()
 	originalFile := filepath.Join(tempDir, "page2.jpg")
 	files := []string{
@@ -626,7 +474,7 @@ func TestReloadPathsForCurrentSourceKeepsExpandedDirectorySelection(t *testing.T
 	}
 }
 
-func TestApplyNewConfigReloadsFromCurrentSource(t *testing.T) {
+func TestPureApplyNewConfigReloadsFromCurrentSource(t *testing.T) {
 	tempDir := t.TempDir()
 	originalFile := filepath.Join(tempDir, "page2.jpg")
 	files := []string{
@@ -692,99 +540,7 @@ func TestApplyNewConfigReloadsFromCurrentSource(t *testing.T) {
 	}
 }
 
-func TestCalculateDisplayContentUsesNavigationPlan(t *testing.T) {
-	tests := []struct {
-		name               string
-		rightToLeft        bool
-		leftW, leftH       int
-		rightW, rightH     int
-		expectedActual     int
-		expectedLeftIndex  int
-		expectedRightIndex int
-	}{
-		{"Compatible LTR spread", false, 100, 150, 100, 150, 2, 0, 1},
-		{"Compatible RTL spread", true, 100, 150, 100, 150, 2, 1, 0},
-		{"Incompatible fallback to single", false, 100, 150, 300, 100, 1, 0, -1},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			images := []*ebiten.Image{
-				ebiten.NewImage(tt.leftW, tt.leftH),
-				ebiten.NewImage(tt.rightW, tt.rightH),
-			}
-			manager := &stubImageManager{
-				paths: []ImagePath{
-					{Path: "left.png"},
-					{Path: "right.png"},
-				},
-				images: images,
-			}
-			g := &Game{
-				imageManager: manager,
-				bookMode:     true,
-				config: Config{
-					AspectRatioThreshold: 1.5,
-					RightToLeft:          tt.rightToLeft,
-				},
-				zoomState: NewZoomState(),
-			}
-
-			g.calculateDisplayContent()
-
-			if g.displayContent == nil {
-				t.Fatal("expected display content")
-			}
-			if g.displayContent.Metadata.ActualImages != tt.expectedActual {
-				t.Fatalf("actual images = %d, want %d", g.displayContent.Metadata.ActualImages, tt.expectedActual)
-			}
-
-			expectedLeft := manager.images[tt.expectedLeftIndex]
-			if g.displayContent.LeftImage != expectedLeft {
-				t.Fatalf("unexpected left image index: got %p want %p", g.displayContent.LeftImage, expectedLeft)
-			}
-
-			if tt.expectedRightIndex < 0 {
-				if g.displayContent.RightImage != nil {
-					t.Fatalf("expected nil right image, got %p", g.displayContent.RightImage)
-				}
-			} else {
-				expectedRight := manager.images[tt.expectedRightIndex]
-				if g.displayContent.RightImage != expectedRight {
-					t.Fatalf("unexpected right image index: got %p want %p", g.displayContent.RightImage, expectedRight)
-				}
-			}
-		})
-	}
-}
-
-func TestImageManager(t *testing.T) {
-	paths := []ImagePath{
-		{Path: "1.jpg"},
-		{Path: "2.jpg"},
-		{Path: "3.jpg"},
-		{Path: "4.jpg"},
-		{Path: "5.jpg"},
-	}
-
-	imageManager := NewImageManager(4)
-	imageManager.SetPaths(paths)
-
-	// Test GetPathsCount
-	if count := imageManager.GetPathsCount(); count != 5 {
-		t.Errorf("Expected paths count 5, got %d", count)
-	}
-
-	// Test GetBookModeImages (should not panic)
-	leftImg, rightImg := imageManager.GetBookModeImages(0, false)
-	// Since we don't have actual image files, both should be nil
-	if leftImg != nil || rightImg != nil {
-		// This is expected behavior when images can't be loaded
-		t.Logf("Images are nil as expected (no actual image files)")
-	}
-}
-
-func TestCalculateHorizontalPosition(t *testing.T) {
+func TestPureCalculateHorizontalPosition(t *testing.T) {
 	g := &Game{}
 	r := NewRenderer(g)
 
@@ -812,7 +568,7 @@ func TestCalculateHorizontalPosition(t *testing.T) {
 	}
 }
 
-func TestImagePathCreation(t *testing.T) {
+func TestPureImagePathCreation(t *testing.T) {
 	tests := []struct {
 		name        string
 		path        string
@@ -858,29 +614,13 @@ func TestImagePathCreation(t *testing.T) {
 	}
 }
 
-// Helper function to test if two string slices are equal
-func stringSlicesEqual(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
-}
-
-// Test helper to verify that the config loading works with default values
-func TestLoadConfigDefaults(t *testing.T) {
-	// Test with non-existent config file
+func TestPureLoadConfigDefaults(t *testing.T) {
 	tempDir := t.TempDir()
 	configPath := filepath.Join(tempDir, "nonexistent.json")
 
 	configResult := loadConfigFromPath(configPath)
 	config := configResult.Config
 
-	// Check all default values (without keybindings/mouse bindings for simplicity)
 	if config.WindowWidth != defaultWidth {
 		t.Errorf("Expected WindowWidth %d, got %d", defaultWidth, config.WindowWidth)
 	}
@@ -923,8 +663,6 @@ func TestLoadConfigDefaults(t *testing.T) {
 	if config.PreloadCount != 4 {
 		t.Errorf("Expected PreloadCount 4, got %d", config.PreloadCount)
 	}
-
-	// Check that keybindings and mouse bindings are properly initialized
 	if len(config.Keybindings) == 0 {
 		t.Error("Expected default keybindings to be populated")
 	}
@@ -936,7 +674,7 @@ func TestLoadConfigDefaults(t *testing.T) {
 	}
 }
 
-func TestKeybindingConflictDetection(t *testing.T) {
+func TestPureKeybindingConflictDetection(t *testing.T) {
 	tests := []struct {
 		name        string
 		keybindings map[string][]string
@@ -956,7 +694,7 @@ func TestKeybindingConflictDetection(t *testing.T) {
 			name: "direct key conflict",
 			keybindings: map[string][]string{
 				"exit": {"Escape"},
-				"help": {"Escape"}, // Same key as exit
+				"help": {"Escape"},
 			},
 			expectError: true,
 		},
@@ -964,7 +702,7 @@ func TestKeybindingConflictDetection(t *testing.T) {
 			name: "modifier key conflict",
 			keybindings: map[string][]string{
 				"exit": {"Shift+KeyA"},
-				"help": {"Shift+KeyA"}, // Same combination
+				"help": {"Shift+KeyA"},
 			},
 			expectError: true,
 		},
@@ -972,7 +710,7 @@ func TestKeybindingConflictDetection(t *testing.T) {
 			name: "multiple keys one conflict",
 			keybindings: map[string][]string{
 				"exit": {"Escape", "KeyQ"},
-				"help": {"Shift+Slash", "KeyQ"}, // KeyQ conflicts
+				"help": {"Shift+Slash", "KeyQ"},
 			},
 			expectError: true,
 		},
@@ -1001,7 +739,7 @@ func TestKeybindingConflictDetection(t *testing.T) {
 	}
 }
 
-func TestMousebindingConflictDetection(t *testing.T) {
+func TestPureMousebindingConflictDetection(t *testing.T) {
 	tests := []struct {
 		name          string
 		mousebindings map[string][]string
@@ -1020,7 +758,7 @@ func TestMousebindingConflictDetection(t *testing.T) {
 			name: "direct mouse action conflict",
 			mousebindings: map[string][]string{
 				"next": {"LeftClick"},
-				"help": {"LeftClick"}, // Same action
+				"help": {"LeftClick"},
 			},
 			expectError: true,
 		},
@@ -1028,7 +766,7 @@ func TestMousebindingConflictDetection(t *testing.T) {
 			name: "wheel action conflict",
 			mousebindings: map[string][]string{
 				"next":     {"WheelDown"},
-				"previous": {"WheelDown"}, // Same wheel direction
+				"previous": {"WheelDown"},
 			},
 			expectError: true,
 		},
@@ -1036,7 +774,7 @@ func TestMousebindingConflictDetection(t *testing.T) {
 			name: "modifier mouse conflict",
 			mousebindings: map[string][]string{
 				"action1": {"Shift+LeftClick"},
-				"action2": {"Shift+LeftClick"}, // Same combination
+				"action2": {"Shift+LeftClick"},
 			},
 			expectError: true,
 		},
@@ -1054,7 +792,7 @@ func TestMousebindingConflictDetection(t *testing.T) {
 			name: "double-click combinations",
 			mousebindings: map[string][]string{
 				"action1": {"LeftClick"},
-				"action2": {"DoubleLeftClick"}, // Different from single click
+				"action2": {"DoubleLeftClick"},
 			},
 			expectError: false,
 		},
@@ -1073,7 +811,7 @@ func TestMousebindingConflictDetection(t *testing.T) {
 	}
 }
 
-func TestMouseSettingsValidation(t *testing.T) {
+func TestPureMouseSettingsValidation(t *testing.T) {
 	tests := []struct {
 		name           string
 		input          MouseSettings
@@ -1096,91 +834,84 @@ func TestMouseSettingsValidation(t *testing.T) {
 				EnableMouse:      true,
 				WheelInverted:    false,
 			},
-			description: "All values within valid ranges",
 		},
 		{
 			name: "wheel sensitivity too low",
 			input: MouseSettings{
-				WheelSensitivity: 0.05, // Below minimum of 0.1
+				WheelSensitivity: 0.05,
 				DoubleClickTime:  300,
 				DragThreshold:    5,
 			},
 			expectedOutput: MouseSettings{
-				WheelSensitivity: 1.0, // Should be reset to default
+				WheelSensitivity: 1.0,
 				DoubleClickTime:  300,
 				DragThreshold:    5,
 			},
-			description: "WheelSensitivity below minimum should be reset",
 		},
 		{
 			name: "wheel sensitivity too high",
 			input: MouseSettings{
-				WheelSensitivity: 10.0, // Above maximum of 5.0
+				WheelSensitivity: 10.0,
 				DoubleClickTime:  300,
 				DragThreshold:    5,
 			},
 			expectedOutput: MouseSettings{
-				WheelSensitivity: 5.0, // Should be clamped to maximum
+				WheelSensitivity: 5.0,
 				DoubleClickTime:  300,
 				DragThreshold:    5,
 			},
-			description: "WheelSensitivity above maximum should be clamped",
 		},
 		{
 			name: "double click time too low",
 			input: MouseSettings{
 				WheelSensitivity: 1.0,
-				DoubleClickTime:  50, // Below minimum of 100
+				DoubleClickTime:  50,
 				DragThreshold:    5,
 			},
 			expectedOutput: MouseSettings{
 				WheelSensitivity: 1.0,
-				DoubleClickTime:  300, // Should be reset to default
+				DoubleClickTime:  300,
 				DragThreshold:    5,
 			},
-			description: "DoubleClickTime below minimum should be reset",
 		},
 		{
 			name: "double click time too high",
 			input: MouseSettings{
 				WheelSensitivity: 1.0,
-				DoubleClickTime:  2000, // Above maximum of 1000
+				DoubleClickTime:  2000,
 				DragThreshold:    5,
 			},
 			expectedOutput: MouseSettings{
 				WheelSensitivity: 1.0,
-				DoubleClickTime:  1000, // Should be clamped to maximum
+				DoubleClickTime:  1000,
 				DragThreshold:    5,
 			},
-			description: "DoubleClickTime above maximum should be clamped",
 		},
 		{
 			name: "drag threshold too low",
 			input: MouseSettings{
 				WheelSensitivity: 1.0,
 				DoubleClickTime:  300,
-				DragThreshold:    0, // Below minimum of 1
+				DragThreshold:    0,
 			},
 			expectedOutput: MouseSettings{
 				WheelSensitivity: 1.0,
 				DoubleClickTime:  300,
-				DragThreshold:    5, // Should be reset to default
+				DragThreshold:    5,
 			},
-			description: "DragThreshold below minimum should be reset",
 		},
 		{
 			name: "drag threshold too high",
 			input: MouseSettings{
 				WheelSensitivity: 1.0,
 				DoubleClickTime:  300,
-				DragThreshold:    50, // Above maximum of 20
+				DragThreshold:    50,
 			},
 			expectedOutput: MouseSettings{
 				WheelSensitivity: 1.0,
 				DoubleClickTime:  300,
-				DragThreshold:    20, // Should be clamped to maximum
+				DragThreshold:    20,
 			},
-			description: "DragThreshold above maximum should be clamped",
 		},
 	}
 

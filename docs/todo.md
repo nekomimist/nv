@@ -59,22 +59,35 @@ inspection and cross-review comparison on March 12, 2026.
   concerns out of `main.go`.
   - Result: process startup now lives in `startup.go`, collection source
     and reload behavior live in `game_collection.go`, and settings/runtime
-    application live in `game_runtime.go`, leaving `main.go` smaller and
-    more focused on the remaining `Game` behavior.
+    application live in `game_runtime.go`, establishing the file split
+    that later allowed the old `main.go` shell to be removed entirely.
 
 - March 15, 2026: Split navigation/display, frame lifecycle, and
   viewport concerns out of `main.go`.
   - Result: navigation/display adapters now live in
     `game_navigation.go`, frame update/draw/layout live in
     `game_loop.go`, and zoom/pan state and behavior live in
-    `game_viewport.go`, reducing `main.go` to a much smaller state and
-    interface-hub file.
+    `game_viewport.go`, leaving the remaining `Game` state shell ready
+    for extraction into `game_state.go`.
 
 - March 15, 2026: Removed duplicated input binding source-of-truth data.
   - Result: key names, mouse action names, wheel directions, and
     double-click/button mappings now come from shared definitions in
     `input_bindings.go`, so runtime parsing and config validation no
     longer drift independently.
+
+- March 15, 2026: Clarified the current test strategy around GUI
+  dependencies.
+  - Result: root-package tests are now labeled as `TestPure...` or
+    `TestGUI...`, `navlogic` remains the strict headless-safe test
+    package, and the documented commands explain which subsets require a
+    graphics-capable environment.
+
+- March 15, 2026: Refreshed architecture notes for the post-`main.go`
+  split layout.
+  - Result: `architecture.md` now describes the extracted startup,
+    runtime, navigation, loop, viewport, and `Game` state files instead
+    of the old monolithic `main.go` design.
 
 ## Medium Priority
 
@@ -86,18 +99,7 @@ inspection and cross-review comparison on March 12, 2026.
     the intended boundary or extracts additional state/forwarding only
     where it clearly improves isolation.
 
-- Clarify test strategy for GUI-dependent code.
-  - Why: current tests mix pure logic with Ebiten-dependent constructs.
-  - Done when: the repo documents which tests are pure unit tests, which
-    require a display, and how to run both kinds.
-
 ## Lower Priority
-
-- Document architectural boundaries for future contributors.
-  - Why: the code already has useful subsystem boundaries, but ownership
-    and runtime responsibilities are still mostly implicit.
-  - Done when: contributors can see where to add behavior without reading
-    every core file.
 
 - Reassess whether settings UI should stay index-based.
   - Why: the current flat index and string-based dispatch are simple, but
