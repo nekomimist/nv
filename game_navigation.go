@@ -1,0 +1,147 @@
+package main
+
+import (
+	"fmt"
+	"strconv"
+	"time"
+
+	"github.com/hajimehoshi/ebiten/v2"
+	"nv/navlogic"
+)
+
+func (g *Game) navigationState() navlogic.State {
+	return navlogic.State{
+		Index:                g.idx,
+		PageCount:            g.imageManager.GetPathsCount(),
+		BookMode:             g.bookMode,
+		TempSingleMode:       g.tempSingleMode,
+		RightToLeft:          g.config.RightToLeft,
+		AspectRatioThreshold: g.config.AspectRatioThreshold,
+	}
+}
+
+func (g *Game) applyNavigationState(state navlogic.State) {
+	g.idx = state.Index
+	g.bookMode = state.BookMode
+	g.tempSingleMode = state.TempSingleMode
+}
+
+func (g *Game) pageMetricsAt(idx int) navlogic.PageMetrics {
+	if idx < 0 || idx >= g.imageManager.GetPathsCount() {
+		return navlogic.PageMetrics{}
+	}
+
+	img := g.imageManager.GetImage(idx)
+	if img == nil {
+		return navlogic.PageMetrics{}
+	}
+
+	bounds := img.Bounds()
+	return navlogic.PageMetrics{
+		Width:  bounds.Dx(),
+		Height: bounds.Dy(),
+	}
+}
+
+func (g *Game) displayImageAt(idx int) *ebiten.Image {
+	if idx < 0 {
+		return nil
+	}
+	return g.imageManager.GetImage(idx)
+}
+
+// calculateDisplayContent determines what should be displayed based on current state.
+func (g *Game) calculateDisplayContent() {
+	plan := navlogic.PlanDisplay(g.navigationState(), g.pageMetricsAt)
+	if plan.TotalPages == 0 {
+		g.displayContent = nil
+		return
+	}
+
+	g.displayContent = &DisplayContent{
+		LeftImage:  g.displayImageAt(plan.LeftIndex),
+		RightImage: g.displayImageAt(plan.RightIndex),
+		Metadata: DisplayMetadata{
+			CurrentPage:  plan.CurrentPage,
+			TotalPages:   plan.TotalPages,
+			ActualImages: plan.ActualImages,
+		},
+	}
+
+	if g.zoomState.Mode != ZoomModeManual && !g.needsInitialZoomUpdate {
+		g.updateZoomLevelForFitMode()
+	}
+}
+
+func (g *Game) showOverlayMessage(message string) {
+	g.overlayMessage = message
+	if message != "" {
+		g.overlayMessageTime = time.Now()
+	} else {
+		g.overlayMessageTime = time.Time{}
+	}
+}
+
+func (g *Game) toggleBookMode() {
+	nextState := navlogic.ToggleBookMode(g.navigationState(), g.pageMetricsAt)
+	g.applyNavigationState(nextState)
+	if g.bookMode {
+		g.showOverlayMessage("Book Mode: ON")
+	} else {
+		g.showOverlayMessage("Book Mode: OFF")
+	}
+
+	g.config.BookMode = g.bookMode
+	g.calculateDisplayContent()
+}
+
+func (g *Game) processPageInput() {
+	if g.pageInputBuffer == "" {
+		return
+	}
+
+	pageNum, err := strconv.Atoi(g.pageInputBuffer)
+	if err != nil {
+		g.showOverlayMessage("Invalid page number")
+		return
+	}
+
+	g.jumpToPage(pageNum)
+}
+
+func (g *Game) jumpToPage(pageNum int) {
+	nextState, boundary := navlogic.JumpToPage(g.navigationState(), pageNum, g.pageMetricsAt)
+	if boundary == navlogic.BoundaryPageNotFound {
+		g.showOverlayMessage(fmt.Sprintf("Page %d not found (1-%d)", pageNum, g.imageManager.GetPathsCount()))
+		return
+	}
+
+	g.applyNavigationState(nextState)
+	g.imageManager.StartPreload(g.idx, NavigationJump)
+	g.resetZoomToInitial()
+	g.calculateDisplayContent()
+}
+
+func (g *Game) navigateNext(singleStep bool) {
+	nextState, boundary := navlogic.NavigateNext(g.navigationState(), g.pageMetricsAt, singleStep)
+	if boundary == navlogic.BoundaryLastPage {
+		g.showOverlayMessage("Last page")
+		return
+	}
+
+	g.applyNavigationState(nextState)
+	g.resetZoomToInitial()
+	g.calculateDisplayContent()
+}
+
+func (g *Game) navigatePrevious(singleStep bool) {
+	nextState, boundary := navlogic.NavigatePrevious(g.navigationState(), g.pageMetricsAt, singleStep)
+	if boundary == navlogic.BoundaryFirstPage {
+		g.showOverlayMessage("First page")
+		return
+	}
+
+	g.applyNavigationState(nextState)
+	g.resetZoomToInitial()
+	g.calculateDisplayContent()
+}

@@ -43,12 +43,11 @@ func getDefaultMouseSettings() MouseSettings {
 func validateKeybindings(keybindings map[string][]string) error {
 	// Check for valid key formats and detect conflicts
 	keyToAction := make(map[string]string)
-	validKeys := getValidKeyNames()
 
 	for action, keys := range keybindings {
 		for _, keyStr := range keys {
 			// Validate key format
-			if err := validateKeyString(keyStr, validKeys); err != nil {
+			if err := validateKeyString(keyStr); err != nil {
 				return fmt.Errorf("invalid key '%s' for action '%s': %v", keyStr, action, err)
 			}
 
@@ -67,12 +66,11 @@ func validateKeybindings(keybindings map[string][]string) error {
 func validateMousebindings(mousebindings map[string][]string) error {
 	// Check for valid mouse action formats and detect conflicts
 	mouseToAction := make(map[string]string)
-	validMouseActions := getValidMouseActionNames()
 
 	for action, mouseActions := range mousebindings {
 		for _, mouseStr := range mouseActions {
 			// Validate mouse action format
-			if err := validateMouseString(mouseStr, validMouseActions); err != nil {
+			if err := validateMouseString(mouseStr); err != nil {
 				return fmt.Errorf("invalid mouse action '%s' for action '%s': %v", mouseStr, action, err)
 			}
 
@@ -88,7 +86,7 @@ func validateMousebindings(mousebindings map[string][]string) error {
 }
 
 // validateMouseString validates a single mouse string format
-func validateMouseString(mouseStr string, validMouseActions map[string]bool) error {
+func validateMouseString(mouseStr string) error {
 	parts := strings.Split(mouseStr, "+")
 	if len(parts) == 0 {
 		return fmt.Errorf("empty mouse string")
@@ -96,14 +94,41 @@ func validateMouseString(mouseStr string, validMouseActions map[string]bool) err
 
 	// Last part should be the actual mouse action
 	actionName := parts[len(parts)-1]
-	if !validMouseActions[actionName] {
-		return fmt.Errorf("unknown mouse action: %s", actionName)
+	if _, ok := mouseActionToButton[actionName]; !ok {
+		if _, ok := mouseWheelActionDeltas[actionName]; !ok {
+			if _, ok := mouseDoubleClickToButton[actionName]; !ok {
+				return fmt.Errorf("unknown mouse action: %s", actionName)
+			}
+		}
+	}
+
+	for i := 0; i < len(parts)-1; i++ {
+		modifier := strings.ToLower(parts[i])
+		if !isValidBindingModifier(modifier) {
+			return fmt.Errorf("unknown modifier: %s", parts[i])
+		}
+	}
+
+	return nil
+}
+
+// validateKeyString validates a single key string format
+func validateKeyString(keyStr string) error {
+	parts := strings.Split(keyStr, "+")
+	if len(parts) == 0 {
+		return fmt.Errorf("empty key string")
+	}
+
+	// Last part should be the actual key
+	keyName := parts[len(parts)-1]
+	if _, ok := keyNameToEbitenKey[keyName]; !ok {
+		return fmt.Errorf("unknown key: %s", keyName)
 	}
 
 	// Check modifiers
 	for i := 0; i < len(parts)-1; i++ {
 		modifier := strings.ToLower(parts[i])
-		if modifier != "shift" && modifier != "ctrl" && modifier != "alt" {
+		if !isValidBindingModifier(modifier) {
 			return fmt.Errorf("unknown modifier: %s", parts[i])
 		}
 	}
@@ -113,23 +138,26 @@ func validateMouseString(mouseStr string, validMouseActions map[string]bool) err
 
 // getValidMouseActionNames returns a set of valid mouse action names
 func getValidMouseActionNames() map[string]bool {
-	return map[string]bool{
-		// Basic mouse buttons
-		"LeftClick":   true,
-		"RightClick":  true,
-		"MiddleClick": true,
-		"Back":        true,
-		"Forward":     true,
-		// Wheel actions
-		"WheelUp":    true,
-		"WheelDown":  true,
-		"WheelLeft":  true,
-		"WheelRight": true,
-		// Double-click actions
-		"DoubleLeftClick":   true,
-		"DoubleRightClick":  true,
-		"DoubleMiddleClick": true,
+	validMouseActions := make(map[string]bool, len(mouseActionToButton)+len(mouseWheelActionDeltas)+len(mouseDoubleClickToButton))
+	for actionName := range mouseActionToButton {
+		validMouseActions[actionName] = true
 	}
+	for actionName := range mouseWheelActionDeltas {
+		validMouseActions[actionName] = true
+	}
+	for actionName := range mouseDoubleClickToButton {
+		validMouseActions[actionName] = true
+	}
+	return validMouseActions
+}
+
+// getValidKeyNames returns a set of valid key names
+func getValidKeyNames() map[string]bool {
+	validKeys := make(map[string]bool, len(keyNameToEbitenKey))
+	for keyName := range keyNameToEbitenKey {
+		validKeys[keyName] = true
+	}
+	return validKeys
 }
 
 // validateMouseSettings validates the mouse settings configuration
@@ -156,66 +184,6 @@ func validateMouseSettings(settings MouseSettings) MouseSettings {
 	}
 
 	return settings
-}
-
-// validateKeyString validates a single key string format
-func validateKeyString(keyStr string, validKeys map[string]bool) error {
-	parts := strings.Split(keyStr, "+")
-	if len(parts) == 0 {
-		return fmt.Errorf("empty key string")
-	}
-
-	// Last part should be the actual key
-	keyName := parts[len(parts)-1]
-	if !validKeys[keyName] {
-		return fmt.Errorf("unknown key: %s", keyName)
-	}
-
-	// Check modifiers
-	for i := 0; i < len(parts)-1; i++ {
-		modifier := strings.ToLower(parts[i])
-		if modifier != "shift" && modifier != "ctrl" && modifier != "alt" {
-			return fmt.Errorf("unknown modifier: %s", parts[i])
-		}
-	}
-
-	return nil
-}
-
-// getValidKeyNames returns a set of valid key names
-func getValidKeyNames() map[string]bool {
-	// Add all keys from the key mapping
-	keyMapping := map[string]bool{
-		// Letters
-		"KeyA": true, "KeyB": true, "KeyC": true, "KeyD": true,
-		"KeyE": true, "KeyF": true, "KeyG": true, "KeyH": true,
-		"KeyI": true, "KeyJ": true, "KeyK": true, "KeyL": true,
-		"KeyM": true, "KeyN": true, "KeyO": true, "KeyP": true,
-		"KeyQ": true, "KeyR": true, "KeyS": true, "KeyT": true,
-		"KeyU": true, "KeyV": true, "KeyW": true, "KeyX": true,
-		"KeyY": true, "KeyZ": true,
-
-		// Numbers
-		"Key0": true, "Key1": true, "Key2": true, "Key3": true,
-		"Key4": true, "Key5": true, "Key6": true, "Key7": true,
-		"Key8": true, "Key9": true,
-
-		// Special keys
-		"Space": true, "Backspace": true, "Enter": true, "Escape": true,
-		"Tab": true, "Home": true, "End": true, "PageUp": true, "PageDown": true,
-		"ArrowUp": true, "ArrowDown": true, "ArrowLeft": true, "ArrowRight": true,
-
-		// Punctuation
-		"Comma": true, "Period": true, "Slash": true, "Semicolon": true,
-		"Quote": true, "Minus": true, "Equal": true,
-
-		// Numpad
-		"Numpad0": true, "Numpad1": true, "Numpad2": true, "Numpad3": true,
-		"Numpad4": true, "Numpad5": true, "Numpad6": true, "Numpad7": true,
-		"Numpad8": true, "Numpad9": true, "NumpadEnter": true,
-	}
-
-	return keyMapping
 }
 
 // ConfigLoadResult contains the result of loading configuration

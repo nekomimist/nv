@@ -51,7 +51,7 @@ type MousebindingManager struct {
 func NewMousebindingManager(mousebindings map[string][]string, settings MouseSettings) *MousebindingManager {
 	mm := &MousebindingManager{
 		mousebindings: mousebindings,
-		mouseMapping:  getMouseMapping(),
+		mouseMapping:  mouseActionToButton,
 		settings:      settings,
 		doubleClickTracker: DoubleClickTracker{
 			lastClickTime: time.Now(),
@@ -59,17 +59,6 @@ func NewMousebindingManager(mousebindings map[string][]string, settings MouseSet
 		},
 	}
 	return mm
-}
-
-// getMouseMapping returns a mapping from string mouse actions to Ebiten mouse buttons
-func getMouseMapping() map[string]ebiten.MouseButton {
-	return map[string]ebiten.MouseButton{
-		"LeftClick":   ebiten.MouseButtonLeft,
-		"RightClick":  ebiten.MouseButtonRight,
-		"MiddleClick": ebiten.MouseButtonMiddle,
-		"Back":        ebiten.MouseButton3, // Back button (side button)
-		"Forward":     ebiten.MouseButton4, // Forward button (side button)
-	}
 }
 
 // parseMouseString parses a mouse string like "Shift+LeftClick" or "WheelUp" into a MouseCombination
@@ -85,31 +74,14 @@ func (mm *MousebindingManager) parseMouseString(mouseStr string) (*MouseCombinat
 	actionName := parts[len(parts)-1]
 
 	// Handle wheel actions
-	if strings.HasPrefix(actionName, "Wheel") {
+	if delta, exists := mouseWheelActionDeltas[actionName]; exists {
 		combination.IsWheel = true
-		switch actionName {
-		case "WheelUp":
-			combination.WheelDeltaY = 1.0
-		case "WheelDown":
-			combination.WheelDeltaY = -1.0
-		case "WheelLeft":
-			combination.WheelDeltaX = -1.0
-		case "WheelRight":
-			combination.WheelDeltaX = 1.0
-		default:
-			return nil, false
-		}
-	} else if strings.HasPrefix(actionName, "Double") {
-		// Handle double-click actions
+		combination.WheelDeltaX = delta.x
+		combination.WheelDeltaY = delta.y
+	} else if button, exists := mouseDoubleClickToButton[actionName]; exists {
 		combination.IsDoubleClick = true
-		baseAction := strings.TrimPrefix(actionName, "Double")
-		button, exists := mm.mouseMapping[baseAction]
-		if !exists {
-			return nil, false
-		}
 		combination.Button = button
 	} else {
-		// Handle regular mouse button actions
 		button, exists := mm.mouseMapping[actionName]
 		if !exists {
 			return nil, false
@@ -119,7 +91,7 @@ func (mm *MousebindingManager) parseMouseString(mouseStr string) (*MouseCombinat
 
 	// Check for modifiers
 	for i := 0; i < len(parts)-1; i++ {
-		switch strings.ToLower(parts[i]) {
+		switch modifier := strings.ToLower(parts[i]); modifier {
 		case "shift":
 			combination.Shift = true
 		case "ctrl":

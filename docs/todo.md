@@ -55,18 +55,36 @@ inspection and cross-review comparison on March 12, 2026.
     pure navigation/display core instead of owning the decision logic
     directly.
 
+- March 15, 2026: Split startup, collection reload, and settings/runtime
+  concerns out of `main.go`.
+  - Result: process startup now lives in `startup.go`, collection source
+    and reload behavior live in `game_collection.go`, and settings/runtime
+    application live in `game_runtime.go`, leaving `main.go` smaller and
+    more focused on the remaining `Game` behavior.
+
+- March 15, 2026: Split navigation/display, frame lifecycle, and
+  viewport concerns out of `main.go`.
+  - Result: navigation/display adapters now live in
+    `game_navigation.go`, frame update/draw/layout live in
+    `game_loop.go`, and zoom/pan state and behavior live in
+    `game_viewport.go`, reducing `main.go` to a much smaller state and
+    interface-hub file.
+
+- March 15, 2026: Removed duplicated input binding source-of-truth data.
+  - Result: key names, mouse action names, wheel directions, and
+    double-click/button mappings now come from shared definitions in
+    `input_bindings.go`, so runtime parsing and config validation no
+    longer drift independently.
+
 ## Medium Priority
 
-- Split `main.go` by runtime concern rather than by growth alone.
-  - Why: the current file is the main maintenance hotspot.
-  - Done when: startup, navigation/display logic, and settings/runtime
-    application are easier to find and test separately.
-
-- Remove duplicated input source-of-truth data.
-  - Why: valid key names and binding resolution are maintained in separate
-    places, which makes drift easy when new bindings are added.
-  - Done when: input validation and runtime parsing derive from one
-    shared definition.
+- Reassess the remaining `Game` shell and ownership boundaries.
+  - Why: the `main.go` split is complete, but `Game` still acts as a
+    broad state owner and interface hub, so the remaining shape should be
+    either documented as intentional or reduced further.
+  - Done when: the repo either documents the current `Game` ownership as
+    the intended boundary or extracts additional state/forwarding only
+    where it clearly improves isolation.
 
 - Clarify test strategy for GUI-dependent code.
   - Why: current tests mix pure logic with Ebiten-dependent constructs.
