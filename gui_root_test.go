@@ -167,6 +167,45 @@ func TestGUI_CalculateDisplayContentUsesNavigationPlan(t *testing.T) {
 	}
 }
 
+func TestGUI_MarkCurrentAsPreJoinedSpreadBreaksCurrentPair(t *testing.T) {
+	images := []*ebiten.Image{
+		ebiten.NewImage(200, 150),
+		ebiten.NewImage(210, 150),
+	}
+	manager := &stubImageManager{
+		paths: []ImagePath{
+			{Path: "left.png"},
+			{Path: "right.png"},
+		},
+		images: images,
+	}
+	g := &Game{
+		imageManager: manager,
+		bookMode:     true,
+		config: Config{
+			AspectRatioThreshold: 1.5,
+		},
+		zoomState: NewZoomState(),
+	}
+
+	g.calculateDisplayContent()
+	if g.displayContent == nil || g.displayContent.Metadata.ActualImages != 2 {
+		t.Fatalf("expected initial pair, got %+v", g.displayContent)
+	}
+
+	g.MarkCurrentAsPreJoinedSpread()
+
+	if len(g.learnedSpreadAspects) != 2 {
+		t.Fatalf("expected two learned spread aspects, got %v", g.learnedSpreadAspects)
+	}
+	if g.displayContent == nil || g.displayContent.Metadata.ActualImages != 1 {
+		t.Fatalf("expected single-page fallback after learning spread, got %+v", g.displayContent)
+	}
+	if g.displayContent.RightImage != nil {
+		t.Fatalf("expected no right image after learning spread, got %p", g.displayContent.RightImage)
+	}
+}
+
 func TestGUI_ImageManager(t *testing.T) {
 	paths := []ImagePath{
 		{Path: "1.jpg"},

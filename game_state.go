@@ -63,8 +63,9 @@ type Game struct {
 	configPath      string // Custom config file path, empty for default
 
 	// Image collection source state
-	collectionSource CollectionSource
-	launchSingleFile string // Original launch file path when started from a single regular image
+	collectionSource     CollectionSource
+	launchSingleFile     string // Original launch file path when started from a single regular image
+	learnedSpreadAspects []float64
 
 	// Image transformation state
 	rotationAngle int  // 0, 90, 180, 270 degrees
@@ -234,6 +235,10 @@ func (g *Game) ToggleReadingDirection() {
 
 func (g *Game) CycleSortMethod() {
 	g.cycleSortMethod()
+}
+
+func (g *Game) MarkCurrentAsPreJoinedSpread() {
+	g.markCurrentAsPreJoinedSpread()
 }
 
 func (g *Game) NavigateNext() {

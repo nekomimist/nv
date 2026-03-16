@@ -140,6 +140,7 @@ type InputActions interface {
 	// Settings
 	ToggleReadingDirection()
 	CycleSortMethod()
+	MarkCurrentAsPreJoinedSpread()
 
 	// Navigation
 	NavigateNext()

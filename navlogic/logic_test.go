@@ -16,18 +16,23 @@ func TestShouldUseBookMode(t *testing.T) {
 		name     string
 		left     PageMetrics
 		right    PageMetrics
+		learned  []float64
 		expected bool
 	}{
-		{"same aspect ratio", PageMetrics{Width: 100, Height: 150}, PageMetrics{Width: 100, Height: 150}, true},
-		{"similar aspect ratio", PageMetrics{Width: 100, Height: 150}, PageMetrics{Width: 120, Height: 180}, true},
-		{"very different aspect ratio", PageMetrics{Width: 100, Height: 150}, PageMetrics{Width: 300, Height: 100}, false},
-		{"missing page", PageMetrics{Width: 100, Height: 150}, PageMetrics{}, false},
-		{"extremely tall image", PageMetrics{Width: 100, Height: 1000}, PageMetrics{Width: 100, Height: 150}, false},
+		{"same aspect ratio", PageMetrics{Width: 100, Height: 150}, PageMetrics{Width: 100, Height: 150}, nil, true},
+		{"similar aspect ratio", PageMetrics{Width: 100, Height: 150}, PageMetrics{Width: 120, Height: 180}, nil, true},
+		{"square pages still pair", PageMetrics{Width: 100, Height: 100}, PageMetrics{Width: 100, Height: 100}, nil, true},
+		{"wide single pages still pair by default", PageMetrics{Width: 200, Height: 150}, PageMetrics{Width: 210, Height: 150}, nil, true},
+		{"learned spread ratio blocks pairing", PageMetrics{Width: 200, Height: 150}, PageMetrics{Width: 210, Height: 150}, []float64{1.34}, false},
+		{"only one side near learned spread ratio still pairs", PageMetrics{Width: 200, Height: 150}, PageMetrics{Width: 160, Height: 150}, []float64{1.34}, true},
+		{"very different aspect ratio", PageMetrics{Width: 100, Height: 150}, PageMetrics{Width: 300, Height: 100}, nil, false},
+		{"missing page", PageMetrics{Width: 100, Height: 150}, PageMetrics{}, nil, false},
+		{"extremely tall image", PageMetrics{Width: 100, Height: 1000}, PageMetrics{Width: 100, Height: 150}, nil, false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := ShouldUseBookMode(tt.left, tt.right, 1.5); got != tt.expected {
+			if got := ShouldUseBookMode(tt.left, tt.right, 1.5, tt.learned); got != tt.expected {
 				t.Fatalf("ShouldUseBookMode() = %v, want %v", got, tt.expected)
 			}
 		})
@@ -80,6 +85,7 @@ func TestPlanDisplay(t *testing.T) {
 			PageCount:            len(metrics),
 			BookMode:             true,
 			AspectRatioThreshold: 1.5,
+			LearnedSpreadAspects: []float64{1.34},
 		}, lookupFromSlice(metrics))
 		if plan.LeftIndex != 0 || plan.RightIndex != -1 || plan.ActualImages != 1 {
 			t.Fatalf("unexpected fallback plan: %+v", plan)

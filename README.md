@@ -43,6 +43,7 @@ A simple image viewer built with Go and Ebiten, featuring seamless archive suppo
 ### Display Modes
 - `B` - Toggle book mode (side-by-side view)
 - `Shift+B` - Toggle reading direction (LTR ↔ RTL)
+- `J` - Mark current image(s) as already-joined spreads for this session
 - `Enter` - Toggle fullscreen
 
 ### Zoom and Pan
@@ -69,6 +70,7 @@ Book mode displays two images side-by-side, perfect for reading manga or viewing
 
 - Flexible Start: Can be enabled from any page
 - Smart Pairing: Automatically handles aspect ratio compatibility
+- Session Learning: If two wide images are actually pre-joined spreads, press `J` to teach NV not to pair similar images again during the current session
 - Reading Direction: Supports both left-to-right and right-to-left modes
 - Automatic Fallback: Falls back to single page when needed
 

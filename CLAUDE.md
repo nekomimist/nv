@@ -203,7 +203,8 @@ This codebase has been extensively refactored for maintainability:
 ### Display Modes
 - **B**: Toggle book mode (spread view - displays 2 images side by side)
 - **Shift+B**: Toggle reading direction (left-to-right ↔ right-to-left)
-- **Z**: Toggle fullscreen
+- **J**: Mark current image(s) as pre-joined spreads for the current session
+- **Enter**: Toggle fullscreen
 
 ### Zoom and Pan
 - **=, Shift+=**: Zoom in (25%-400% range)
@@ -234,7 +235,8 @@ This codebase has been extensively refactored for maintainability:
 - **Aspect Ratio Threshold**: Uses `aspect_ratio_threshold` config (default 1.5)
 - **Extreme Ratios**: Automatically excludes very tall (<0.4) or wide (>2.5) images
 - **Reading Direction**: Respects `right_to_left` setting for image order
-- **Smart Pairing**: `shouldUseBookMode()` determines compatibility in real-time
+- **Smart Pairing**: `shouldUseBookMode()` prefers pairing pages with similar aspect ratios, including wide single pages
+- **Session Learning**: `J` marks the current image(s) as pre-joined spreads so similar aspect ratios stop pairing for the rest of the session
 
 ### Page Jump Behavior
 - **Final Page Logic**: Jumping to last page handles book mode pairing intelligently

@@ -1,8 +1,9 @@
 package navlogic
 
 const (
-	minAspectRatio = 0.4
-	maxAspectRatio = 2.5
+	minAspectRatio         = 0.4
+	maxAspectRatio         = 2.5
+	learnedSpreadTolerance = 1.12
 )
 
 type PageMetrics struct {
@@ -19,6 +20,7 @@ type State struct {
 	TempSingleMode       bool
 	RightToLeft          bool
 	AspectRatioThreshold float64
+	LearnedSpreadAspects []float64
 }
 
 type DisplayPlan struct {
@@ -65,7 +67,7 @@ func PlanDisplay(state State, lookup MetricsLookup) DisplayPlan {
 	leftIdx, rightIdx := pairIndices(state, state.Index)
 	leftMetrics := lookup(leftIdx)
 	rightMetrics := lookup(rightIdx)
-	if ShouldUseBookMode(leftMetrics, rightMetrics, state.AspectRatioThreshold) {
+	if ShouldUseBookMode(leftMetrics, rightMetrics, state.AspectRatioThreshold, state.LearnedSpreadAspects) {
 		plan.LeftIndex = leftIdx
 		plan.RightIndex = rightIdx
 		plan.ActualImages = 2
@@ -95,7 +97,7 @@ func SetCurrentIndex(state State, targetIdx int, lookup MetricsLookup) State {
 	if state.BookMode && targetIdx == state.PageCount-1 {
 		if targetIdx > 0 {
 			leftIdx, rightIdx := pairIndices(state, targetIdx-1)
-			if ShouldUseBookMode(lookup(leftIdx), lookup(rightIdx), state.AspectRatioThreshold) {
+			if ShouldUseBookMode(lookup(leftIdx), lookup(rightIdx), state.AspectRatioThreshold, state.LearnedSpreadAspects) {
 				state.Index = targetIdx - 1
 				state.TempSingleMode = false
 				return state
@@ -193,7 +195,7 @@ func ToggleBookMode(state State, lookup MetricsLookup) State {
 
 	if state.Index == state.PageCount-1 {
 		leftIdx, rightIdx := pairIndices(state, state.Index-1)
-		if ShouldUseBookMode(lookup(leftIdx), lookup(rightIdx), state.AspectRatioThreshold) {
+		if ShouldUseBookMode(lookup(leftIdx), lookup(rightIdx), state.AspectRatioThreshold, state.LearnedSpreadAspects) {
 			state.Index--
 			state.TempSingleMode = false
 		} else {
@@ -217,23 +219,51 @@ func JumpToPage(state State, pageNum int, lookup MetricsLookup) (State, Boundary
 	return SetCurrentIndex(state, targetIdx, lookup), BoundaryNone
 }
 
-func ShouldUseBookMode(leftMetrics, rightMetrics PageMetrics, aspectRatioThreshold float64) bool {
+func ShouldUseBookMode(leftMetrics, rightMetrics PageMetrics, aspectRatioThreshold float64, learnedSpreadAspects []float64) bool {
 	if !isAvailable(leftMetrics) || !isAvailable(rightMetrics) {
 		return false
 	}
 
-	leftAspect := float64(leftMetrics.Width) / float64(leftMetrics.Height)
-	rightAspect := float64(rightMetrics.Width) / float64(rightMetrics.Height)
+	leftAspect := aspectRatio(leftMetrics)
+	rightAspect := aspectRatio(rightMetrics)
 	if leftAspect < minAspectRatio || leftAspect > maxAspectRatio ||
 		rightAspect < minAspectRatio || rightAspect > maxAspectRatio {
 		return false
 	}
 
-	aspectRatio := leftAspect / rightAspect
-	if aspectRatio < 1.0 {
-		aspectRatio = 1.0 / aspectRatio
+	if aspectDistance(leftAspect, rightAspect) > aspectRatioThreshold {
+		return false
 	}
-	return aspectRatio <= aspectRatioThreshold
+
+	if matchesLearnedSpreadAspect(leftAspect, learnedSpreadAspects) &&
+		matchesLearnedSpreadAspect(rightAspect, learnedSpreadAspects) {
+		return false
+	}
+
+	return true
+}
+
+func aspectRatio(metrics PageMetrics) float64 {
+	return float64(metrics.Width) / float64(metrics.Height)
+}
+
+func aspectDistance(a, b float64) float64 {
+	if a < b {
+		a, b = b, a
+	}
+	return a / b
+}
+
+func matchesLearnedSpreadAspect(aspect float64, learnedSpreadAspects []float64) bool {
+	for _, learnedAspect := range learnedSpreadAspects {
+		if learnedAspect <= 0 {
+			continue
+		}
+		if aspectDistance(aspect, learnedAspect) <= learnedSpreadTolerance {
+			return true
+		}
+	}
+	return false
 }
 
 func normalizeState(state State) State {

@@ -28,6 +28,7 @@ var actionDefinitions = []ActionDefinition{
 	{"rotate_right", []string{"KeyR"}, []string{}, "Rotate right 90 degrees"},
 	{"flip_horizontal", []string{"KeyH"}, []string{}, "Flip horizontally"},
 	{"flip_vertical", []string{"KeyV"}, []string{}, "Flip vertically"},
+	{"mark_prejoined_spread", []string{"KeyJ"}, []string{}, "Mark current image(s) as pre-joined spread"},
 	{"cycle_sort", []string{"Shift+KeyS"}, []string{"Alt+MiddleClick"}, "Cycle sort method (Natural/Simple/Entry)"},
 	{"expand_directory", []string{"KeyS"}, []string{}, "Scan directory images (single file mode)"},
 	{"toggle_settings", []string{"KeyO"}, []string{}, "Open/close settings"},
@@ -100,6 +101,8 @@ func (ae *ActionExecutor) ExecuteAction(action string, inputActions InputActions
 		inputActions.FlipHorizontal()
 	case "flip_vertical":
 		inputActions.FlipVertical()
+	case "mark_prejoined_spread":
+		inputActions.MarkCurrentAsPreJoinedSpread()
 	case "cycle_sort":
 		inputActions.CycleSortMethod()
 	case "expand_directory":

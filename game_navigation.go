@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"time"
 
@@ -17,6 +18,7 @@ func (g *Game) navigationState() navlogic.State {
 		TempSingleMode:       g.tempSingleMode,
 		RightToLeft:          g.config.RightToLeft,
 		AspectRatioThreshold: g.config.AspectRatioThreshold,
+		LearnedSpreadAspects: append([]float64(nil), g.learnedSpreadAspects...),
 	}
 }
 
@@ -48,6 +50,32 @@ func (g *Game) displayImageAt(idx int) *ebiten.Image {
 		return nil
 	}
 	return g.imageManager.GetImage(idx)
+}
+
+func (g *Game) pageAspectAt(idx int) float64 {
+	metrics := g.pageMetricsAt(idx)
+	if metrics.Width <= 0 || metrics.Height <= 0 {
+		return 0
+	}
+	return float64(metrics.Width) / float64(metrics.Height)
+}
+
+func (g *Game) addLearnedSpreadAspect(aspect float64) bool {
+	if aspect <= 0 || math.IsNaN(aspect) || math.IsInf(aspect, 0) {
+		return false
+	}
+
+	for _, existing := range g.learnedSpreadAspects {
+		if existing <= 0 {
+			continue
+		}
+		if max(aspect/existing, existing/aspect) <= 1.02 {
+			return false
+		}
+	}
+
+	g.learnedSpreadAspects = append(g.learnedSpreadAspects, aspect)
+	return true
 }
 
 // calculateDisplayContent determines what should be displayed based on current state.
@@ -92,6 +120,39 @@ func (g *Game) toggleBookMode() {
 	}
 
 	g.config.BookMode = g.bookMode
+	g.calculateDisplayContent()
+}
+
+func (g *Game) markCurrentAsPreJoinedSpread() {
+	plan := navlogic.PlanDisplay(g.navigationState(), g.pageMetricsAt)
+	if plan.TotalPages == 0 || plan.LeftIndex < 0 {
+		return
+	}
+
+	indices := []int{plan.LeftIndex}
+	if plan.RightIndex >= 0 && plan.RightIndex != plan.LeftIndex {
+		indices = append(indices, plan.RightIndex)
+	}
+
+	learned := make([]float64, 0, len(indices))
+	for _, idx := range indices {
+		aspect := g.pageAspectAt(idx)
+		if g.addLearnedSpreadAspect(aspect) {
+			learned = append(learned, aspect)
+		}
+	}
+
+	if len(learned) == 0 {
+		g.showOverlayMessage("Pre-joined spread ratio already learned")
+		return
+	}
+
+	if len(learned) == 1 {
+		g.showOverlayMessage(fmt.Sprintf("Learned pre-joined spread ratio: %.2f", learned[0]))
+	} else {
+		g.showOverlayMessage(fmt.Sprintf("Learned pre-joined spread ratios: %.2f, %.2f", learned[0], learned[1]))
+	}
+
 	g.calculateDisplayContent()
 }
 
