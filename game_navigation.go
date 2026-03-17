@@ -90,7 +90,8 @@ func (g *Game) calculateDisplayContent() {
 		LeftImage:  g.displayImageAt(plan.LeftIndex),
 		RightImage: g.displayImageAt(plan.RightIndex),
 		Metadata: DisplayMetadata{
-			CurrentPage:  plan.CurrentPage,
+			LeftPage:     plan.LeftIndex + 1,
+			RightPage:    plan.RightIndex + 1,
 			TotalPages:   plan.TotalPages,
 			ActualImages: plan.ActualImages,
 		},
@@ -120,6 +121,16 @@ func (g *Game) toggleBookMode() {
 	}
 
 	g.config.BookMode = g.bookMode
+	g.calculateDisplayContent()
+}
+
+func (g *Game) toggleReadingDirection() {
+	g.config.RightToLeft = !g.config.RightToLeft
+	direction := "Left-to-Right"
+	if g.config.RightToLeft {
+		direction = "Right-to-Left"
+	}
+	g.showOverlayMessage("Reading Direction: " + direction)
 	g.calculateDisplayContent()
 }
 

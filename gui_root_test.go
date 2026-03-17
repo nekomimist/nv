@@ -110,10 +110,12 @@ func TestGUI_CalculateDisplayContentUsesNavigationPlan(t *testing.T) {
 		expectedActual     int
 		expectedLeftIndex  int
 		expectedRightIndex int
+		expectedLeftPage   int
+		expectedRightPage  int
 	}{
-		{"Compatible LTR spread", false, 100, 150, 100, 150, 2, 0, 1},
-		{"Compatible RTL spread", true, 100, 150, 100, 150, 2, 1, 0},
-		{"Incompatible fallback to single", false, 100, 150, 300, 100, 1, 0, -1},
+		{"Compatible LTR spread", false, 100, 150, 100, 150, 2, 0, 1, 1, 2},
+		{"Compatible RTL spread", true, 100, 150, 100, 150, 2, 1, 0, 2, 1},
+		{"Incompatible fallback to single", false, 100, 150, 300, 100, 1, 0, -1, 1, 0},
 	}
 
 	for _, tt := range tests {
@@ -147,6 +149,14 @@ func TestGUI_CalculateDisplayContentUsesNavigationPlan(t *testing.T) {
 			if g.displayContent.Metadata.ActualImages != tt.expectedActual {
 				t.Fatalf("actual images = %d, want %d", g.displayContent.Metadata.ActualImages, tt.expectedActual)
 			}
+			if g.displayContent.Metadata.LeftPage != tt.expectedLeftPage || g.displayContent.Metadata.RightPage != tt.expectedRightPage {
+				t.Fatalf("unexpected pages: got left=%d right=%d want left=%d right=%d",
+					g.displayContent.Metadata.LeftPage,
+					g.displayContent.Metadata.RightPage,
+					tt.expectedLeftPage,
+					tt.expectedRightPage,
+				)
+			}
 
 			expectedLeft := manager.images[tt.expectedLeftIndex]
 			if g.displayContent.LeftImage != expectedLeft {
@@ -164,6 +174,100 @@ func TestGUI_CalculateDisplayContentUsesNavigationPlan(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestGUI_BuildPageNumberStringUsesScreenOrder(t *testing.T) {
+	tests := []struct {
+		name     string
+		metadata DisplayMetadata
+		expected string
+	}{
+		{
+			name: "single page",
+			metadata: DisplayMetadata{
+				LeftPage:     3,
+				TotalPages:   10,
+				ActualImages: 1,
+			},
+			expected: "3 / 10",
+		},
+		{
+			name: "ltr spread",
+			metadata: DisplayMetadata{
+				LeftPage:     3,
+				RightPage:    4,
+				TotalPages:   10,
+				ActualImages: 2,
+			},
+			expected: "3→4 / 10",
+		},
+		{
+			name: "rtl spread",
+			metadata: DisplayMetadata{
+				LeftPage:     4,
+				RightPage:    3,
+				TotalPages:   10,
+				ActualImages: 2,
+			},
+			expected: "4←3 / 10",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := &Game{
+				displayContent: &DisplayContent{Metadata: tt.metadata},
+			}
+			r := NewRenderer(g)
+
+			if got := r.buildPageNumberString(); got != tt.expected {
+				t.Fatalf("buildPageNumberString() = %q, want %q", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestGUI_ToggleReadingDirectionRecalculatesDisplayContent(t *testing.T) {
+	images := []*ebiten.Image{
+		ebiten.NewImage(100, 150),
+		ebiten.NewImage(100, 150),
+	}
+	manager := &stubImageManager{
+		paths: []ImagePath{
+			{Path: "1.png"},
+			{Path: "2.png"},
+		},
+		images: images,
+	}
+	g := &Game{
+		imageManager: manager,
+		bookMode:     true,
+		config: Config{
+			AspectRatioThreshold: 1.5,
+			RightToLeft:          false,
+		},
+		zoomState: NewZoomState(),
+	}
+
+	g.calculateDisplayContent()
+	if g.displayContent == nil || g.displayContent.LeftImage != images[0] || g.displayContent.RightImage != images[1] {
+		t.Fatalf("unexpected initial display content: %+v", g.displayContent)
+	}
+
+	g.ToggleReadingDirection()
+
+	if !g.config.RightToLeft {
+		t.Fatal("expected RightToLeft to be enabled")
+	}
+	if g.displayContent == nil {
+		t.Fatal("expected display content after toggling reading direction")
+	}
+	if g.displayContent.LeftImage != images[1] || g.displayContent.RightImage != images[0] {
+		t.Fatalf("expected images to swap after toggling reading direction, got left=%p right=%p", g.displayContent.LeftImage, g.displayContent.RightImage)
+	}
+	if g.displayContent.Metadata.LeftPage != 2 || g.displayContent.Metadata.RightPage != 1 {
+		t.Fatalf("unexpected page order after toggle: %+v", g.displayContent.Metadata)
 	}
 }
 

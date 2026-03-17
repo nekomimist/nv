@@ -863,20 +863,19 @@ func (r *Renderer) buildPageNumberString() string {
 	}
 
 	total := content.Metadata.TotalPages
-	currentPage := content.Metadata.CurrentPage
+	leftPage := content.Metadata.LeftPage
+	rightPage := content.Metadata.RightPage
 	actualImages := content.Metadata.ActualImages
 
 	if actualImages == 2 {
-		// 2 images displayed = book mode
-		rightPage := currentPage + 1
-		if rightPage > total {
-			rightPage = total
+		separator := "→"
+		if leftPage > rightPage {
+			separator = "←"
 		}
-		return fmt.Sprintf("%d-%d / %d", currentPage, rightPage, total)
-	} else {
-		// 1 image displayed = single mode
-		return fmt.Sprintf("%d / %d", currentPage, total)
+		return fmt.Sprintf("%d%s%d / %d", leftPage, separator, rightPage, total)
 	}
+
+	return fmt.Sprintf("%d / %d", leftPage, total)
 }
 
 func (r *Renderer) drawTransformedImageCentered(screen *ebiten.Image, img *ebiten.Image) {

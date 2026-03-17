@@ -14,7 +14,8 @@ const (
 
 // DisplayMetadata contains information about what is being displayed.
 type DisplayMetadata struct {
-	CurrentPage  int // Current page number (1-based)
+	LeftPage     int // Page number currently shown on the left side (or single-page slot)
+	RightPage    int // Page number currently shown on the right side, 0 when not used
 	TotalPages   int // Total number of pages
 	ActualImages int // Number of images actually being displayed (1 or 2)
 }
@@ -225,12 +226,7 @@ func (g *Game) UpdatePageInputBuffer(buffer string) {
 }
 
 func (g *Game) ToggleReadingDirection() {
-	g.config.RightToLeft = !g.config.RightToLeft
-	direction := "Left-to-Right"
-	if g.config.RightToLeft {
-		direction = "Right-to-Left"
-	}
-	g.showOverlayMessage("Reading Direction: " + direction)
+	g.toggleReadingDirection()
 }
 
 func (g *Game) CycleSortMethod() {
