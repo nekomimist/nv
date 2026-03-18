@@ -60,6 +60,67 @@ func (g *Game) pageAspectAt(idx int) float64 {
 	return float64(metrics.Width) / float64(metrics.Height)
 }
 
+func (g *Game) logDisplayPlan(context string, state navlogic.State, plan navlogic.DisplayPlan) {
+	if plan.TotalPages == 0 {
+		debugLog("%s: no pages available", context)
+		return
+	}
+
+	debugLog(
+		"%s: state idx=%d pageCount=%d bookMode=%t tempSingle=%t rtl=%t learned=%d -> plan leftIdx=%d rightIdx=%d actualImages=%d currentPage=%d/%d",
+		context,
+		state.Index,
+		state.PageCount,
+		state.BookMode,
+		state.TempSingleMode,
+		state.RightToLeft,
+		len(state.LearnedSpreadAspects),
+		plan.LeftIndex,
+		plan.RightIndex,
+		plan.ActualImages,
+		plan.CurrentPage,
+		plan.TotalPages,
+	)
+
+	if state.TempSingleMode {
+		debugLog("%s: bookmode decision skipped because tempSingleMode=true", context)
+		return
+	}
+	if !state.BookMode {
+		debugLog("%s: bookmode decision skipped because bookMode=false", context)
+		return
+	}
+
+	leftIdx, rightIdx := plan.LeftIndex, plan.RightIndex
+	if plan.ActualImages != 2 {
+		leftIdx, rightIdx = pairedIndicesForLog(state)
+	}
+	leftMetrics := g.pageMetricsAt(leftIdx)
+	rightMetrics := g.pageMetricsAt(rightIdx)
+	decision := navlogic.ExplainBookModeDecision(leftMetrics, rightMetrics, state.AspectRatioThreshold, state.LearnedSpreadAspects)
+	debugLog(
+		"%s: pair candidate leftIdx=%d(%dx%d aspect=%.3f) rightIdx=%d(%dx%d aspect=%.3f) decision=%t reason=%s",
+		context,
+		leftIdx,
+		leftMetrics.Width,
+		leftMetrics.Height,
+		decision.LeftAspect,
+		rightIdx,
+		rightMetrics.Width,
+		rightMetrics.Height,
+		decision.RightAspect,
+		decision.UseBookMode,
+		decision.Reason,
+	)
+}
+
+func pairedIndicesForLog(state navlogic.State) (int, int) {
+	if state.RightToLeft {
+		return state.Index + 1, state.Index
+	}
+	return state.Index, state.Index + 1
+}
+
 func (g *Game) addLearnedSpreadAspect(aspect float64) bool {
 	if aspect <= 0 || math.IsNaN(aspect) || math.IsInf(aspect, 0) {
 		return false
@@ -80,7 +141,8 @@ func (g *Game) addLearnedSpreadAspect(aspect float64) bool {
 
 // calculateDisplayContent determines what should be displayed based on current state.
 func (g *Game) calculateDisplayContent() {
-	plan := navlogic.PlanDisplay(g.navigationState(), g.pageMetricsAt)
+	state := g.navigationState()
+	plan := navlogic.PlanDisplay(state, g.pageMetricsAt)
 	if plan.TotalPages == 0 {
 		g.displayContent = nil
 		return
@@ -100,6 +162,8 @@ func (g *Game) calculateDisplayContent() {
 	if g.zoomState.Mode != ZoomModeManual && !g.needsInitialZoomUpdate {
 		g.updateZoomLevelForFitMode()
 	}
+
+	g.logDisplayPlan("calculateDisplayContent", state, plan)
 }
 
 func (g *Game) showOverlayMessage(message string) {
@@ -112,6 +176,7 @@ func (g *Game) showOverlayMessage(message string) {
 }
 
 func (g *Game) toggleBookMode() {
+	prevState := g.navigationState()
 	nextState := navlogic.ToggleBookMode(g.navigationState(), g.pageMetricsAt)
 	g.applyNavigationState(nextState)
 	if g.bookMode {
@@ -122,6 +187,10 @@ func (g *Game) toggleBookMode() {
 
 	g.config.BookMode = g.bookMode
 	g.calculateDisplayContent()
+	debugLog("toggleBookMode: prev idx=%d bookMode=%t tempSingle=%t -> next idx=%d bookMode=%t tempSingle=%t",
+		prevState.Index, prevState.BookMode, prevState.TempSingleMode,
+		nextState.Index, nextState.BookMode, nextState.TempSingleMode,
+	)
 }
 
 func (g *Game) toggleReadingDirection() {
@@ -132,6 +201,7 @@ func (g *Game) toggleReadingDirection() {
 	}
 	g.showOverlayMessage("Reading Direction: " + direction)
 	g.calculateDisplayContent()
+	debugLog("toggleReadingDirection: rtl=%t", g.config.RightToLeft)
 }
 
 func (g *Game) markCurrentAsPreJoinedSpread() {
@@ -182,6 +252,7 @@ func (g *Game) processPageInput() {
 }
 
 func (g *Game) jumpToPage(pageNum int) {
+	prevState := g.navigationState()
 	nextState, boundary := navlogic.JumpToPage(g.navigationState(), pageNum, g.pageMetricsAt)
 	if boundary == navlogic.BoundaryPageNotFound {
 		g.showOverlayMessage(fmt.Sprintf("Page %d not found (1-%d)", pageNum, g.imageManager.GetPathsCount()))
@@ -192,11 +263,15 @@ func (g *Game) jumpToPage(pageNum int) {
 	g.imageManager.StartPreload(g.idx, NavigationJump)
 	g.resetZoomToInitial()
 	g.calculateDisplayContent()
+	debugLog("jumpToPage: requested=%d prevIdx=%d -> nextIdx=%d boundary=%v bookMode=%t tempSingle=%t",
+		pageNum, prevState.Index, nextState.Index, boundary, nextState.BookMode, nextState.TempSingleMode)
 }
 
 func (g *Game) navigateNext(singleStep bool) {
+	prevState := g.navigationState()
 	nextState, boundary := navlogic.NavigateNext(g.navigationState(), g.pageMetricsAt, singleStep)
 	if boundary == navlogic.BoundaryLastPage {
+		debugLog("navigateNext: singleStep=%t prevIdx=%d boundary=%v", singleStep, prevState.Index, boundary)
 		g.showOverlayMessage("Last page")
 		return
 	}
@@ -204,11 +279,19 @@ func (g *Game) navigateNext(singleStep bool) {
 	g.applyNavigationState(nextState)
 	g.resetZoomToInitial()
 	g.calculateDisplayContent()
+	debugLog("navigateNext: singleStep=%t prev idx=%d bookMode=%t tempSingle=%t -> next idx=%d bookMode=%t tempSingle=%t boundary=%v",
+		singleStep,
+		prevState.Index, prevState.BookMode, prevState.TempSingleMode,
+		nextState.Index, nextState.BookMode, nextState.TempSingleMode,
+		boundary,
+	)
 }
 
 func (g *Game) navigatePrevious(singleStep bool) {
+	prevState := g.navigationState()
 	nextState, boundary := navlogic.NavigatePrevious(g.navigationState(), g.pageMetricsAt, singleStep)
 	if boundary == navlogic.BoundaryFirstPage {
+		debugLog("navigatePrevious: singleStep=%t prevIdx=%d boundary=%v", singleStep, prevState.Index, boundary)
 		g.showOverlayMessage("First page")
 		return
 	}
@@ -216,4 +299,10 @@ func (g *Game) navigatePrevious(singleStep bool) {
 	g.applyNavigationState(nextState)
 	g.resetZoomToInitial()
 	g.calculateDisplayContent()
+	debugLog("navigatePrevious: singleStep=%t prev idx=%d bookMode=%t tempSingle=%t -> next idx=%d bookMode=%t tempSingle=%t boundary=%v",
+		singleStep,
+		prevState.Index, prevState.BookMode, prevState.TempSingleMode,
+		nextState.Index, nextState.BookMode, nextState.TempSingleMode,
+		boundary,
+	)
 }

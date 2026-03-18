@@ -31,6 +31,13 @@ type DisplayPlan struct {
 	ActualImages int
 }
 
+type BookModeDecision struct {
+	UseBookMode bool
+	Reason      string
+	LeftAspect  float64
+	RightAspect float64
+}
+
 type Boundary int
 
 const (
@@ -74,7 +81,10 @@ func PlanDisplay(state State, lookup MetricsLookup) DisplayPlan {
 		return plan
 	}
 
+	currentMetrics := lookup(state.Index)
 	switch {
+	case isAvailable(currentMetrics):
+		plan.LeftIndex = state.Index
 	case isAvailable(leftMetrics):
 		plan.LeftIndex = leftIdx
 	case isAvailable(rightMetrics):
@@ -163,20 +173,55 @@ func NavigatePrevious(state State, lookup MetricsLookup, singleStep bool) (State
 		return state, BoundaryNone
 	}
 
-	currentPlan := PlanDisplay(state, lookup)
-	if state.BookMode && !singleStep && currentPlan.ActualImages == 2 {
-		if state.Index < 2 {
-			state.Index = 0
-			state.BookMode = false
-			state.TempSingleMode = true
-			return state, BoundaryNone
+	if state.BookMode && !singleStep {
+		currentPlan := PlanDisplay(state, lookup)
+		prevPage := minDisplayedIndex(currentPlan) - 1
+		if prevPage < 0 {
+			return state, BoundaryFirstPage
 		}
-		state.Index -= 2
+
+		prevPairAnchor := prevPage - 1
+		if prevPairAnchor >= 0 {
+			prevState := state
+			prevState.Index = prevPairAnchor
+			prevPlan := PlanDisplay(prevState, lookup)
+			if prevPlan.ActualImages == 2 &&
+				minDisplayedIndex(prevPlan) == prevPairAnchor &&
+				maxDisplayedIndex(prevPlan) == prevPage {
+				state.Index = prevPairAnchor
+				state.TempSingleMode = false
+				return state, BoundaryNone
+			}
+		}
+
+		state.Index = prevPage
+		state.TempSingleMode = true
+		state.BookMode = true
 		return state, BoundaryNone
 	}
 
 	state.Index--
 	return state, BoundaryNone
+}
+
+func minDisplayedIndex(plan DisplayPlan) int {
+	if plan.ActualImages == 2 && plan.RightIndex >= 0 && plan.RightIndex < plan.LeftIndex {
+		return plan.RightIndex
+	}
+	if plan.LeftIndex >= 0 {
+		return plan.LeftIndex
+	}
+	return -1
+}
+
+func maxDisplayedIndex(plan DisplayPlan) int {
+	if plan.ActualImages == 2 && plan.RightIndex > plan.LeftIndex {
+		return plan.RightIndex
+	}
+	if plan.LeftIndex >= 0 {
+		return plan.LeftIndex
+	}
+	return -1
 }
 
 func ToggleBookMode(state State, lookup MetricsLookup) State {
@@ -198,9 +243,10 @@ func ToggleBookMode(state State, lookup MetricsLookup) State {
 		if ShouldUseBookMode(lookup(leftIdx), lookup(rightIdx), state.AspectRatioThreshold, state.LearnedSpreadAspects) {
 			state.Index--
 			state.TempSingleMode = false
-		} else {
-			state.TempSingleMode = true
+			state.BookMode = true
+			return state
 		}
+		state.TempSingleMode = true
 		state.BookMode = true
 		return state
 	}
@@ -220,27 +266,38 @@ func JumpToPage(state State, pageNum int, lookup MetricsLookup) (State, Boundary
 }
 
 func ShouldUseBookMode(leftMetrics, rightMetrics PageMetrics, aspectRatioThreshold float64, learnedSpreadAspects []float64) bool {
+	return ExplainBookModeDecision(leftMetrics, rightMetrics, aspectRatioThreshold, learnedSpreadAspects).UseBookMode
+}
+
+func ExplainBookModeDecision(leftMetrics, rightMetrics PageMetrics, aspectRatioThreshold float64, learnedSpreadAspects []float64) BookModeDecision {
+	decision := BookModeDecision{}
 	if !isAvailable(leftMetrics) || !isAvailable(rightMetrics) {
-		return false
+		decision.Reason = "missing page metrics"
+		return decision
 	}
 
-	leftAspect := aspectRatio(leftMetrics)
-	rightAspect := aspectRatio(rightMetrics)
-	if leftAspect < minAspectRatio || leftAspect > maxAspectRatio ||
-		rightAspect < minAspectRatio || rightAspect > maxAspectRatio {
-		return false
+	decision.LeftAspect = aspectRatio(leftMetrics)
+	decision.RightAspect = aspectRatio(rightMetrics)
+	if decision.LeftAspect < minAspectRatio || decision.LeftAspect > maxAspectRatio ||
+		decision.RightAspect < minAspectRatio || decision.RightAspect > maxAspectRatio {
+		decision.Reason = "aspect ratio outside supported range"
+		return decision
 	}
 
-	if aspectDistance(leftAspect, rightAspect) > aspectRatioThreshold {
-		return false
+	if aspectDistance(decision.LeftAspect, decision.RightAspect) > aspectRatioThreshold {
+		decision.Reason = "page aspect ratios differ too much"
+		return decision
 	}
 
-	if matchesLearnedSpreadAspect(leftAspect, learnedSpreadAspects) &&
-		matchesLearnedSpreadAspect(rightAspect, learnedSpreadAspects) {
-		return false
+	if matchesLearnedSpreadAspect(decision.LeftAspect, learnedSpreadAspects) &&
+		matchesLearnedSpreadAspect(decision.RightAspect, learnedSpreadAspects) {
+		decision.Reason = "matches learned pre-joined spread ratio"
+		return decision
 	}
 
-	return true
+	decision.UseBookMode = true
+	decision.Reason = "compatible pair"
+	return decision
 }
 
 func aspectRatio(metrics PageMetrics) float64 {

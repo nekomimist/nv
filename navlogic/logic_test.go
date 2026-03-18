@@ -39,6 +39,32 @@ func TestShouldUseBookMode(t *testing.T) {
 	}
 }
 
+func TestExplainBookModeDecision(t *testing.T) {
+	t.Run("compatible pair", func(t *testing.T) {
+		decision := ExplainBookModeDecision(
+			PageMetrics{Width: 100, Height: 150},
+			PageMetrics{Width: 100, Height: 150},
+			1.5,
+			nil,
+		)
+		if !decision.UseBookMode || decision.Reason != "compatible pair" {
+			t.Fatalf("unexpected decision: %+v", decision)
+		}
+	})
+
+	t.Run("learned spread ratio", func(t *testing.T) {
+		decision := ExplainBookModeDecision(
+			PageMetrics{Width: 200, Height: 150},
+			PageMetrics{Width: 210, Height: 150},
+			1.5,
+			[]float64{1.34},
+		)
+		if decision.UseBookMode || decision.Reason != "matches learned pre-joined spread ratio" {
+			t.Fatalf("unexpected decision: %+v", decision)
+		}
+	})
+}
+
 func TestPlanDisplay(t *testing.T) {
 	metrics := []PageMetrics{
 		{Width: 100, Height: 150},
@@ -89,6 +115,24 @@ func TestPlanDisplay(t *testing.T) {
 		}, lookupFromSlice(metrics))
 		if plan.LeftIndex != 0 || plan.RightIndex != -1 || plan.ActualImages != 1 {
 			t.Fatalf("unexpected fallback plan: %+v", plan)
+		}
+	})
+
+	t.Run("rtl incompatible spread falls back to current index", func(t *testing.T) {
+		rtlMetrics := []PageMetrics{
+			{Width: 3138, Height: 2229},
+			{Width: 3229, Height: 4647},
+			{Width: 3200, Height: 4633},
+		}
+		plan := PlanDisplay(State{
+			Index:                0,
+			PageCount:            len(rtlMetrics),
+			BookMode:             true,
+			RightToLeft:          true,
+			AspectRatioThreshold: 1.5,
+		}, lookupFromSlice(rtlMetrics))
+		if plan.LeftIndex != 0 || plan.RightIndex != -1 || plan.ActualImages != 1 {
+			t.Fatalf("unexpected rtl fallback plan: %+v", plan)
 		}
 	})
 }
@@ -169,6 +213,270 @@ func TestNavigateNextAndPrevious(t *testing.T) {
 	if boundary != BoundaryFirstPage {
 		t.Fatalf("expected BoundaryFirstPage, got %v", boundary)
 	}
+
+	t.Run("rtl fallback does not skip current page", func(t *testing.T) {
+		rtlMetrics := []PageMetrics{
+			{Width: 3138, Height: 2229},
+			{Width: 3229, Height: 4647},
+			{Width: 3200, Height: 4633},
+			{Width: 3200, Height: 4633},
+		}
+		lookup := lookupFromSlice(rtlMetrics)
+
+		plan := PlanDisplay(State{
+			Index:                0,
+			PageCount:            len(rtlMetrics),
+			BookMode:             true,
+			RightToLeft:          true,
+			AspectRatioThreshold: 1.5,
+		}, lookup)
+		if plan.LeftIndex != 0 || plan.RightIndex != -1 || plan.ActualImages != 1 {
+			t.Fatalf("expected current page single fallback, got %+v", plan)
+		}
+
+		state, boundary := NavigateNext(State{
+			Index:                0,
+			PageCount:            len(rtlMetrics),
+			BookMode:             true,
+			RightToLeft:          true,
+			AspectRatioThreshold: 1.5,
+		}, lookup, false)
+		if boundary != BoundaryNone || state.Index != 1 {
+			t.Fatalf("expected single-page advance by 1 after rtl fallback, got boundary=%v state=%+v", boundary, state)
+		}
+
+		nextPlan := PlanDisplay(state, lookup)
+		if nextPlan.LeftIndex != 2 || nextPlan.RightIndex != 1 || nextPlan.ActualImages != 2 {
+			t.Fatalf("expected next rtl spread to be 2/1, got %+v", nextPlan)
+		}
+	})
+
+	t.Run("rtl learned spread fallback shows current page", func(t *testing.T) {
+		rtlMetrics := []PageMetrics{
+			{Width: 3258, Height: 4676},
+			{Width: 3258, Height: 4660},
+			{Width: 3144, Height: 2243},
+			{Width: 3138, Height: 2238},
+		}
+		plan := PlanDisplay(State{
+			Index:                2,
+			PageCount:            len(rtlMetrics),
+			BookMode:             true,
+			RightToLeft:          true,
+			AspectRatioThreshold: 1.5,
+			LearnedSpreadAspects: []float64{1.40},
+		}, lookupFromSlice(rtlMetrics))
+		if plan.LeftIndex != 2 || plan.RightIndex != -1 || plan.ActualImages != 1 {
+			t.Fatalf("expected rtl learned-spread fallback to current page, got %+v", plan)
+		}
+	})
+
+	t.Run("navigate previous from rtl single fallback restores previous spread", func(t *testing.T) {
+		rtlMetrics := []PageMetrics{
+			{Width: 3258, Height: 4676},
+			{Width: 3258, Height: 4660},
+			{Width: 3144, Height: 2243},
+			{Width: 3138, Height: 2238},
+		}
+		lookup := lookupFromSlice(rtlMetrics)
+
+		currentPlan := PlanDisplay(State{
+			Index:                2,
+			PageCount:            len(rtlMetrics),
+			BookMode:             true,
+			RightToLeft:          true,
+			AspectRatioThreshold: 1.5,
+			LearnedSpreadAspects: []float64{1.40},
+		}, lookup)
+		if currentPlan.LeftIndex != 2 || currentPlan.RightIndex != -1 || currentPlan.ActualImages != 1 {
+			t.Fatalf("expected rtl current page single fallback, got %+v", currentPlan)
+		}
+
+		state, boundary := NavigatePrevious(State{
+			Index:                2,
+			PageCount:            len(rtlMetrics),
+			BookMode:             true,
+			RightToLeft:          true,
+			AspectRatioThreshold: 1.5,
+			LearnedSpreadAspects: []float64{1.40},
+		}, lookup, false)
+		if boundary != BoundaryNone || state.Index != 0 {
+			t.Fatalf("expected previous navigation to restore prior spread anchor, got boundary=%v state=%+v", boundary, state)
+		}
+
+		prevPlan := PlanDisplay(state, lookup)
+		if prevPlan.LeftIndex != 1 || prevPlan.RightIndex != 0 || prevPlan.ActualImages != 2 {
+			t.Fatalf("expected previous rtl spread to be 1/0, got %+v", prevPlan)
+		}
+	})
+
+	t.Run("navigate previous from rtl spread enters preceding single page first", func(t *testing.T) {
+		rtlMetrics := []PageMetrics{
+			{Width: 3139, Height: 2228},
+			{Width: 3138, Height: 2229},
+			{Width: 3138, Height: 2229},
+			{Width: 3229, Height: 4647},
+			{Width: 3200, Height: 4633},
+		}
+		lookup := lookupFromSlice(rtlMetrics)
+
+		currentPlan := PlanDisplay(State{
+			Index:                3,
+			PageCount:            len(rtlMetrics),
+			BookMode:             true,
+			RightToLeft:          true,
+			AspectRatioThreshold: 1.5,
+			LearnedSpreadAspects: []float64{1.40},
+		}, lookup)
+		if currentPlan.LeftIndex != 4 || currentPlan.RightIndex != 3 || currentPlan.ActualImages != 2 {
+			t.Fatalf("expected current rtl spread to be 4/3, got %+v", currentPlan)
+		}
+
+		state, boundary := NavigatePrevious(State{
+			Index:                3,
+			PageCount:            len(rtlMetrics),
+			BookMode:             true,
+			RightToLeft:          true,
+			AspectRatioThreshold: 1.5,
+			LearnedSpreadAspects: []float64{1.40},
+		}, lookup, false)
+		if boundary != BoundaryNone || state.Index != 2 {
+			t.Fatalf("expected previous navigation to land on immediate preceding single page, got boundary=%v state=%+v", boundary, state)
+		}
+
+		prevPlan := PlanDisplay(state, lookup)
+		if prevPlan.LeftIndex != 2 || prevPlan.RightIndex != -1 || prevPlan.ActualImages != 1 {
+			t.Fatalf("expected previous rtl page to stay single, got %+v", prevPlan)
+		}
+	})
+
+	t.Run("navigate previous from ltr spread enters preceding single page first", func(t *testing.T) {
+		ltrMetrics := []PageMetrics{
+			{Width: 3139, Height: 2228},
+			{Width: 3138, Height: 2229},
+			{Width: 3138, Height: 2229},
+			{Width: 3229, Height: 4647},
+			{Width: 3200, Height: 4633},
+		}
+		lookup := lookupFromSlice(ltrMetrics)
+
+		currentPlan := PlanDisplay(State{
+			Index:                3,
+			PageCount:            len(ltrMetrics),
+			BookMode:             true,
+			RightToLeft:          false,
+			AspectRatioThreshold: 1.5,
+			LearnedSpreadAspects: []float64{1.40},
+		}, lookup)
+		if currentPlan.LeftIndex != 3 || currentPlan.RightIndex != 4 || currentPlan.ActualImages != 2 {
+			t.Fatalf("expected current ltr spread to be 3/4, got %+v", currentPlan)
+		}
+
+		state, boundary := NavigatePrevious(State{
+			Index:                3,
+			PageCount:            len(ltrMetrics),
+			BookMode:             true,
+			RightToLeft:          false,
+			AspectRatioThreshold: 1.5,
+			LearnedSpreadAspects: []float64{1.40},
+		}, lookup, false)
+		if boundary != BoundaryNone || state.Index != 2 {
+			t.Fatalf("expected previous navigation to land on immediate preceding single page, got boundary=%v state=%+v", boundary, state)
+		}
+
+		prevPlan := PlanDisplay(state, lookup)
+		if prevPlan.LeftIndex != 2 || prevPlan.RightIndex != -1 || prevPlan.ActualImages != 1 {
+			t.Fatalf("expected previous ltr page to stay single, got %+v", prevPlan)
+		}
+	})
+
+	t.Run("navigate previous follows no-skip heuristic through mixed rtl sequence", func(t *testing.T) {
+		rtlMetrics := []PageMetrics{
+			{Width: 3150, Height: 2239},
+			{Width: 3263, Height: 4664},
+			{Width: 3258, Height: 4676},
+			{Width: 3267, Height: 4659},
+			{Width: 3230, Height: 4676},
+			{Width: 3229, Height: 4669},
+			{Width: 3139, Height: 2229},
+		}
+		lookup := lookupFromSlice(rtlMetrics)
+		learned := []float64{1.40}
+
+		state := State{
+			Index:                6,
+			PageCount:            len(rtlMetrics),
+			BookMode:             true,
+			RightToLeft:          true,
+			AspectRatioThreshold: 1.5,
+			LearnedSpreadAspects: learned,
+		}
+		plan := PlanDisplay(state, lookup)
+		if plan.LeftIndex != 6 || plan.RightIndex != -1 || plan.ActualImages != 1 {
+			t.Fatalf("expected current page 6 to be single, got %+v", plan)
+		}
+
+		expected := []struct {
+			index      int
+			leftIndex  int
+			rightIndex int
+			actual     int
+		}{
+			{4, 5, 4, 2},
+			{2, 3, 2, 2},
+			{1, 1, -1, 1},
+			{0, 0, -1, 1},
+		}
+
+		for _, want := range expected {
+			var boundary Boundary
+			state, boundary = NavigatePrevious(state, lookup, false)
+			if boundary != BoundaryNone || state.Index != want.index {
+				t.Fatalf("unexpected state after previous: boundary=%v state=%+v wantIndex=%d", boundary, state, want.index)
+			}
+			plan = PlanDisplay(state, lookup)
+			if plan.LeftIndex != want.leftIndex || plan.RightIndex != want.rightIndex || plan.ActualImages != want.actual {
+				t.Fatalf("unexpected plan after previous: %+v want left=%d right=%d actual=%d", plan, want.leftIndex, want.rightIndex, want.actual)
+			}
+		}
+	})
+
+	t.Run("navigate previous from rtl single enters preceding spread before preceding single", func(t *testing.T) {
+		rtlMetrics := []PageMetrics{
+			{Width: 3138, Height: 2229},
+			{Width: 3229, Height: 4647},
+			{Width: 3200, Height: 4633},
+			{Width: 3258, Height: 4676},
+			{Width: 3258, Height: 4660},
+			{Width: 3144, Height: 2243},
+			{Width: 3138, Height: 2238},
+		}
+		lookup := lookupFromSlice(rtlMetrics)
+		learned := []float64{1.40}
+
+		state := State{
+			Index:                5,
+			PageCount:            len(rtlMetrics),
+			BookMode:             true,
+			RightToLeft:          true,
+			AspectRatioThreshold: 1.5,
+			LearnedSpreadAspects: learned,
+		}
+		currentPlan := PlanDisplay(state, lookup)
+		if currentPlan.LeftIndex != 5 || currentPlan.RightIndex != -1 || currentPlan.ActualImages != 1 {
+			t.Fatalf("expected current rtl page to stay single, got %+v", currentPlan)
+		}
+
+		state, boundary := NavigatePrevious(state, lookup, false)
+		if boundary != BoundaryNone || state.Index != 3 {
+			t.Fatalf("expected previous navigation to land on preceding spread anchor, got boundary=%v state=%+v", boundary, state)
+		}
+
+		prevPlan := PlanDisplay(state, lookup)
+		if prevPlan.LeftIndex != 4 || prevPlan.RightIndex != 3 || prevPlan.ActualImages != 2 {
+			t.Fatalf("expected previous rtl spread to be 4/3, got %+v", prevPlan)
+		}
+	})
 }
 
 func TestToggleBookMode(t *testing.T) {

@@ -226,8 +226,9 @@ This codebase has been extensively refactored for maintainability:
 - **Automatic Fallback**: Falls back to single page if images are incompatible
 
 ### Navigation Logic
-- **Normal Navigation**: Moves by 2 pages in book mode, 1 page in single mode
-- **Temporary Single Mode**: Automatically switches to display single final page when needed
+- **Normal Navigation**: Advances by display unit in book mode. This is often 2 pages, but falls back to 1 page when pairing is unsuitable.
+- **Previous Heuristic**: Backward navigation prioritizes the nearest unseen prior page, then pairs it only if the adjacent page is also compatible.
+- **Temporary Single Mode**: Used for incomplete final pairs and for forced single-page display when book mode needs to avoid skipped or duplicated pages.
 - **Fine Adjustment**: Shift+keys override book mode for single-page movements
 - **Boundary Handling**: Displays appropriate messages at first/last page
 
@@ -244,7 +245,7 @@ This codebase has been extensively refactored for maintainability:
 - **Boundary Detection**: Shows page range information during input
 
 ### Temporary Single Mode
-- **Auto-Activation**: Triggered when book mode reaches incomplete pairs
+- **Auto-Activation**: Triggered when book mode reaches incomplete pairs or when previous navigation needs a single-page fallback to preserve continuity
 - **Return Logic**: Automatically returns to book mode when possible
 - **Visual Indication**: Page status shows current mode state
 

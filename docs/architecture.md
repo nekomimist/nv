@@ -138,6 +138,20 @@ Pairs are rejected when:
 
 When a pair is not suitable, the app falls back to single-image display.
 
+Book mode navigation is now heuristic rather than perfectly symmetric.
+
+- `NavigateNext` still advances by display unit from the current anchor
+- `NavigatePrevious` prioritizes the nearest not-yet-shown prior page, then
+  tries to pair it with the adjacent page if that pair is compatible
+- this intentionally prioritizes "no skipped pages" and "no duplicate pages"
+  over perfectly matching forward/backward grouping in odd-length runs
+- even-length runs of compatible pages between incompatible boundaries still
+  tend to produce the same grouping in both directions
+
+`TempSingleMode` is not just an end-of-book special case anymore. It is also
+used as a forced-single marker when book mode needs to show exactly one page
+to preserve navigation continuity.
+
 ### Config application
 
 Config loading is defensive:
