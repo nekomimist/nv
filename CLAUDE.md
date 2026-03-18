@@ -147,9 +147,19 @@ GOOS=windows GOARCH=amd64 go build -ldflags "$LDFLAGS" -o nv-debug.exe
 # Show version
 ./nv --version
 
+# Enable debug logs and also save them to a file
+./nv -d -log-file /tmp/nv-debug.log ./images/
+
 # Development mode (if built manually)
 go run main.go [image_files_or_directories...]
 ```
+
+### Command-Line Options
+
+- `-c <path>`: Use a custom config file path
+- `-d`: Enable debug logging
+- `-log-file <path>`: Append logs to a file in addition to the console
+- `--version`: Print version information and exit
 
 ### Development and Testing
 

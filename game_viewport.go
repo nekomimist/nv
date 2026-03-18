@@ -17,6 +17,21 @@ const (
 	ZoomModeManual                    // Manual zoom level
 )
 
+func (m ZoomMode) String() string {
+	switch m {
+	case ZoomModeFitWindow:
+		return "fit_window"
+	case ZoomModeFitWidth:
+		return "fit_width"
+	case ZoomModeFitHeight:
+		return "fit_height"
+	case ZoomModeManual:
+		return "manual"
+	default:
+		return "unknown"
+	}
+}
+
 // ZoomState manages zoom and pan state.
 type ZoomState struct {
 	Mode       ZoomMode // Current zoom mode
@@ -37,6 +52,7 @@ func NewZoomState() *ZoomState {
 
 func (g *Game) zoomIn() {
 	if g.zoomState.Mode != ZoomModeManual {
+		debugKV("viewport", "zoom_switch_to_manual", "trigger", "zoom_in", "prev_mode", g.zoomState.Mode)
 		g.switchToManual100()
 		return
 	}
@@ -50,10 +66,12 @@ func (g *Game) zoomIn() {
 
 	g.zoomState.Level = newLevel
 	g.showOverlayMessage(fmt.Sprintf("%.0f%%", g.zoomState.Level*100))
+	debugKV("viewport", "zoom_in", "level", g.zoomState.Level)
 }
 
 func (g *Game) zoomOut() {
 	if g.zoomState.Mode != ZoomModeManual {
+		debugKV("viewport", "zoom_switch_to_manual", "trigger", "zoom_out", "prev_mode", g.zoomState.Mode)
 		g.switchToManual100()
 		return
 	}
@@ -67,6 +85,7 @@ func (g *Game) zoomOut() {
 
 	g.zoomState.Level = newLevel
 	g.showOverlayMessage(fmt.Sprintf("%.0f%%", g.zoomState.Level*100))
+	debugKV("viewport", "zoom_out", "level", g.zoomState.Level)
 }
 
 func (g *Game) zoomReset() {
@@ -74,6 +93,7 @@ func (g *Game) zoomReset() {
 }
 
 func (g *Game) zoomFit() {
+	prevMode := g.zoomState.Mode
 	switch g.zoomState.Mode {
 	case ZoomModeFitWindow:
 		g.zoomState.Mode = ZoomModeFitWidth
@@ -100,14 +120,17 @@ func (g *Game) zoomFit() {
 		g.updateZoomLevelForFitMode()
 		g.showOverlayMessage("Fit to Window")
 	}
+	debugKV("viewport", "zoom_fit_cycle", "prev_mode", prevMode, "next_mode", g.zoomState.Mode, "level", g.zoomState.Level)
 }
 
 func (g *Game) switchToManual100() {
+	prevMode := g.zoomState.Mode
 	g.zoomState.Mode = ZoomModeManual
 	g.zoomState.Level = 1.0
 	g.zoomState.PanOffsetX = 0
 	g.zoomState.PanOffsetY = 0
 	g.showOverlayMessage("100%")
+	debugKV("viewport", "zoom_reset_manual", "prev_mode", prevMode, "level", g.zoomState.Level)
 }
 
 func (g *Game) panUp() {
@@ -118,6 +141,7 @@ func (g *Game) panUp() {
 	_, stepY := g.getPanStep()
 	g.zoomState.PanOffsetY += stepY
 	g.clampPanToLimits()
+	debugKV("viewport", "pan_up", "pan_y", g.zoomState.PanOffsetY)
 }
 
 func (g *Game) panDown() {
@@ -128,6 +152,7 @@ func (g *Game) panDown() {
 	_, stepY := g.getPanStep()
 	g.zoomState.PanOffsetY -= stepY
 	g.clampPanToLimits()
+	debugKV("viewport", "pan_down", "pan_y", g.zoomState.PanOffsetY)
 }
 
 func (g *Game) panLeft() {
@@ -138,6 +163,7 @@ func (g *Game) panLeft() {
 	stepX, _ := g.getPanStep()
 	g.zoomState.PanOffsetX += stepX
 	g.clampPanToLimits()
+	debugKV("viewport", "pan_left", "pan_x", g.zoomState.PanOffsetX)
 }
 
 func (g *Game) panRight() {
@@ -148,6 +174,7 @@ func (g *Game) panRight() {
 	stepX, _ := g.getPanStep()
 	g.zoomState.PanOffsetX -= stepX
 	g.clampPanToLimits()
+	debugKV("viewport", "pan_right", "pan_x", g.zoomState.PanOffsetX)
 }
 
 func (g *Game) panByDelta(deltaX, deltaY float64) {
@@ -204,6 +231,14 @@ func (g *Game) updateZoomLevelForFitMode() {
 
 	scale *= ebiten.Monitor().DeviceScaleFactor()
 	g.zoomState.Level = scale
+	debugKV("viewport", "fit_scale_updated",
+		"mode", g.zoomState.Mode,
+		"image_width", iw,
+		"image_height", ih,
+		"logical_width", g.currentLogicalW,
+		"logical_height", g.currentLogicalH,
+		"level", g.zoomState.Level,
+	)
 }
 
 // resetZoomToInitial resets zoom state to the configured initial mode.
@@ -235,6 +270,13 @@ func (g *Game) resetZoomToInitial() {
 		g.zoomState.Level = 1.0
 		g.needsInitialZoomUpdate = false
 	}
+
+	debugKV("viewport", "zoom_reset_initial",
+		"initial_zoom_mode", g.config.InitialZoomMode,
+		"mode", g.zoomState.Mode,
+		"needs_initial_zoom", g.needsInitialZoomUpdate,
+		"needs_initial_pan_align", g.needsInitialPanAlign,
+	)
 }
 
 // alignPanForCurrentFitModeIfConfigured nudges pan offsets to configured edges.
@@ -243,10 +285,12 @@ func (g *Game) alignPanForCurrentFitModeIfConfigured() {
 	case ZoomModeFitWidth:
 		if g.config.FitWidthAlignTop {
 			g.zoomState.PanOffsetY = 1e12
+			debugKV("viewport", "fit_align_applied", "mode", g.zoomState.Mode, "axis", "y", "direction", "top")
 		}
 	case ZoomModeFitHeight:
 		if g.config.FitHeightAlignLeft {
 			g.zoomState.PanOffsetX = 1e12
+			debugKV("viewport", "fit_align_applied", "mode", g.zoomState.Mode, "axis", "x", "direction", "left")
 		}
 	}
 }
@@ -291,6 +335,8 @@ func (g *Game) clampPanToLimits() {
 	scale := g.zoomState.Level
 	sw := float64(iw) * scale
 	sh := float64(ih) * scale
+	prevPanX := g.zoomState.PanOffsetX
+	prevPanY := g.zoomState.PanOffsetY
 
 	if sw > w {
 		maxPanX := sw/2 - w/2
@@ -314,6 +360,20 @@ func (g *Game) clampPanToLimits() {
 		}
 	} else {
 		g.zoomState.PanOffsetY = 0
+	}
+
+	if prevPanX != g.zoomState.PanOffsetX || prevPanY != g.zoomState.PanOffsetY {
+		debugKV("viewport", "pan_clamped",
+			"mode", g.zoomState.Mode,
+			"prev_pan_x", prevPanX,
+			"prev_pan_y", prevPanY,
+			"next_pan_x", g.zoomState.PanOffsetX,
+			"next_pan_y", g.zoomState.PanOffsetY,
+			"scaled_width", sw,
+			"scaled_height", sh,
+			"viewport_width", w,
+			"viewport_height", h,
+		)
 	}
 }
 

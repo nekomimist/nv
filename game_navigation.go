@@ -62,32 +62,31 @@ func (g *Game) pageAspectAt(idx int) float64 {
 
 func (g *Game) logDisplayPlan(context string, state navlogic.State, plan navlogic.DisplayPlan) {
 	if plan.TotalPages == 0 {
-		debugLog("%s: no pages available", context)
+		debugKV("nav", "display_plan", "context", context, "reason", "no_pages")
 		return
 	}
 
-	debugLog(
-		"%s: state idx=%d pageCount=%d bookMode=%t tempSingle=%t rtl=%t learned=%d -> plan leftIdx=%d rightIdx=%d actualImages=%d currentPage=%d/%d",
-		context,
-		state.Index,
-		state.PageCount,
-		state.BookMode,
-		state.TempSingleMode,
-		state.RightToLeft,
-		len(state.LearnedSpreadAspects),
-		plan.LeftIndex,
-		plan.RightIndex,
-		plan.ActualImages,
-		plan.CurrentPage,
-		plan.TotalPages,
+	debugKV("nav", "display_plan",
+		"context", context,
+		"idx", state.Index,
+		"page_count", state.PageCount,
+		"book_mode", state.BookMode,
+		"temp_single", state.TempSingleMode,
+		"rtl", state.RightToLeft,
+		"learned_count", len(state.LearnedSpreadAspects),
+		"left_idx", plan.LeftIndex,
+		"right_idx", plan.RightIndex,
+		"actual_images", plan.ActualImages,
+		"current_page", plan.CurrentPage,
+		"total_pages", plan.TotalPages,
 	)
 
 	if state.TempSingleMode {
-		debugLog("%s: bookmode decision skipped because tempSingleMode=true", context)
+		debugKV("nav", "book_decision_skipped", "context", context, "reason", "temp_single")
 		return
 	}
 	if !state.BookMode {
-		debugLog("%s: bookmode decision skipped because bookMode=false", context)
+		debugKV("nav", "book_decision_skipped", "context", context, "reason", "book_mode_off")
 		return
 	}
 
@@ -98,19 +97,19 @@ func (g *Game) logDisplayPlan(context string, state navlogic.State, plan navlogi
 	leftMetrics := g.pageMetricsAt(leftIdx)
 	rightMetrics := g.pageMetricsAt(rightIdx)
 	decision := navlogic.ExplainBookModeDecision(leftMetrics, rightMetrics, state.AspectRatioThreshold, state.LearnedSpreadAspects)
-	debugLog(
-		"%s: pair candidate leftIdx=%d(%dx%d aspect=%.3f) rightIdx=%d(%dx%d aspect=%.3f) decision=%t reason=%s",
-		context,
-		leftIdx,
-		leftMetrics.Width,
-		leftMetrics.Height,
-		decision.LeftAspect,
-		rightIdx,
-		rightMetrics.Width,
-		rightMetrics.Height,
-		decision.RightAspect,
-		decision.UseBookMode,
-		decision.Reason,
+	debugKV("nav", "book_decision",
+		"context", context,
+		"left_idx", leftIdx,
+		"left_width", leftMetrics.Width,
+		"left_height", leftMetrics.Height,
+		"left_aspect", decision.LeftAspect,
+		"right_idx", rightIdx,
+		"right_width", rightMetrics.Width,
+		"right_height", rightMetrics.Height,
+		"right_aspect", decision.RightAspect,
+		"use_book_mode", decision.UseBookMode,
+		"threshold", state.AspectRatioThreshold,
+		"reason", decision.Reason,
 	)
 }
 
@@ -170,6 +169,13 @@ func (g *Game) showOverlayMessage(message string) {
 	g.overlayMessage = message
 	if message != "" {
 		g.overlayMessageTime = time.Now()
+		debugKV("nav", "overlay_message",
+			"message", message,
+			"idx", g.idx,
+			"book_mode", g.bookMode,
+			"temp_single", g.tempSingleMode,
+			"zoom_mode", g.zoomState.Mode,
+		)
 	} else {
 		g.overlayMessageTime = time.Time{}
 	}
@@ -187,9 +193,13 @@ func (g *Game) toggleBookMode() {
 
 	g.config.BookMode = g.bookMode
 	g.calculateDisplayContent()
-	debugLog("toggleBookMode: prev idx=%d bookMode=%t tempSingle=%t -> next idx=%d bookMode=%t tempSingle=%t",
-		prevState.Index, prevState.BookMode, prevState.TempSingleMode,
-		nextState.Index, nextState.BookMode, nextState.TempSingleMode,
+	debugKV("nav", "toggle_book_mode",
+		"prev_idx", prevState.Index,
+		"prev_book_mode", prevState.BookMode,
+		"prev_temp_single", prevState.TempSingleMode,
+		"next_idx", nextState.Index,
+		"next_book_mode", nextState.BookMode,
+		"next_temp_single", nextState.TempSingleMode,
 	)
 }
 
@@ -201,7 +211,7 @@ func (g *Game) toggleReadingDirection() {
 	}
 	g.showOverlayMessage("Reading Direction: " + direction)
 	g.calculateDisplayContent()
-	debugLog("toggleReadingDirection: rtl=%t", g.config.RightToLeft)
+	debugKV("nav", "toggle_reading_direction", "rtl", g.config.RightToLeft)
 }
 
 func (g *Game) markCurrentAsPreJoinedSpread() {
@@ -225,6 +235,7 @@ func (g *Game) markCurrentAsPreJoinedSpread() {
 
 	if len(learned) == 0 {
 		g.showOverlayMessage("Pre-joined spread ratio already learned")
+		debugKV("nav", "learn_spread_skip", "reason", "already_learned", "idx", g.idx)
 		return
 	}
 
@@ -235,19 +246,27 @@ func (g *Game) markCurrentAsPreJoinedSpread() {
 	}
 
 	g.calculateDisplayContent()
+	debugKV("nav", "learn_spread",
+		"idx", g.idx,
+		"learned", learned,
+		"learned_count", len(g.learnedSpreadAspects),
+	)
 }
 
 func (g *Game) processPageInput() {
 	if g.pageInputBuffer == "" {
+		debugKV("input", "page_input_skip", "reason", "empty_buffer")
 		return
 	}
 
 	pageNum, err := strconv.Atoi(g.pageInputBuffer)
 	if err != nil {
 		g.showOverlayMessage("Invalid page number")
+		debugKV("input", "page_input_invalid", "buffer", g.pageInputBuffer, "error", err)
 		return
 	}
 
+	debugKV("input", "page_input_submit", "buffer", g.pageInputBuffer, "page", pageNum)
 	g.jumpToPage(pageNum)
 }
 
@@ -256,6 +275,7 @@ func (g *Game) jumpToPage(pageNum int) {
 	nextState, boundary := navlogic.JumpToPage(g.navigationState(), pageNum, g.pageMetricsAt)
 	if boundary == navlogic.BoundaryPageNotFound {
 		g.showOverlayMessage(fmt.Sprintf("Page %d not found (1-%d)", pageNum, g.imageManager.GetPathsCount()))
+		debugKV("nav", "jump_to_page", "requested_page", pageNum, "boundary", boundary, "reason", "page_not_found")
 		return
 	}
 
@@ -263,15 +283,21 @@ func (g *Game) jumpToPage(pageNum int) {
 	g.imageManager.StartPreload(g.idx, NavigationJump)
 	g.resetZoomToInitial()
 	g.calculateDisplayContent()
-	debugLog("jumpToPage: requested=%d prevIdx=%d -> nextIdx=%d boundary=%v bookMode=%t tempSingle=%t",
-		pageNum, prevState.Index, nextState.Index, boundary, nextState.BookMode, nextState.TempSingleMode)
+	debugKV("nav", "jump_to_page",
+		"requested_page", pageNum,
+		"prev_idx", prevState.Index,
+		"next_idx", nextState.Index,
+		"boundary", boundary,
+		"book_mode", nextState.BookMode,
+		"temp_single", nextState.TempSingleMode,
+	)
 }
 
 func (g *Game) navigateNext(singleStep bool) {
 	prevState := g.navigationState()
 	nextState, boundary := navlogic.NavigateNext(g.navigationState(), g.pageMetricsAt, singleStep)
 	if boundary == navlogic.BoundaryLastPage {
-		debugLog("navigateNext: singleStep=%t prevIdx=%d boundary=%v", singleStep, prevState.Index, boundary)
+		debugKV("nav", "navigate_next", "single_step", singleStep, "prev_idx", prevState.Index, "boundary", boundary)
 		g.showOverlayMessage("Last page")
 		return
 	}
@@ -279,11 +305,15 @@ func (g *Game) navigateNext(singleStep bool) {
 	g.applyNavigationState(nextState)
 	g.resetZoomToInitial()
 	g.calculateDisplayContent()
-	debugLog("navigateNext: singleStep=%t prev idx=%d bookMode=%t tempSingle=%t -> next idx=%d bookMode=%t tempSingle=%t boundary=%v",
-		singleStep,
-		prevState.Index, prevState.BookMode, prevState.TempSingleMode,
-		nextState.Index, nextState.BookMode, nextState.TempSingleMode,
-		boundary,
+	debugKV("nav", "navigate_next",
+		"single_step", singleStep,
+		"prev_idx", prevState.Index,
+		"prev_book_mode", prevState.BookMode,
+		"prev_temp_single", prevState.TempSingleMode,
+		"next_idx", nextState.Index,
+		"next_book_mode", nextState.BookMode,
+		"next_temp_single", nextState.TempSingleMode,
+		"boundary", boundary,
 	)
 }
 
@@ -291,7 +321,7 @@ func (g *Game) navigatePrevious(singleStep bool) {
 	prevState := g.navigationState()
 	nextState, boundary := navlogic.NavigatePrevious(g.navigationState(), g.pageMetricsAt, singleStep)
 	if boundary == navlogic.BoundaryFirstPage {
-		debugLog("navigatePrevious: singleStep=%t prevIdx=%d boundary=%v", singleStep, prevState.Index, boundary)
+		debugKV("nav", "navigate_previous", "single_step", singleStep, "prev_idx", prevState.Index, "boundary", boundary)
 		g.showOverlayMessage("First page")
 		return
 	}
@@ -299,10 +329,14 @@ func (g *Game) navigatePrevious(singleStep bool) {
 	g.applyNavigationState(nextState)
 	g.resetZoomToInitial()
 	g.calculateDisplayContent()
-	debugLog("navigatePrevious: singleStep=%t prev idx=%d bookMode=%t tempSingle=%t -> next idx=%d bookMode=%t tempSingle=%t boundary=%v",
-		singleStep,
-		prevState.Index, prevState.BookMode, prevState.TempSingleMode,
-		nextState.Index, nextState.BookMode, nextState.TempSingleMode,
-		boundary,
+	debugKV("nav", "navigate_previous",
+		"single_step", singleStep,
+		"prev_idx", prevState.Index,
+		"prev_book_mode", prevState.BookMode,
+		"prev_temp_single", prevState.TempSingleMode,
+		"next_idx", nextState.Index,
+		"next_book_mode", nextState.BookMode,
+		"next_temp_single", nextState.TempSingleMode,
+		"boundary", boundary,
 	)
 }

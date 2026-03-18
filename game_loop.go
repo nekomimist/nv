@@ -7,9 +7,7 @@ import (
 )
 
 func (g *Game) Update() error {
-	if g.wasInputHandled {
-		debugLog("waiting for previous input to complete\n")
-	} else {
+	if !g.wasInputHandled {
 		g.wasInputHandled = g.inputHandler.HandleInput()
 	}
 
@@ -21,6 +19,7 @@ func (g *Game) Update() error {
 	if g.imageManager.ConsumeAsyncRefresh() {
 		g.calculateDisplayContent()
 		g.renderer.lastSnapshot = nil
+		debugKV("cache", "async_refresh", "idx", g.idx)
 	}
 
 	if g.exitRequested {
@@ -44,13 +43,25 @@ func (g *Game) Draw(screen *ebiten.Image) {
 
 	w, h := screen.Bounds().Dx(), screen.Bounds().Dy()
 	currentSnapshot := NewRenderStateSnapshot(g, w, h)
+	redrawReason := ""
 
 	if g.wasInputHandled ||
 		g.renderer.lastSnapshot == nil ||
 		!currentSnapshot.Equals(g.renderer.lastSnapshot) ||
 		g.forceRedrawFrames > 0 {
+		switch {
+		case g.wasInputHandled:
+			redrawReason = "input_handled"
+		case g.renderer.lastSnapshot == nil:
+			redrawReason = "missing_snapshot"
+		case !currentSnapshot.Equals(g.renderer.lastSnapshot):
+			redrawReason = "snapshot_changed"
+		case g.forceRedrawFrames > 0:
+			redrawReason = "forced_redraw"
+		}
 		g.renderer.Draw(screen)
 		g.renderer.lastSnapshot = currentSnapshot
+		debugKV("renderer", "redraw", "reason", redrawReason, "width", w, "height", h, "force_redraw_frames", g.forceRedrawFrames)
 
 		if g.forceRedrawFrames > 0 {
 			g.forceRedrawFrames--
@@ -64,6 +75,11 @@ func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {
 		g.currentLogicalW = outsideWidth
 		g.currentLogicalH = outsideHeight
 		g.forceRedrawFrames = 1
+		debugKV("viewport", "layout_changed",
+			"logical_width", outsideWidth,
+			"logical_height", outsideHeight,
+			"device_scale", ebiten.Monitor().DeviceScaleFactor(),
+		)
 	}
 
 	if g.savedWinW != outsideWidth || g.savedWinH != outsideHeight {

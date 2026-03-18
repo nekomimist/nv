@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"image/color"
-	"log"
 	"math"
 	"sort"
 	"strings"
@@ -61,7 +60,7 @@ func NewRenderer(renderState RenderState) *Renderer {
 	// Initialize font source with lightweight goregular
 	s, err := text.NewGoTextFaceSource(bytes.NewReader(goregular.TTF))
 	if err != nil {
-		log.Fatal(err)
+		fatalKV("renderer", "font_init_failed", "error", err)
 	}
 
 	return &Renderer{
@@ -745,7 +744,7 @@ func (r *Renderer) applyTransformations(img *ebiten.Image) *ebiten.Image {
 		return r.transformCache.image
 	}
 
-	r.invalidateTransformCache()
+	r.invalidateTransformCache("rebuild_transform")
 
 	w, h := img.Bounds().Dx(), img.Bounds().Dy()
 
@@ -793,12 +792,19 @@ func (r *Renderer) applyTransformations(img *ebiten.Image) *ebiten.Image {
 		flipV:    r.renderState.IsFlippedV(),
 		image:    transformedImg,
 	}
+	debugKV("renderer", "transform_cache_rebuilt",
+		"width", finalW,
+		"height", finalH,
+		"rotation", r.renderState.GetRotationAngle(),
+		"flip_h", r.renderState.IsFlippedH(),
+		"flip_v", r.renderState.IsFlippedV(),
+	)
 	return transformedImg
 }
 
 func (r *Renderer) createBookModeImage(leftImg, rightImg *ebiten.Image) *ebiten.Image {
 	if rightImg == nil {
-		r.invalidateBookCache()
+		r.invalidateBookCache("single_image")
 		return leftImg
 	}
 
@@ -808,8 +814,8 @@ func (r *Renderer) createBookModeImage(leftImg, rightImg *ebiten.Image) *ebiten.
 		return r.bookCache.image
 	}
 
-	r.invalidateTransformCache()
-	r.invalidateBookCache()
+	r.invalidateTransformCache("book_image_changed")
+	r.invalidateBookCache("book_image_changed")
 
 	leftW, leftH := leftImg.Bounds().Dx(), leftImg.Bounds().Dy()
 	rightW, rightH := rightImg.Bounds().Dx(), rightImg.Bounds().Dy()
@@ -838,20 +844,30 @@ func (r *Renderer) createBookModeImage(leftImg, rightImg *ebiten.Image) *ebiten.
 		right: rightImg,
 		image: combinedImg,
 	}
+	debugKV("renderer", "book_cache_rebuilt",
+		"left_width", leftW,
+		"left_height", leftH,
+		"right_width", rightW,
+		"right_height", rightH,
+		"combined_width", combinedW,
+		"combined_height", combinedH,
+	)
 
 	return combinedImg
 }
 
-func (r *Renderer) invalidateBookCache() {
+func (r *Renderer) invalidateBookCache(reason string) {
 	if r.bookCache.image != nil {
 		r.bookCache.image.Deallocate()
+		debugKV("renderer", "book_cache_invalidated", "reason", reason)
 	}
 	r.bookCache = rendererBookCache{}
 }
 
-func (r *Renderer) invalidateTransformCache() {
+func (r *Renderer) invalidateTransformCache(reason string) {
 	if r.transformCache.image != nil {
 		r.transformCache.image.Deallocate()
+		debugKV("renderer", "transform_cache_invalidated", "reason", reason)
 	}
 	r.transformCache = rendererTransformCache{}
 }

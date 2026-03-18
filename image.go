@@ -11,7 +11,6 @@ import (
 	_ "image/jpeg"
 	_ "image/png"
 	"io"
-	"log"
 	"math"
 	"os"
 	"path/filepath"
@@ -43,6 +42,19 @@ const (
 	NavigationBackward
 	NavigationJump
 )
+
+func (d NavigationDirection) String() string {
+	switch d {
+	case NavigationForward:
+		return "forward"
+	case NavigationBackward:
+		return "backward"
+	case NavigationJump:
+		return "jump"
+	default:
+		return "unknown"
+	}
+}
 
 // PreloadRequest represents a request to preload an image
 type PreloadRequest struct {
@@ -141,20 +153,23 @@ func (pm *PreloadManager) recordResult(success bool, queueSize int) {
 // Stop stops the preload manager
 func (pm *PreloadManager) Stop() {
 	pm.cancel()
+	debugKV("cache", "preload_stop")
 }
 
 // StartPreload starts preloading images from the current index in the specified direction
 func (pm *PreloadManager) StartPreload(currentIdx int, direction NavigationDirection) {
 	if !pm.IsEnabled() {
+		debugKV("cache", "preload_skip", "reason", "disabled", "idx", currentIdx, "direction", direction)
 		return
 	}
 
 	// Clear the request channel to cancel any pending requests
+	drained := 0
 drain:
 	for {
 		select {
 		case <-pm.requestChan:
-			// discard pending requests
+			drained++
 		default:
 			break drain
 		}
@@ -163,9 +178,17 @@ drain:
 	// Send new preload request
 	select {
 	case pm.requestChan <- PreloadRequest{Index: currentIdx, Direction: direction}:
+		debugKV("cache", "preload_start",
+			"idx", currentIdx,
+			"direction", direction,
+			"drained", drained,
+		)
 	default:
-		// Channel is full, skip this request
-		debugLog("Preload request channel full, skipping preload request")
+		debugKV("cache", "preload_skip",
+			"reason", "request_channel_full",
+			"idx", currentIdx,
+			"direction", direction,
+		)
 	}
 }
 
@@ -195,6 +218,12 @@ func (pm *PreloadManager) processPreloadRequest(req PreloadRequest) {
 	}
 
 	indices := pm.calculatePreloadIndices(req.Index, req.Direction, pathsCount)
+	debugKV("cache", "preload_plan",
+		"idx", req.Index,
+		"direction", req.Direction,
+		"paths_count", pathsCount,
+		"indices", indices,
+	)
 
 	for _, idx := range indices {
 		select {
@@ -265,6 +294,7 @@ func (pm *PreloadManager) preloadImage(idx int) {
 
 	// Check if already in cache
 	if _, ok := pm.imageManager.cache.Get(cacheKey); ok {
+		debugKV("cache", "preload_skip", "reason", "already_cached", "idx", idx, "path", cacheKey)
 		return // Already cached
 	}
 
@@ -317,7 +347,7 @@ func NewImageManager(cacheSize int) ImageManager {
 		}
 	})
 	if err != nil {
-		log.Printf("Error: Failed to create LRU cache: %v", err)
+		errorKV("cache", "cache_create_failed", "requested_size", cacheSize, "error", err)
 		cache, _ = lru.NewWithEvict[string, *ebiten.Image](16, func(_ string, img *ebiten.Image) {
 			if img != nil {
 				img.Deallocate()
@@ -336,7 +366,7 @@ func NewImageManagerWithPreload(cacheSize int, preloadCount int, preloadEnabled 
 		}
 	})
 	if err != nil {
-		log.Printf("Error: Failed to create LRU cache: %v", err)
+		errorKV("cache", "cache_create_failed", "requested_size", cacheSize, "error", err)
 		cache, _ = lru.NewWithEvict[string, *ebiten.Image](16, func(_ string, img *ebiten.Image) {
 			if img != nil {
 				img.Deallocate()
@@ -417,7 +447,11 @@ func (m *DefaultImageManager) processLoadRequest(req loadRequest) {
 
 	img, err := m.loadImage(req.path)
 	if err != nil {
-		log.Printf("Error: Failed to load image %s: %v", req.path.Path, err)
+		errorKV("cache", "cache_load_failed",
+			"path", req.path.Path,
+			"source", loadSource(req.preload),
+			"error", err,
+		)
 		errorImg := CreateErrorImage(400, 300, req.path.Path, err.Error())
 		m.cache.Add(req.cacheKey, errorImg)
 		m.asyncRefresh.Store(true)
@@ -431,7 +465,12 @@ func (m *DefaultImageManager) processLoadRequest(req loadRequest) {
 
 	var mem runtime.MemStats
 	runtime.ReadMemStats(&mem)
-	debugLog("Cache MISS (async): %s, loaded and cached (cache: %d items, memory: %dMB)", req.cacheKey, m.cache.Len(), mem.Alloc/1024/1024)
+	debugKV("cache", "cache_load_complete",
+		"path", req.cacheKey,
+		"source", loadSource(req.preload),
+		"cache_len", m.cache.Len(),
+		"mem_mb", mem.Alloc/1024/1024,
+	)
 }
 
 func (m *DefaultImageManager) requestAsyncLoad(imagePath ImagePath) {
@@ -445,12 +484,22 @@ func (m *DefaultImageManager) requestPreload(imagePath ImagePath) {
 func (m *DefaultImageManager) enqueueLoadRequest(imagePath ImagePath, preload bool) {
 	cacheKey := imagePath.Path
 	if _, ok := m.cache.Get(cacheKey); ok {
+		debugKV("cache", "cache_enqueue_skip",
+			"path", cacheKey,
+			"source", loadSource(preload),
+			"reason", "already_cached",
+		)
 		return
 	}
 
 	m.inflightMu.Lock()
 	if _, exists := m.inflight[cacheKey]; exists {
 		m.inflightMu.Unlock()
+		debugKV("cache", "cache_enqueue_skip",
+			"path", cacheKey,
+			"source", loadSource(preload),
+			"reason", "already_inflight",
+		)
 		return
 	}
 	m.inflight[cacheKey] = struct{}{}
@@ -467,11 +516,27 @@ func (m *DefaultImageManager) enqueueLoadRequest(imagePath ImagePath, preload bo
 	select {
 	case <-m.loadCtx.Done():
 		m.clearInflight(cacheKey)
+		debugKV("cache", "cache_enqueue_skip",
+			"path", cacheKey,
+			"source", loadSource(preload),
+			"reason", "load_context_closed",
+		)
 	case queue <- req:
 		m.updatePreloadQueueSize()
+		debugKV("cache", "cache_enqueue",
+			"path", cacheKey,
+			"source", loadSource(preload),
+			"queue", queueName,
+			"queue_len", len(queue),
+		)
 	default:
 		m.clearInflight(cacheKey)
-		debugLog("%s load queue full, skipping request for %s", queueName, cacheKey)
+		debugKV("cache", "cache_enqueue_skip",
+			"path", cacheKey,
+			"source", loadSource(preload),
+			"queue", queueName,
+			"reason", "queue_full",
+		)
 	}
 }
 
@@ -509,8 +574,10 @@ func (m *DefaultImageManager) SetPaths(paths []ImagePath) {
 	m.mu.Lock()
 	m.paths = paths
 	m.mu.Unlock()
-	// No need to clear cache since we use file paths as keys
-	debugLog("SetPaths: %d new paths, cache preserved (%d items)", len(paths), m.cache.Len())
+	debugKV("cache", "paths_replaced",
+		"paths_count", len(paths),
+		"cache_len", m.cache.Len(),
+	)
 }
 
 func (m *DefaultImageManager) GetPathsCount() int {
@@ -530,6 +597,7 @@ func (m *DefaultImageManager) StopPreload() {
 		m.preloadManager.Stop()
 	}
 	m.loadCancel()
+	debugKV("cache", "load_stop")
 }
 
 func (m *DefaultImageManager) GetPreloadStats() PreloadStats {
@@ -572,10 +640,10 @@ func (m *DefaultImageManager) GetImage(idx int) *ebiten.Image {
 	// Check if image is already in cache
 	img, ok := m.cache.Get(cacheKey)
 	if ok {
-		debugLog("Cache HIT: %s (cache: %d items)", cacheKey, m.cache.Len())
 		return img
 	}
 
+	debugKV("cache", "cache_lookup_miss", "idx", idx, "path", cacheKey)
 	m.startLoadWorker()
 	m.requestAsyncLoad(imagePath)
 	return m.loadingPlaceholder
@@ -730,7 +798,14 @@ func (m *DefaultImageManager) createEbitenImageFromDecoded(src image.Image, orig
 			resized, changed := resizeImageToFit(src, limit)
 			if changed {
 				newBounds := resized.Bounds()
-				log.Printf("Info: downscaled large image %s from %dx%d to %dx%d (limit %d)", origin, width, height, newBounds.Dx(), newBounds.Dy(), limit)
+				infoKV("cache", "image_downscaled",
+					"path", origin,
+					"width", width,
+					"height", height,
+					"new_width", newBounds.Dx(),
+					"new_height", newBounds.Dy(),
+					"limit", limit,
+				)
 				src = resized
 			}
 		}
@@ -879,10 +954,11 @@ func processArchive(archivePath string) ([]ImagePath, error) {
 	}
 
 	if err != nil {
-		log.Printf("Error: Failed to process archive %s: %v", archivePath, err)
+		errorKV("collection", "archive_process_failed", "archive_path", archivePath, "error", err)
 		return []ImagePath{}, err
 	}
 
+	debugKV("collection", "archive_processed", "archive_path", archivePath, "entries", len(archiveImages))
 	return archiveImages, nil
 }
 
@@ -925,6 +1001,12 @@ func collectImagesFromSameDirectory(filePath string, sortMethod int) ([]ImagePat
 
 	// Sort the images
 	sortedImages := sortImagePaths(images, sortMethod)
+	debugKV("collection", "collect_same_directory_complete",
+		"file_path", filePath,
+		"directory", dir,
+		"sort_method", sortMethod,
+		"paths_count", len(sortedImages),
+	)
 	return sortedImages, nil
 }
 
@@ -937,6 +1019,7 @@ func collectImages(args []string, sortMethod int) ([]ImagePath, error) {
 		}
 		if info.IsDir() {
 			var dirImages []ImagePath
+			archiveCount := 0
 			err := filepath.Walk(p, func(path string, fi os.FileInfo, err error) error {
 				if err != nil {
 					return err
@@ -950,22 +1033,29 @@ func collectImages(args []string, sortMethod int) ([]ImagePath, error) {
 						ArchivePath: "",
 						EntryPath:   "",
 					})
-				} else if isArchiveExt(path) {
-					archiveImages, err := processArchive(path)
-					if err == nil {
-						sortedArchiveImages := sortImagePaths(archiveImages, sortMethod)
-						dirImages = append(dirImages, sortedArchiveImages...)
-					} else {
-						log.Printf("Warning: Skipping problematic archive %s: %v", path, err)
+					} else if isArchiveExt(path) {
+						archiveCount++
+						archiveImages, err := processArchive(path)
+						if err == nil {
+							sortedArchiveImages := sortImagePaths(archiveImages, sortMethod)
+							dirImages = append(dirImages, sortedArchiveImages...)
+						} else {
+							warnKV("collection", "archive_skipped", "path", path, "error", err)
+						}
 					}
-				}
-				return nil
-			})
+					return nil
+				})
 			if err != nil {
 				return nil, err
 			}
 			sortedDirImages := sortImagePaths(dirImages, sortMethod)
 			list = append(list, sortedDirImages...)
+			debugKV("collection", "collect_directory_complete",
+				"path", p,
+				"sort_method", sortMethod,
+				"paths_count", len(sortedDirImages),
+				"archives_seen", archiveCount,
+			)
 		} else {
 			if isSupportedExt(p) {
 				list = append(list, ImagePath{
@@ -978,12 +1068,29 @@ func collectImages(args []string, sortMethod int) ([]ImagePath, error) {
 				if err == nil {
 					sortedArchiveImages := sortImagePaths(archiveImages, sortMethod)
 					list = append(list, sortedArchiveImages...)
+					debugKV("collection", "collect_archive_complete",
+						"path", p,
+						"sort_method", sortMethod,
+						"paths_count", len(sortedArchiveImages),
+					)
 				} else {
-					log.Printf("Warning: Skipping problematic archive %s: %v", p, err)
+					warnKV("collection", "archive_skipped", "path", p, "error", err)
 				}
 			}
 		}
 	}
 
+	debugKV("collection", "collect_complete",
+		"args_count", len(args),
+		"sort_method", sortMethod,
+		"paths_count", len(list),
+	)
 	return list, nil
+}
+
+func loadSource(preload bool) string {
+	if preload {
+		return "preload"
+	}
+	return "async"
 }

@@ -27,7 +27,17 @@ A simple image viewer built with Go and Ebiten, featuring seamless archive suppo
 
 # View images from multiple sources
 ./nv ./photos/ manga.zip single_image.png
+
+# Enable debug logging and also append logs to a file
+./nv -d -log-file /tmp/nv-debug.log ./photos/
 ```
+
+### Command-Line Options
+
+- `-c <path>`: Load and save config using the specified JSON file
+- `-d`: Enable debug logging
+- `-log-file <path>`: Append logs to the given file as well as the console
+- `--version`: Print version information and exit
 
 ## Controls
 
@@ -153,6 +163,7 @@ Settings are automatically saved to OS-standard configuration directories:
 
 Notes:
 - Default config location can be overridden with `-c <path>`.
+- Use `-d` together with `-log-file <path>` when you want verbose debug logs preserved for later analysis.
 
 ## License
 

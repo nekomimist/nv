@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -278,16 +277,16 @@ func loadConfigFromPath(configPath string) ConfigLoadResult {
 	data, err := os.ReadFile(configPath)
 	if err != nil {
 		// Config file not found is not an error - use defaults
-		log.Printf("Config file not found at %s, using defaults", configPath)
+		infoKV("config", "config_not_found", "path", configPath, "reason", "use_defaults")
 		result.Status = "Default"
 		return result
 	}
 
-	log.Printf("Loaded config from: %s", configPath)
+	infoKV("config", "config_loaded", "path", configPath)
 
 	if err := json.Unmarshal(data, &config); err != nil {
 		// Invalid config file - log warning and use defaults
-		log.Printf("Warning: Invalid config file %s, using defaults: %v", configPath, err)
+		warnKV("config", "config_invalid", "path", configPath, "error", err, "reason", "use_defaults")
 		result.HasError = true
 		result.Status = "Error"
 		result.Warnings = append(result.Warnings, fmt.Sprintf("Invalid config file: %v", err))
@@ -377,10 +376,10 @@ func loadConfigFromPath(configPath string) ConfigLoadResult {
 			}
 		}
 
-		// Validate keybindings and resolve conflicts
-		if err := validateKeybindings(config.Keybindings); err != nil {
-			log.Printf("Warning: Invalid keybindings detected, using defaults: %v", err)
-			config.Keybindings = getDefaultKeybindings()
+			// Validate keybindings and resolve conflicts
+			if err := validateKeybindings(config.Keybindings); err != nil {
+				warnKV("config", "keybindings_invalid", "error", err, "reason", "use_defaults")
+				config.Keybindings = getDefaultKeybindings()
 			result.Status = "Warning"
 			result.Warnings = append(result.Warnings, fmt.Sprintf("Keybinding errors: %v", err))
 		}
@@ -398,10 +397,10 @@ func loadConfigFromPath(configPath string) ConfigLoadResult {
 			}
 		}
 
-		// Validate mousebindings and resolve conflicts
-		if err := validateMousebindings(config.Mousebindings); err != nil {
-			log.Printf("Warning: Invalid mousebindings detected, using defaults: %v", err)
-			config.Mousebindings = getDefaultMousebindings()
+			// Validate mousebindings and resolve conflicts
+			if err := validateMousebindings(config.Mousebindings); err != nil {
+				warnKV("config", "mousebindings_invalid", "error", err, "reason", "use_defaults")
+				config.Mousebindings = getDefaultMousebindings()
 			result.Status = "Warning"
 			result.Warnings = append(result.Warnings, fmt.Sprintf("Mousebinding errors: %v", err))
 		}
@@ -428,27 +427,30 @@ func saveConfig(config Config) {
 func saveConfigToPath(config Config, configPath string) {
 	// Don't save if size is too small
 	if config.WindowWidth < minWidth || config.WindowHeight < minHeight {
-		log.Printf("Warning: Not saving config with invalid window size: %dx%d",
-			config.WindowWidth, config.WindowHeight)
+		warnKV("config", "config_save_skipped",
+			"reason", "invalid_window_size",
+			"width", config.WindowWidth,
+			"height", config.WindowHeight,
+		)
 		return
 	}
 
 	// Create directory if it doesn't exist
 	configDir := filepath.Dir(configPath)
 	if err := os.MkdirAll(configDir, 0755); err != nil {
-		log.Printf("Error: Failed to create config directory %s: %v", configDir, err)
+		errorKV("config", "config_dir_create_failed", "path", configDir, "error", err)
 		return
 	}
 
 	data, err := json.MarshalIndent(config, "", "  ")
 	if err != nil {
-		log.Printf("Error: Failed to marshal config: %v", err)
+		errorKV("config", "config_marshal_failed", "error", err)
 		return
 	}
 
 	if err := os.WriteFile(configPath, data, 0644); err != nil {
-		log.Printf("Error: Failed to save config to %s: %v", configPath, err)
+		errorKV("config", "config_save_failed", "path", configPath, "error", err)
 	} else {
-		log.Printf("Saved config to: %s", configPath)
+		infoKV("config", "config_saved", "path", configPath)
 	}
 }

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"image"
 	"image/png"
-	"log"
 	"os"
 
 	"github.com/hajimehoshi/ebiten/v2"
@@ -34,12 +33,14 @@ var icon48 []byte
 
 type startupOptions struct {
 	configPath string
+	logPath    string
 	args       []string
 }
 
 func parseStartupOptions() startupOptions {
 	configFile := flag.String("c", "", "config file path (default: OS config dir)")
 	debug := flag.Bool("d", false, "enable debug logging")
+	logFile := flag.String("log-file", "", "append logs to file as well as console")
 	showVersion := flag.Bool("version", false, "show version information")
 	flag.Parse()
 
@@ -51,6 +52,7 @@ func parseStartupOptions() startupOptions {
 	debugMode = *debug
 	return startupOptions{
 		configPath: *configFile,
+		logPath:    *logFile,
 		args:       flag.Args(),
 	}
 }
@@ -64,6 +66,15 @@ func loadStartupConfig(configPath string) ConfigLoadResult {
 
 func newGameFromStartup(configResult ConfigLoadResult, configPath string, args []string, paths []ImagePath) *Game {
 	config := configResult.Config
+	debugKV("startup", "game_create_begin",
+		"args_count", len(args),
+		"paths_count", len(paths),
+		"book_mode", config.BookMode,
+		"fullscreen", config.Fullscreen,
+		"cache_size", config.CacheSize,
+		"preload_enabled", config.PreloadEnabled,
+		"preload_count", config.PreloadCount,
+	)
 
 	imageManager := NewImageManagerWithPreload(config.CacheSize, config.PreloadCount, config.PreloadEnabled)
 	if dm, ok := imageManager.(*DefaultImageManager); ok {
@@ -118,6 +129,7 @@ func applyStartupConfigWarning(g *Game, configResult ConfigLoadResult) {
 func initializeSingleFileMode(g *Game, args []string) {
 	if len(args) == 1 && isSupportedExt(args[0]) && !isArchiveExt(args[0]) {
 		g.launchSingleFile = args[0]
+		debugKV("startup", "single_file_mode_enabled", "path", args[0])
 	}
 }
 
@@ -128,6 +140,10 @@ func initializeBookModeForLaunch(g *Game, paths []ImagePath) {
 
 	if len(paths) == 1 {
 		g.tempSingleMode = true
+		debugKV("startup", "book_mode_launch_single_fallback",
+			"paths_count", len(paths),
+			"reason", "single_path",
+		)
 		return
 	}
 
@@ -135,6 +151,11 @@ func initializeBookModeForLaunch(g *Game, paths []ImagePath) {
 	if plan.ActualImages != 2 {
 		g.tempSingleMode = true
 	}
+	debugKV("startup", "book_mode_launch_plan",
+		"paths_count", len(paths),
+		"actual_images", plan.ActualImages,
+		"temp_single", g.tempSingleMode,
+	)
 }
 
 func configureWindow(g *Game) {
@@ -148,6 +169,12 @@ func configureWindow(g *Game) {
 		g.savedWinW, g.savedWinH = g.config.WindowWidth, g.config.WindowHeight
 		ebiten.SetFullscreen(true)
 	}
+
+	debugKV("startup", "window_configured",
+		"width", g.config.WindowWidth,
+		"height", g.config.WindowHeight,
+		"fullscreen", g.config.Fullscreen,
+	)
 }
 
 // getWindowTitle returns the window title with version information.
@@ -158,34 +185,43 @@ func getWindowTitle() string {
 	return fmt.Sprintf("Nekomimist's Image Viewer v%s", version)
 }
 
-// debugLog outputs debug messages only when debug mode is enabled.
-func debugLog(format string, args ...interface{}) {
-	if debugMode {
-		log.Printf(format, args...)
-	}
-}
-
 func main() {
 	opts := parseStartupOptions()
+	logFile, err := configureLogOutput(opts.logPath)
+	if err != nil {
+		fatalKV("startup", "log_output_configure_failed", "path", opts.logPath, "error", err)
+	}
+	if logFile != nil {
+		defer logFile.Close()
+		infoKV("startup", "log_file_enabled", "path", opts.logPath)
+	}
+
 	configResult := loadStartupConfig(opts.configPath)
+	debugKV("startup", "options_parsed",
+		"config_path", opts.configPath,
+		"log_path", opts.logPath,
+		"args", opts.args,
+		"debug", debugMode,
+	)
 
 	if err := InitGraphics(); err != nil {
-		log.Printf("Warning: Failed to initialize graphics system: %v", err)
+		warnKV("startup", "graphics_init_failed", "error", err)
 	}
 
 	paths, err := collectImages(opts.args, configResult.Config.SortMethod)
 	if err != nil {
-		log.Fatal(err)
+		fatalKV("startup", "collect_images_failed", "error", err)
 	}
 	if len(paths) == 0 {
-		log.Fatal("no image files specified")
+		fatalKV("startup", "no_images", "args_count", len(opts.args))
 	}
+	infoKV("startup", "images_collected", "paths_count", len(paths), "sort_method", configResult.Config.SortMethod)
 
 	g := newGameFromStartup(configResult, opts.configPath, opts.args, paths)
 	configureWindow(g)
 
 	if err := ebiten.RunGame(g); err != nil && err != ebiten.Termination {
-		log.Fatal(err)
+		fatalKV("startup", "run_game_failed", "error", err)
 	}
 }
 

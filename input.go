@@ -77,6 +77,7 @@ func NewInputHandler(inputActions InputActions, inputState InputState, keybindin
 // Returns true if any input was processed, false otherwise
 func (h *InputHandler) HandleInput() bool {
 	if h.inputActions.GetTotalPagesCount() == 0 {
+		debugKV("input", "handle_input_skip", "reason", "no_pages")
 		return false
 	}
 
@@ -104,6 +105,7 @@ func (h *InputHandler) handleKeyboardInput() bool {
 	// Normal input processing uses the action system
 	for _, actionDef := range actionDefinitions {
 		if h.keybindingManager.ExecuteAction(actionDef.Name, h.inputActions, h.inputState) {
+			debugKV("input", "action", "source", "keyboard", "action", actionDef.Name)
 			return true
 		}
 	}
@@ -118,12 +120,14 @@ func (h *InputHandler) handlePageInputModeKeys() bool {
 	// Handle page input mode special keys
 	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
 		// Cancel page input
+		debugKV("input", "action", "source", "page_input", "action", "page_input_cancel")
 		h.inputActions.ExitPageInputMode()
 		return true
 	}
 
 	if inpututil.IsKeyJustPressed(ebiten.KeyEnter) || inpututil.IsKeyJustPressed(ebiten.KeyNumpadEnter) {
 		// Confirm page input
+		debugKV("input", "action", "source", "page_input", "action", "page_input_confirm", "buffer", h.inputState.GetPageInputBuffer())
 		h.inputActions.ProcessPageInput()
 		h.inputActions.ExitPageInputMode()
 		return true
@@ -135,6 +139,7 @@ func (h *InputHandler) handlePageInputModeKeys() bool {
 		if len(currentBuffer) > 0 {
 			newBuffer := currentBuffer[:len(currentBuffer)-1]
 			h.inputActions.UpdatePageInputBuffer(newBuffer)
+			debugKV("input", "action", "source", "page_input", "action", "page_input_backspace", "buffer", newBuffer)
 		}
 		return true
 	}
@@ -147,6 +152,7 @@ func (h *InputHandler) handlePageInputModeKeys() bool {
 	if digit != "" {
 		currentBuffer := h.inputState.GetPageInputBuffer()
 		h.inputActions.UpdatePageInputBuffer(currentBuffer + digit)
+		debugKV("input", "action", "source", "page_input", "action", "page_input_append", "buffer", currentBuffer+digit)
 		return true
 	}
 
@@ -186,6 +192,7 @@ func (h *InputHandler) handleMouseInput() bool {
 		}
 
 		if h.mousebindingManager.ExecuteAction(actionDef.Name, h.inputActions, h.inputState) {
+			debugKV("input", "action", "source", "mouse", "action", actionDef.Name)
 			return true // Return immediately on first action processed
 		}
 	}
@@ -228,8 +235,10 @@ func (h *InputHandler) handlePendingMouseAction() bool {
 
 	// Button released - execute the pending action
 	action := h.pendingMouseAction.Action
+	startX := h.pendingMouseAction.StartX
+	startY := h.pendingMouseAction.StartY
 	h.pendingMouseAction.Reset()
-
+	debugKV("input", "action", "source", "pending_click", "action", action, "start_x", startX, "start_y", startY)
 	return globalActionExecutor.ExecuteAction(action, h.inputActions, h.inputState)
 }
 
@@ -258,6 +267,11 @@ func (h *InputHandler) handleMouseDragWithConflictResolution() bool {
 			h.dragState.TotalDeltaX = 0
 			h.dragState.TotalDeltaY = 0
 			// Don't set IsDragging yet - wait for threshold
+			debugKV("input", "drag_ready",
+				"start_x", mouseX,
+				"start_y", mouseY,
+				"threshold", mouseSettings.DragThreshold,
+			)
 		}
 		return false // Allow other non-LeftClick processing
 	}
@@ -276,6 +290,14 @@ func (h *InputHandler) handleMouseDragWithConflictResolution() bool {
 			if totalMovement > threshold {
 				// Start dragging - cancel any pending actions
 				h.dragState.IsDragging = true
+				debugKV("input", "drag_start",
+					"start_x", h.dragState.StartX,
+					"start_y", h.dragState.StartY,
+					"mouse_x", mouseX,
+					"mouse_y", mouseY,
+					"threshold", mouseSettings.DragThreshold,
+					"pending_action", h.pendingMouseAction.Action,
+				)
 				h.pendingMouseAction.Reset() // Cancel pending LeftClick
 				return true                  // Consume the input
 			}
@@ -306,6 +328,12 @@ func (h *InputHandler) handleMouseDragWithConflictResolution() bool {
 
 	// Check for drag end (left mouse button just released)
 	if inpututil.IsMouseButtonJustReleased(ebiten.MouseButtonLeft) && h.dragState.IsDragging {
+		debugKV("input", "drag_end",
+			"start_x", h.dragState.StartX,
+			"start_y", h.dragState.StartY,
+			"total_delta_x", h.dragState.TotalDeltaX,
+			"total_delta_y", h.dragState.TotalDeltaY,
+		)
 		h.dragState.Reset()
 		return true // Consume the input
 	}
@@ -317,11 +345,16 @@ func (h *InputHandler) handleMouseDragWithConflictResolution() bool {
 func (h *InputHandler) checkAndSetPendingLeftClickActions(mouseX, mouseY int) {
 	for _, actionDef := range actionDefinitions {
 		if h.isLeftClickAction(actionDef.Name) {
-			if h.mousebindingManager.CheckAction(actionDef.Name) {
-				// Found a LeftClick action that would trigger - make it pending
-				h.pendingMouseAction.SetPending(actionDef.Name, mouseX, mouseY)
-				break // Only one pending action at a time
+				if h.mousebindingManager.CheckAction(actionDef.Name) {
+					// Found a LeftClick action that would trigger - make it pending
+					h.pendingMouseAction.SetPending(actionDef.Name, mouseX, mouseY)
+					debugKV("input", "pending_click_set",
+						"action", actionDef.Name,
+						"start_x", mouseX,
+						"start_y", mouseY,
+					)
+					break // Only one pending action at a time
+				}
 			}
 		}
 	}
-}

@@ -275,6 +275,11 @@ func (g *Game) settingsAdjust(left bool) {
 		c.MouseSettings.DragThreshold = clampInt(c.MouseSettings.DragThreshold+stepSign*1, 1, 20)
 	}
 	g.pendingConfig = c
+	debugKV("config", "settings_adjust",
+		"setting", settingsListOrder()[idx],
+		"direction", map[bool]string{true: "left", false: "right"}[left],
+		"value", getSettingValueStringFromConfig(g.pendingConfig, idx),
+	)
 }
 
 // settingsToggle toggles bool/enums or triggers save/cancel on Enter
@@ -293,35 +298,43 @@ func (g *Game) settingsToggleOrEnter() {
 func (h *InputHandler) handleSettingsModeKeys() bool {
 	// Allow the dedicated action to close the panel
 	if h.keybindingManager.ExecuteAction("toggle_settings", h.inputActions, h.inputState) {
+		debugKV("input", "action", "source", "settings", "action", "toggle_settings")
 		return true
 	}
 
 	// Navigation
 	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
+		debugKV("input", "action", "source", "settings", "action", "settings_cancel")
 		h.inputActions.SettingsCancel()
 		return true
 	}
 	if ebiten.IsKeyPressed(ebiten.KeyControl) && inpututil.IsKeyJustPressed(ebiten.KeyS) {
+		debugKV("input", "action", "source", "settings", "action", "settings_save")
 		h.inputActions.SettingsSave()
 		return true
 	}
 	if inpututil.IsKeyJustPressed(ebiten.KeyArrowUp) {
+		debugKV("input", "action", "source", "settings", "action", "settings_move_up")
 		h.inputActions.SettingsMoveUp()
 		return true
 	}
 	if inpututil.IsKeyJustPressed(ebiten.KeyArrowDown) {
+		debugKV("input", "action", "source", "settings", "action", "settings_move_down")
 		h.inputActions.SettingsMoveDown()
 		return true
 	}
 	if inpututil.IsKeyJustPressed(ebiten.KeyArrowLeft) {
+		debugKV("input", "action", "source", "settings", "action", "settings_left")
 		h.inputActions.SettingsLeft()
 		return true
 	}
 	if inpututil.IsKeyJustPressed(ebiten.KeyArrowRight) {
+		debugKV("input", "action", "source", "settings", "action", "settings_right")
 		h.inputActions.SettingsRight()
 		return true
 	}
 	if inpututil.IsKeyJustPressed(ebiten.KeyEnter) || inpututil.IsKeyJustPressed(ebiten.KeyNumpadEnter) {
+		debugKV("input", "action", "source", "settings", "action", "settings_enter")
 		h.inputActions.SettingsEnter()
 		return true
 	}

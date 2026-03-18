@@ -35,6 +35,17 @@ const (
 	CollectionSourceExpandedSingleDirectory
 )
 
+func (m CollectionSourceMode) String() string {
+	switch m {
+	case CollectionSourceArgs:
+		return "args"
+	case CollectionSourceExpandedSingleDirectory:
+		return "expanded_single_directory"
+	default:
+		return "unknown"
+	}
+}
+
 type CollectionSource struct {
 	Mode             CollectionSourceMode
 	Args             []string
@@ -97,6 +108,13 @@ func (g *Game) reloadPathsForCurrentSource() bool {
 
 	paths, err := g.collectionSource.collect(g.config.SortMethod)
 	if err != nil || len(paths) == 0 {
+		debugKV("collection", "reload_paths_failed",
+			"source_mode", g.collectionSource.Mode,
+			"sort_method", g.config.SortMethod,
+			"current_path", currentPath,
+			"paths_count", len(paths),
+			"error", err,
+		)
 		return false
 	}
 
@@ -112,18 +130,35 @@ func (g *Game) reloadPathsForCurrentSource() bool {
 
 	g.setCurrentIndex(targetIdx)
 	g.calculateDisplayContent()
+	debugKV("collection", "reload_paths_complete",
+		"source_mode", g.collectionSource.Mode,
+		"sort_method", g.config.SortMethod,
+		"current_path", currentPath,
+		"target_idx", targetIdx,
+		"paths_count", len(paths),
+	)
 	return true
 }
 
 func (g *Game) cycleSortMethod() {
+	prevSortMethod := g.config.SortMethod
 	g.config.SortMethod = (g.config.SortMethod + 1) % 3
 	g.showOverlayMessage("Sort: " + getSortMethodName(g.config.SortMethod))
 	g.reloadPathsForCurrentSource()
+	debugKV("collection", "cycle_sort_method",
+		"prev_sort_method", prevSortMethod,
+		"next_sort_method", g.config.SortMethod,
+		"source_mode", g.collectionSource.Mode,
+	)
 }
 
 func (g *Game) expandToDirectoryAndJump() {
 	// Only work when launched with a single regular image and not yet expanded.
 	if g.launchSingleFile == "" || g.collectionSource.Mode == CollectionSourceExpandedSingleDirectory {
+		debugKV("collection", "expand_directory_skip",
+			"launch_single_file", g.launchSingleFile,
+			"source_mode", g.collectionSource.Mode,
+		)
 		return
 	}
 
@@ -132,11 +167,21 @@ func (g *Game) expandToDirectoryAndJump() {
 	newPaths, err := collectImagesFromSameDirectory(originalFilePath, g.config.SortMethod)
 	if err != nil {
 		g.showOverlayMessage(fmt.Sprintf("Failed to scan directory: %v", err))
+		debugKV("collection", "expand_directory_failed",
+			"path", originalFilePath,
+			"sort_method", g.config.SortMethod,
+			"error", err,
+		)
 		return
 	}
 
 	if len(newPaths) == 0 {
 		g.showOverlayMessage("No images found in directory")
+		debugKV("collection", "expand_directory_failed",
+			"path", originalFilePath,
+			"sort_method", g.config.SortMethod,
+			"reason", "no_images",
+		)
 		return
 	}
 
@@ -150,6 +195,11 @@ func (g *Game) expandToDirectoryAndJump() {
 
 	if originalFileIndex == -1 {
 		g.showOverlayMessage("Original file not found in directory")
+		debugKV("collection", "expand_directory_failed",
+			"path", originalFilePath,
+			"sort_method", g.config.SortMethod,
+			"reason", "original_file_not_found",
+		)
 		return
 	}
 
@@ -158,4 +208,10 @@ func (g *Game) expandToDirectoryAndJump() {
 	g.idx = originalFileIndex
 	g.showOverlayMessage(fmt.Sprintf("Loaded %d images from directory", len(newPaths)))
 	g.calculateDisplayContent()
+	debugKV("collection", "expand_directory_complete",
+		"path", originalFilePath,
+		"sort_method", g.config.SortMethod,
+		"paths_count", len(newPaths),
+		"target_idx", originalFileIndex,
+	)
 }
