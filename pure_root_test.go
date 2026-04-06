@@ -305,6 +305,177 @@ func TestPureDefaultWindowSizeValidation(t *testing.T) {
 	}
 }
 
+func TestPureNormalizeConfigPath(t *testing.T) {
+	tempDir := t.TempDir()
+	configDir := filepath.Join(tempDir, "configs")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+
+	originalWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	defer func() {
+		if chdirErr := os.Chdir(originalWD); chdirErr != nil {
+			t.Fatalf("restore wd: %v", chdirErr)
+		}
+	}()
+
+	if err := os.Chdir(tempDir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+
+	relPath := filepath.Join("configs", "..", "configs", "viewer.json")
+	got, err := normalizeConfigPath(relPath)
+	if err != nil {
+		t.Fatalf("normalizeConfigPath failed: %v", err)
+	}
+
+	want := filepath.Join(configDir, "viewer.json")
+	if got != want {
+		t.Fatalf("normalizeConfigPath = %q, want %q", got, want)
+	}
+}
+
+func TestPureSingleInstanceEndpointDependsOnNormalizedConfigPath(t *testing.T) {
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, "viewer.json")
+
+	first := singleInstanceEndpoint(configPath)
+	second := singleInstanceEndpoint(filepath.Clean(filepath.Join(tempDir, ".", "viewer.json")))
+	third := singleInstanceEndpoint(filepath.Join(tempDir, "other.json"))
+
+	if first != second {
+		t.Fatalf("expected same endpoint for same normalized path, got %q and %q", first, second)
+	}
+	if first == third {
+		t.Fatalf("expected different endpoint for different config paths, got %q", first)
+	}
+}
+
+func TestPureNewForwardRequestNormalizesArgs(t *testing.T) {
+	tempDir := t.TempDir()
+	imagePath := filepath.Join(tempDir, "sample.png")
+	if err := os.WriteFile(imagePath, []byte("x"), 0644); err != nil {
+		t.Fatalf("write image path: %v", err)
+	}
+
+	originalWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	defer func() {
+		if chdirErr := os.Chdir(originalWD); chdirErr != nil {
+			t.Fatalf("restore wd: %v", chdirErr)
+		}
+	}()
+
+	if err := os.Chdir(tempDir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+
+	req, err := newForwardRequest([]string{"./sample.png"})
+	if err != nil {
+		t.Fatalf("newForwardRequest failed: %v", err)
+	}
+	if req.ActivateOnly {
+		t.Fatal("expected non-activate request")
+	}
+	if len(req.Args) != 1 {
+		t.Fatalf("args len = %d, want 1", len(req.Args))
+	}
+	if req.Args[0] != imagePath {
+		t.Fatalf("normalized arg = %q, want %q", req.Args[0], imagePath)
+	}
+}
+
+func TestPureReplaceCollectionFromArgsResetsRuntimeState(t *testing.T) {
+	tempDir := t.TempDir()
+	imagePath := filepath.Join(tempDir, "page1.png")
+	if err := os.WriteFile(imagePath, []byte("x"), 0644); err != nil {
+		t.Fatalf("write image path: %v", err)
+	}
+
+	imageManager := &stubImageManager{}
+	g := &Game{
+		imageManager: imageManager,
+		zoomState:    NewZoomState(),
+		config: Config{
+			BookMode:        true,
+			InitialZoomMode: "actual_size",
+		},
+		idx:                  5,
+		bookMode:             false,
+		tempSingleMode:       true,
+		showHelp:             true,
+		showInfo:             true,
+		showSettings:         true,
+		settingsIndex:        3,
+		pageInputMode:        true,
+		pageInputBuffer:      "42",
+		rotationAngle:        90,
+		flipH:                true,
+		flipV:                true,
+		learnedSpreadAspects: []float64{2.0, 2.1},
+	}
+	g.zoomState.Mode = ZoomModeFitWidth
+	g.zoomState.Level = 2.5
+	g.zoomState.PanOffsetX = 123
+	g.zoomState.PanOffsetY = -45
+
+	args := []string{imagePath}
+	paths := []ImagePath{{Path: imagePath}}
+
+	g.replaceCollectionFromArgs(args, paths)
+
+	if got := g.idx; got != 0 {
+		t.Fatalf("idx = %d, want 0", got)
+	}
+	if !g.bookMode {
+		t.Fatal("expected bookMode to reset from config")
+	}
+	if !g.tempSingleMode {
+		t.Fatal("expected single-file launch in book mode to enable tempSingleMode")
+	}
+	if g.rotationAngle != 0 || g.flipH || g.flipV {
+		t.Fatalf("transform state not reset: rotation=%d flipH=%v flipV=%v", g.rotationAngle, g.flipH, g.flipV)
+	}
+	if g.showHelp || g.showInfo || g.showSettings || g.pageInputMode {
+		t.Fatalf("ui mode flags not reset: help=%v info=%v settings=%v pageInput=%v", g.showHelp, g.showInfo, g.showSettings, g.pageInputMode)
+	}
+	if g.pageInputBuffer != "" {
+		t.Fatalf("pageInputBuffer = %q, want empty", g.pageInputBuffer)
+	}
+	if len(g.learnedSpreadAspects) != 0 {
+		t.Fatalf("learnedSpreadAspects = %v, want empty", g.learnedSpreadAspects)
+	}
+	if g.collectionSource.Mode != CollectionSourceArgs {
+		t.Fatalf("collectionSource.Mode = %v, want args", g.collectionSource.Mode)
+	}
+	if !reflect.DeepEqual(g.collectionSource.Args, args) {
+		t.Fatalf("collectionSource.Args = %v, want %v", g.collectionSource.Args, args)
+	}
+	if g.launchSingleFile != imagePath {
+		t.Fatalf("launchSingleFile = %q, want %q", g.launchSingleFile, imagePath)
+	}
+	if g.zoomState.Mode != ZoomModeManual || g.zoomState.Level != 1.0 {
+		t.Fatalf("zoom reset failed: mode=%v level=%v", g.zoomState.Mode, g.zoomState.Level)
+	}
+	if g.zoomState.PanOffsetX != 0 || g.zoomState.PanOffsetY != 0 {
+		t.Fatalf("pan reset failed: x=%v y=%v", g.zoomState.PanOffsetX, g.zoomState.PanOffsetY)
+	}
+	if got := imageManager.GetPathsCount(); got != 1 {
+		t.Fatalf("paths count = %d, want 1", got)
+	}
+	if got := len(imageManager.preloadDirections); got != 1 || imageManager.preloadDirections[0] != NavigationJump {
+		t.Fatalf("preload directions = %v, want [jump]", imageManager.preloadDirections)
+	}
+	if g.displayContent == nil || g.displayContent.Metadata.TotalPages != 1 {
+		t.Fatalf("display content metadata = %+v, want total pages 1", g.displayContent)
+	}
+}
+
 func TestPureCollectImages(t *testing.T) {
 	tempDir := t.TempDir()
 

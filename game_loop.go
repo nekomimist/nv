@@ -7,6 +7,11 @@ import (
 )
 
 func (g *Game) Update() error {
+	if g.applyPendingOpenRequests() {
+		g.wasInputHandled = true
+		g.renderer.lastSnapshot = nil
+	}
+
 	if !g.wasInputHandled {
 		g.wasInputHandled = g.inputHandler.HandleInput()
 	}

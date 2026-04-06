@@ -85,6 +85,9 @@ type Game struct {
 	settingsIndex int
 	pendingConfig Config
 
+	externalOpenRequests <-chan pendingLaunchRequest
+	instanceBridge       *singleInstanceBridge
+
 	exitRequested bool
 	didShutdown   bool
 }

@@ -143,6 +143,7 @@ func (g *Game) reloadPathsForCurrentSource() bool {
 func (g *Game) cycleSortMethod() {
 	prevSortMethod := g.config.SortMethod
 	g.config.SortMethod = (g.config.SortMethod + 1) % 3
+	g.updateSingleInstanceSortMethod()
 	g.showOverlayMessage("Sort: " + getSortMethodName(g.config.SortMethod))
 	g.reloadPathsForCurrentSource()
 	debugKV("collection", "cycle_sort_method",
@@ -213,5 +214,66 @@ func (g *Game) expandToDirectoryAndJump() {
 		"sort_method", g.config.SortMethod,
 		"paths_count", len(newPaths),
 		"target_idx", originalFileIndex,
+	)
+}
+
+func (g *Game) applyPendingOpenRequests() bool {
+	if g.externalOpenRequests == nil {
+		return false
+	}
+
+	applied := false
+	for {
+		select {
+		case req := <-g.externalOpenRequests:
+			g.applyPendingOpenRequest(req)
+			applied = true
+		default:
+			return applied
+		}
+	}
+}
+
+func (g *Game) applyPendingOpenRequest(req pendingLaunchRequest) {
+	bestEffortActivateWindow()
+	if req.ActivateOnly {
+		debugKV("single_instance", "activate_existing_window")
+		return
+	}
+
+	g.replaceCollectionFromArgs(req.Args, req.Paths)
+}
+
+func (g *Game) replaceCollectionFromArgs(args []string, paths []ImagePath) {
+	g.imageManager.SetPaths(paths)
+	g.collectionSource = newArgsCollectionSource(args)
+	g.launchSingleFile = ""
+	g.idx = 0
+	g.tempSingleMode = false
+	g.bookMode = g.config.BookMode
+	g.learnedSpreadAspects = nil
+	g.rotationAngle = 0
+	g.flipH = false
+	g.flipV = false
+	g.showHelp = false
+	g.showInfo = false
+	g.showSettings = false
+	g.settingsIndex = 0
+	g.pendingConfig = Config{}
+	g.pageInputMode = false
+	g.pageInputBuffer = ""
+
+	g.resetZoomToInitial()
+	initializeSingleFileMode(g, args)
+	initializeBookModeForLaunch(g, paths)
+	g.calculateDisplayContent()
+	g.imageManager.StartPreload(g.idx, NavigationJump)
+	g.showOverlayMessage(fmt.Sprintf("Loaded %d image(s)", len(paths)))
+
+	debugKV("single_instance", "replace_collection",
+		"args_count", len(args),
+		"paths_count", len(paths),
+		"book_mode", g.bookMode,
+		"temp_single", g.tempSingleMode,
 	)
 }

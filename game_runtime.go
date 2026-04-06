@@ -95,6 +95,7 @@ func (g *Game) applyConfigResult(res ConfigLoadResult) {
 func (g *Game) applyNewConfig(newCfg Config) {
 	old := g.config
 	g.config = newCfg
+	g.updateSingleInstanceSortMethod()
 	debugKV("config", "apply_config_begin",
 		"old_fullscreen", old.Fullscreen,
 		"new_fullscreen", g.config.Fullscreen,
@@ -143,6 +144,12 @@ func (g *Game) applyNewConfig(newCfg Config) {
 		"cache_size", g.config.CacheSize,
 		"cache_resize_requires_restart", old.CacheSize != g.config.CacheSize,
 	)
+}
+
+func (g *Game) updateSingleInstanceSortMethod() {
+	if g.instanceBridge != nil {
+		g.instanceBridge.SetSortMethod(g.config.SortMethod)
+	}
 }
 
 // updatePreloadConfig updates preload manager (no effect on cache size; restart needed for cache resize).

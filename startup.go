@@ -197,6 +197,20 @@ func main() {
 	}
 
 	configResult := loadStartupConfig(opts.configPath)
+	instanceBridge := newSingleInstanceBridge(configResult.Config.SortMethod)
+	instanceManager, err := newSingleInstanceManager(opts.configPath)
+	if err != nil {
+		fatalKV("single_instance", "init_failed", "config_path", opts.configPath, "error", err)
+	}
+	isPrimary, err := instanceManager.AcquireOrForward(opts.args, instanceBridge)
+	if err != nil {
+		fatalKV("single_instance", "acquire_failed", "config_path", opts.configPath, "error", err)
+	}
+	if !isPrimary {
+		return
+	}
+	defer instanceManager.Close()
+
 	debugKV("startup", "options_parsed",
 		"config_path", opts.configPath,
 		"log_path", opts.logPath,
@@ -218,6 +232,7 @@ func main() {
 	infoKV("startup", "images_collected", "paths_count", len(paths), "sort_method", configResult.Config.SortMethod)
 
 	g := newGameFromStartup(configResult, opts.configPath, opts.args, paths)
+	initSingleInstanceBridge(instanceBridge, g)
 	configureWindow(g)
 
 	if err := ebiten.RunGame(g); err != nil && err != ebiten.Termination {
