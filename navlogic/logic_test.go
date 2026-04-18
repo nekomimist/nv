@@ -1,6 +1,10 @@
 package navlogic
 
-import "testing"
+import (
+	"fmt"
+	"math/rand"
+	"testing"
+)
 
 func lookupFromSlice(metrics []PageMetrics) MetricsLookup {
 	return func(idx int) PageMetrics {
@@ -8,6 +12,150 @@ func lookupFromSlice(metrics []PageMetrics) MetricsLookup {
 			return PageMetrics{}
 		}
 		return metrics[idx]
+	}
+}
+
+type testPageKind int
+
+const (
+	testPagePairable testPageKind = iota
+	testPageForcedSingle
+)
+
+func (k testPageKind) String() string {
+	switch k {
+	case testPagePairable:
+		return "pairable"
+	case testPageForcedSingle:
+		return "forcedSingle"
+	default:
+		return fmt.Sprintf("unknown(%d)", int(k))
+	}
+}
+
+func metricsFromKinds(kinds []testPageKind) []PageMetrics {
+	metrics := make([]PageMetrics, len(kinds))
+	for i, kind := range kinds {
+		switch kind {
+		case testPagePairable:
+			metrics[i] = PageMetrics{Width: 100, Height: 150}
+		case testPageForcedSingle:
+			metrics[i] = PageMetrics{Width: 100, Height: 1000}
+		default:
+			panic(fmt.Sprintf("unsupported page kind: %d", kind))
+		}
+	}
+	return metrics
+}
+
+func kindsString(kinds []testPageKind) string {
+	return fmt.Sprint(kinds)
+}
+
+func displayedIndicesForTest(t *testing.T, plan DisplayPlan, pageCount int) []int {
+	t.Helper()
+
+	displayed := make([]int, 0, 2)
+	if plan.LeftIndex >= 0 {
+		displayed = append(displayed, plan.LeftIndex)
+	}
+	if plan.RightIndex >= 0 {
+		displayed = append(displayed, plan.RightIndex)
+	}
+
+	if len(displayed) != plan.ActualImages {
+		t.Fatalf("ActualImages mismatch: plan=%+v displayed=%v", plan, displayed)
+	}
+
+	seen := make(map[int]struct{}, len(displayed))
+	for _, idx := range displayed {
+		if idx < 0 || idx >= pageCount {
+			t.Fatalf("displayed index out of range: idx=%d pageCount=%d plan=%+v", idx, pageCount, plan)
+		}
+		if _, ok := seen[idx]; ok {
+			t.Fatalf("displayed duplicate index within one plan: idx=%d plan=%+v", idx, plan)
+		}
+		seen[idx] = struct{}{}
+	}
+
+	return displayed
+}
+
+func formatPlanHistory(history []DisplayPlan) string {
+	return fmt.Sprint(history)
+}
+
+func verifyForwardCoverage(t *testing.T, kinds []testPageKind, rightToLeft bool) State {
+	t.Helper()
+
+	metrics := metricsFromKinds(kinds)
+	lookup := lookupFromSlice(metrics)
+	state := State{
+		Index:                0,
+		PageCount:            len(metrics),
+		BookMode:             true,
+		RightToLeft:          rightToLeft,
+		AspectRatioThreshold: 1.5,
+	}
+
+	counts := make([]int, len(metrics))
+	history := make([]DisplayPlan, 0, len(metrics))
+	for {
+		plan := PlanDisplay(state, lookup)
+		history = append(history, plan)
+		for _, idx := range displayedIndicesForTest(t, plan, len(metrics)) {
+			counts[idx]++
+		}
+
+		nextState, boundary := NavigateNext(state, lookup, false)
+		if boundary == BoundaryLastPage {
+			break
+		}
+		if boundary != BoundaryNone {
+			t.Fatalf("unexpected forward boundary: %v state=%+v history=%s", boundary, state, formatPlanHistory(history))
+		}
+		state = nextState
+	}
+
+	for idx, count := range counts {
+		if count != 1 {
+			t.Fatalf("forward coverage mismatch: page=%d count=%d kinds=%s rtl=%v history=%s", idx, count, kindsString(kinds), rightToLeft, formatPlanHistory(history))
+		}
+	}
+
+	return state
+}
+
+func verifyBackwardCoverage(t *testing.T, kinds []testPageKind, start State) {
+	t.Helper()
+
+	metrics := metricsFromKinds(kinds)
+	lookup := lookupFromSlice(metrics)
+	counts := make([]int, len(metrics))
+	history := make([]DisplayPlan, 0, len(metrics))
+	state := start
+
+	for {
+		plan := PlanDisplay(state, lookup)
+		history = append(history, plan)
+		for _, idx := range displayedIndicesForTest(t, plan, len(metrics)) {
+			counts[idx]++
+		}
+
+		nextState, boundary := NavigatePrevious(state, lookup, false)
+		if boundary == BoundaryFirstPage {
+			break
+		}
+		if boundary != BoundaryNone {
+			t.Fatalf("unexpected backward boundary: %v state=%+v history=%s", boundary, state, formatPlanHistory(history))
+		}
+		state = nextState
+	}
+
+	for idx, count := range counts {
+		if count != 1 {
+			t.Fatalf("backward coverage mismatch: page=%d count=%d kinds=%s rtl=%v history=%s", idx, count, kindsString(kinds), start.RightToLeft, formatPlanHistory(history))
+		}
 	}
 }
 
@@ -500,5 +648,84 @@ func TestToggleBookMode(t *testing.T) {
 	}, lookupFromSlice([]PageMetrics{{Width: 100, Height: 150}}))
 	if !singlePage.BookMode || !singlePage.TempSingleMode {
 		t.Fatalf("expected single-page temp single mode, got %+v", singlePage)
+	}
+}
+
+func TestNavigationTraversalCoversEachPageExactlyOncePerDirection(t *testing.T) {
+	fixedCases := []struct {
+		name  string
+		kinds []testPageKind
+	}{
+		{
+			name:  "single page",
+			kinds: []testPageKind{testPagePairable},
+		},
+		{
+			name:  "all pairable",
+			kinds: []testPageKind{testPagePairable, testPagePairable, testPagePairable, testPagePairable, testPagePairable},
+		},
+		{
+			name:  "all forced single",
+			kinds: []testPageKind{testPageForcedSingle, testPageForcedSingle, testPageForcedSingle, testPageForcedSingle, testPageForcedSingle},
+		},
+		{
+			name:  "alternating",
+			kinds: []testPageKind{testPagePairable, testPageForcedSingle, testPagePairable, testPageForcedSingle, testPagePairable, testPageForcedSingle},
+		},
+		{
+			name: "odd pairable run between singles",
+			kinds: []testPageKind{
+				testPageForcedSingle,
+				testPagePairable, testPagePairable, testPagePairable,
+				testPageForcedSingle,
+			},
+		},
+		{
+			name: "even pairable run between singles",
+			kinds: []testPageKind{
+				testPageForcedSingle,
+				testPagePairable, testPagePairable, testPagePairable, testPagePairable,
+				testPageForcedSingle,
+			},
+		},
+	}
+
+	for _, rightToLeft := range []bool{false, true} {
+		directionName := "ltr"
+		if rightToLeft {
+			directionName = "rtl"
+		}
+
+		t.Run(directionName, func(t *testing.T) {
+			for _, tc := range fixedCases {
+				t.Run(tc.name, func(t *testing.T) {
+					lastState := verifyForwardCoverage(t, tc.kinds, rightToLeft)
+					verifyBackwardCoverage(t, tc.kinds, lastState)
+				})
+			}
+
+			const (
+				randomSeed  int64 = 20260418
+				randomCases       = 1000
+				maxPages          = 40
+			)
+			rng := rand.New(rand.NewSource(randomSeed))
+
+			for i := 0; i < randomCases; i++ {
+				kinds := make([]testPageKind, 1+rng.Intn(maxPages))
+				for j := range kinds {
+					if rng.Intn(2) == 0 {
+						kinds[j] = testPagePairable
+					} else {
+						kinds[j] = testPageForcedSingle
+					}
+				}
+
+				t.Run(fmt.Sprintf("random_%03d", i), func(t *testing.T) {
+					lastState := verifyForwardCoverage(t, kinds, rightToLeft)
+					verifyBackwardCoverage(t, kinds, lastState)
+				})
+			}
+		})
 	}
 }

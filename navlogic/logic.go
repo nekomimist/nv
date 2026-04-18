@@ -162,7 +162,7 @@ func NavigatePrevious(state State, lookup MetricsLookup, singleStep bool) (State
 		return state, BoundaryFirstPage
 	}
 
-	if state.TempSingleMode {
+	if state.TempSingleMode && !state.BookMode {
 		if state.Index < 2 {
 			state.Index = 0
 		} else {
@@ -184,6 +184,7 @@ func NavigatePrevious(state State, lookup MetricsLookup, singleStep bool) (State
 		if prevPairAnchor >= 0 {
 			prevState := state
 			prevState.Index = prevPairAnchor
+			prevState.TempSingleMode = false
 			prevPlan := PlanDisplay(prevState, lookup)
 			if prevPlan.ActualImages == 2 &&
 				minDisplayedIndex(prevPlan) == prevPairAnchor &&
