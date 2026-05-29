@@ -8,8 +8,10 @@ A quick orientation for humans and AI agents working on this repo. Short, factua
 
 ## Quickstart
 - Build: `make linux` / `make windows` / `make debug` (Windows icon requires `rsrc`).
+- Native decode build: `make linux-native` / `make windows-native`.
 - Run: `go run . [images|directories|archives...]`
 - Checks: `make test` / `make fmt` / `make vet` / `make lint` / `make check`
+- Decode benchmarks: `make bench-decode` / `make bench-decode-native` / `make bench-decode-windows`
 
 ## Layout (Key Files)
 - `main.go`: Entrypoint; initialization and startup flow.
@@ -39,6 +41,8 @@ A quick orientation for humans and AI agents working on this repo. Short, factua
 
 ## Platform Notes
 - For Windows builds, install `rsrc`: `go install github.com/akavel/rsrc@latest`.
+- Linux native decode builds need `libpng-dev`, `libturbojpeg0-dev`, and CGO.
+- Windows native decode cross-builds from WSL need `gcc-mingw-w64` and `g++-mingw-w64`.
 
 ## Config Paths
 - Linux: `~/.config/nekomimist/nv/config.json`

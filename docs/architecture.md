@@ -123,6 +123,17 @@ Two modes bypass the generic action flow for practical reasons:
 - LRU cache eviction
 - large-image downscaling before Ebiten image creation
 
+Actual file/byte decoding is delegated to `internal/imgdecode` so that the
+decode path can be tested and benchmarked without importing Ebiten. The
+default build uses Go's standard image decoders. Builds with the
+`native_decode` tag opt into CGO-backed PNG/JPEG decode:
+
+- Linux uses libpng and TurboJPEG.
+- Windows uses Windows Imaging Component.
+- JPEG always tries native decode first in native builds.
+- PNG only tries native decode for images of at least 1 megapixel; smaller
+  PNG files stay on the standard decoder to avoid native setup overhead.
+
 This is the most explicit interface boundary in the repo.
 
 ## Behavior Notes
