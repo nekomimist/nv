@@ -345,16 +345,16 @@ func (h *InputHandler) handleMouseDragWithConflictResolution() bool {
 func (h *InputHandler) checkAndSetPendingLeftClickActions(mouseX, mouseY int) {
 	for _, actionDef := range actionDefinitions {
 		if h.isLeftClickAction(actionDef.Name) {
-				if h.mousebindingManager.CheckAction(actionDef.Name) {
-					// Found a LeftClick action that would trigger - make it pending
-					h.pendingMouseAction.SetPending(actionDef.Name, mouseX, mouseY)
-					debugKV("input", "pending_click_set",
-						"action", actionDef.Name,
-						"start_x", mouseX,
-						"start_y", mouseY,
-					)
-					break // Only one pending action at a time
-				}
+			if h.mousebindingManager.CheckAction(actionDef.Name) {
+				// Found a LeftClick action that would trigger - make it pending
+				h.pendingMouseAction.SetPending(actionDef.Name, mouseX, mouseY)
+				debugKV("input", "pending_click_set",
+					"action", actionDef.Name,
+					"start_x", mouseX,
+					"start_y", mouseY,
+				)
+				break // Only one pending action at a time
 			}
 		}
 	}
+}

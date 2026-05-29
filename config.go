@@ -376,10 +376,10 @@ func loadConfigFromPath(configPath string) ConfigLoadResult {
 			}
 		}
 
-			// Validate keybindings and resolve conflicts
-			if err := validateKeybindings(config.Keybindings); err != nil {
-				warnKV("config", "keybindings_invalid", "error", err, "reason", "use_defaults")
-				config.Keybindings = getDefaultKeybindings()
+		// Validate keybindings and resolve conflicts
+		if err := validateKeybindings(config.Keybindings); err != nil {
+			warnKV("config", "keybindings_invalid", "error", err, "reason", "use_defaults")
+			config.Keybindings = getDefaultKeybindings()
 			result.Status = "Warning"
 			result.Warnings = append(result.Warnings, fmt.Sprintf("Keybinding errors: %v", err))
 		}
@@ -397,10 +397,10 @@ func loadConfigFromPath(configPath string) ConfigLoadResult {
 			}
 		}
 
-			// Validate mousebindings and resolve conflicts
-			if err := validateMousebindings(config.Mousebindings); err != nil {
-				warnKV("config", "mousebindings_invalid", "error", err, "reason", "use_defaults")
-				config.Mousebindings = getDefaultMousebindings()
+		// Validate mousebindings and resolve conflicts
+		if err := validateMousebindings(config.Mousebindings); err != nil {
+			warnKV("config", "mousebindings_invalid", "error", err, "reason", "use_defaults")
+			config.Mousebindings = getDefaultMousebindings()
 			result.Status = "Warning"
 			result.Warnings = append(result.Warnings, fmt.Sprintf("Mousebinding errors: %v", err))
 		}
