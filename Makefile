@@ -13,6 +13,8 @@ LDFLAGS_GUI := $(LDFLAGS) -H windowsgui
 BINARY_LINUX := nv
 BINARY_WINDOWS := nv.exe
 BINARY_WINDOWS_DEBUG := nv-debug.exe
+BINARY_LINUX_NATIVE := nv-native
+BINARY_WINDOWS_NATIVE := nv-native.exe
 RESOURCE_FILE := nv.syso
 
 # Default target
@@ -26,12 +28,24 @@ linux: $(RESOURCE_FILE)
 	go build -ldflags "$(LDFLAGS)" -o $(BINARY_LINUX)
 	@echo "Linux build complete: $(BINARY_LINUX)"
 
+.PHONY: linux-native
+linux-native: $(RESOURCE_FILE)
+	@echo "Building Linux native-decode version v$(VERSION)..."
+	CGO_ENABLED=1 go build -tags native_decode -ldflags "$(LDFLAGS)" -o $(BINARY_LINUX_NATIVE)
+	@echo "Linux native-decode build complete: $(BINARY_LINUX_NATIVE)"
+
 # Windows GUI build
 .PHONY: windows
 windows: $(RESOURCE_FILE)
 	@echo "Building Windows GUI version v$(VERSION)..."
 	GOOS=windows GOARCH=amd64 go build -ldflags "$(LDFLAGS_GUI)" -o $(BINARY_WINDOWS)
 	@echo "Windows GUI build complete: $(BINARY_WINDOWS)"
+
+.PHONY: windows-native
+windows-native: $(RESOURCE_FILE)
+	@echo "Building Windows native-decode GUI version v$(VERSION)..."
+	GOOS=windows GOARCH=amd64 CGO_ENABLED=1 CC=x86_64-w64-mingw32-gcc CXX=x86_64-w64-mingw32-g++ go build -tags native_decode -ldflags "$(LDFLAGS_GUI)" -o $(BINARY_WINDOWS_NATIVE)
+	@echo "Windows native-decode GUI build complete: $(BINARY_WINDOWS_NATIVE)"
 
 # Windows debug build (with console)
 .PHONY: debug
@@ -62,7 +76,7 @@ icon:
 .PHONY: clean
 clean:
 	@echo "Cleaning build artifacts..."
-	@rm -f $(BINARY_LINUX) $(BINARY_WINDOWS) $(BINARY_WINDOWS_DEBUG)
+	@rm -f $(BINARY_LINUX) $(BINARY_WINDOWS) $(BINARY_WINDOWS_DEBUG) $(BINARY_LINUX_NATIVE) $(BINARY_WINDOWS_NATIVE)
 	@echo "Clean complete"
 
 # Clean everything including generated files
@@ -101,6 +115,21 @@ test:
 test-pure:
 	@echo "Running pure tests..."
 	GOCACHE=/tmp/nv-go-build-cache go test ./navlogic
+
+.PHONY: bench-decode
+bench-decode:
+	@echo "Benchmarking stdlib image decode..."
+	GOCACHE=/tmp/nv-go-build-cache go test ./internal/imgdecode -run '^$$' -bench '^BenchmarkDecode' -benchmem -count=5
+
+.PHONY: bench-decode-native
+bench-decode-native:
+	@echo "Benchmarking native image decode..."
+	GOCACHE=/tmp/nv-go-build-cache CGO_ENABLED=1 go test ./internal/imgdecode -tags native_decode -run '^$$' -bench '^BenchmarkDecode' -benchmem -count=5
+
+.PHONY: bench-decode-windows
+bench-decode-windows:
+	@echo "Benchmarking Windows stdlib and WIC decode via WSL..."
+	scripts/bench-decode-wsl-windows.sh
 
 .PHONY: test-root-pure
 test-root-pure:
@@ -145,7 +174,9 @@ help:
 	@echo ""
 	@echo "  make           - Build Linux and Windows versions"
 	@echo "  make linux     - Build Linux version"
+	@echo "  make linux-native - Build Linux version with CGO native PNG/JPEG decode"
 	@echo "  make windows   - Build Windows GUI version"
+	@echo "  make windows-native - Build Windows GUI version with CGO WIC decode"
 	@echo "  make debug     - Build Windows debug version (with console)"
 	@echo "  make all       - Build all versions"
 	@echo ""
@@ -156,6 +187,9 @@ help:
 	@echo "  make deps      - Install build dependencies"
 	@echo "  make test      - Run tests"
 	@echo "  make test-pure - Run strict pure/headless-safe tests"
+	@echo "  make bench-decode - Benchmark stdlib PNG/JPEG decode"
+	@echo "  make bench-decode-native - Benchmark native PNG/JPEG decode"
+	@echo "  make bench-decode-windows - Benchmark Windows stdlib/WIC decode via WSL"
 	@echo "  make test-root-pure - Run logic-oriented root-package tests"
 	@echo "  make test-gui  - Run GUI-dependent tests"
 	@echo "  make fmt       - Format code"

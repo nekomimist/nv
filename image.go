@@ -2,14 +2,10 @@ package main
 
 import (
 	"archive/zip"
-	"bytes"
 	"context"
 	"fmt"
 	"image"
 	"image/color"
-	_ "image/gif"
-	_ "image/jpeg"
-	_ "image/png"
 	"io"
 	"math"
 	"os"
@@ -19,13 +15,13 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"nv/internal/imgdecode"
+
 	"github.com/bodgit/sevenzip"
 	"github.com/hajimehoshi/ebiten/v2"
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/nwaples/rardecode"
-	_ "golang.org/x/image/bmp"
 	"golang.org/x/image/draw"
-	_ "golang.org/x/image/webp"
 )
 
 type ImagePath struct {
@@ -664,8 +660,7 @@ func (m *DefaultImageManager) getPath(idx int) (ImagePath, bool) {
 // Image loading functions
 
 func (m *DefaultImageManager) loadImageFromBytes(data []byte, path string) (*ebiten.Image, error) {
-	reader := bytes.NewReader(data)
-	decoded, _, err := image.Decode(reader)
+	decoded, err := imgdecode.DecodeBytes(data, path)
 	if err != nil {
 		return nil, fmt.Errorf("decoding %s: %v", path, err)
 	}
@@ -758,13 +753,7 @@ func (m *DefaultImageManager) loadImageFrom7z(archivePath, entryPath string) (*e
 
 func (m *DefaultImageManager) loadImage(imagePath ImagePath) (*ebiten.Image, error) {
 	if imagePath.ArchivePath == "" {
-		f, err := os.Open(imagePath.Path)
-		if err != nil {
-			return nil, err
-		}
-		defer f.Close()
-
-		decoded, _, err := image.Decode(f)
+		decoded, err := imgdecode.DecodeFile(imagePath.Path)
 		if err != nil {
 			return nil, fmt.Errorf("decoding %s: %v", imagePath.Path, err)
 		}
@@ -1033,18 +1022,18 @@ func collectImages(args []string, sortMethod int) ([]ImagePath, error) {
 						ArchivePath: "",
 						EntryPath:   "",
 					})
-					} else if isArchiveExt(path) {
-						archiveCount++
-						archiveImages, err := processArchive(path)
-						if err == nil {
-							sortedArchiveImages := sortImagePaths(archiveImages, sortMethod)
-							dirImages = append(dirImages, sortedArchiveImages...)
-						} else {
-							warnKV("collection", "archive_skipped", "path", path, "error", err)
-						}
+				} else if isArchiveExt(path) {
+					archiveCount++
+					archiveImages, err := processArchive(path)
+					if err == nil {
+						sortedArchiveImages := sortImagePaths(archiveImages, sortMethod)
+						dirImages = append(dirImages, sortedArchiveImages...)
+					} else {
+						warnKV("collection", "archive_skipped", "path", path, "error", err)
 					}
-					return nil
-				})
+				}
+				return nil
+			})
 			if err != nil {
 				return nil, err
 			}
