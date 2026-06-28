@@ -959,18 +959,131 @@ func (r *Renderer) drawTransformedImageCentered(screen *ebiten.Image, img *ebite
 	screen.DrawImage(img, op)
 }
 
-// drawImagesDirect draws images (single or book mode) without any mode checking
-func (r *Renderer) drawImagesDirect(screen *ebiten.Image, leftImg, rightImg *ebiten.Image) {
+type displayLayout struct {
+	canvasW      int
+	canvasH      int
+	transformedW int
+	transformedH int
+	leftX        int
+	leftY        int
+	rightX       int
+	rightY       int
+}
+
+// drawImagesDirect draws images (single or book mode) without any mode checking.
+func (r *Renderer) drawImagesDirect(screen *ebiten.Image, leftImg, rightImg DisplayImage) {
 	if leftImg == nil {
 		return
 	}
 
-	// createBookModeImage handles both single (rightImg=nil) and book mode cases
-	finalImg := r.createBookModeImage(leftImg, rightImg)
+	layout := r.calculateDisplayLayout(leftImg, rightImg)
+	scale, offsetX, offsetY := r.calculateDisplayTransform(screen, layout.transformedW, layout.transformedH)
+	r.drawDisplayImageTiles(screen, leftImg, layout.leftX, layout.leftY, layout, scale, offsetX, offsetY)
+	if rightImg != nil {
+		r.drawDisplayImageTiles(screen, rightImg, layout.rightX, layout.rightY, layout, scale, offsetX, offsetY)
+	}
+}
 
-	// Apply transformations to the final image
-	transformedImg := r.applyTransformations(finalImg)
+func (r *Renderer) calculateDisplayLayout(leftImg, rightImg DisplayImage) displayLayout {
+	leftBounds := leftImg.Bounds()
+	leftW, leftH := leftBounds.Dx(), leftBounds.Dy()
 
-	// Draw the transformed image
-	r.drawTransformedImageCentered(screen, transformedImg)
+	layout := displayLayout{
+		canvasW: leftW,
+		canvasH: leftH,
+		leftX:   0,
+		leftY:   0,
+	}
+
+	if rightImg != nil {
+		rightBounds := rightImg.Bounds()
+		rightW, rightH := rightBounds.Dx(), rightBounds.Dy()
+		layout.canvasW = leftW + rightW + imageGap
+		layout.canvasH = int(math.Max(float64(leftH), float64(rightH)))
+		layout.leftY = layout.canvasH/2 - leftH/2
+		layout.rightX = leftW + imageGap
+		layout.rightY = layout.canvasH/2 - rightH/2
+	}
+
+	if r.renderState.GetRotationAngle() == 90 || r.renderState.GetRotationAngle() == 270 {
+		layout.transformedW = layout.canvasH
+		layout.transformedH = layout.canvasW
+	} else {
+		layout.transformedW = layout.canvasW
+		layout.transformedH = layout.canvasH
+	}
+
+	return layout
+}
+
+func (r *Renderer) calculateDisplayTransform(screen *ebiten.Image, imageW, imageH int) (float64, float64, float64) {
+	iw, ih := float64(imageW), float64(imageH)
+	w, h := float64(screen.Bounds().Dx()), float64(screen.Bounds().Dy())
+
+	var scale float64
+	var offsetX, offsetY float64
+
+	if r.renderState.GetZoomMode() == ZoomModeFitWindow {
+		if r.renderState.IsFullscreen() {
+			scale = math.Min(w/iw, h/ih)
+		} else if iw > w || ih > h {
+			scale = math.Min(w/iw, h/ih)
+		} else {
+			scale = 1
+		}
+		sw, sh := iw*scale, ih*scale
+		offsetX = w/2 - sw/2
+		offsetY = h/2 - sh/2
+		return scale, offsetX, offsetY
+	}
+
+	scale = r.renderState.GetZoomLevel()
+	sw, sh := iw*scale, ih*scale
+	panX := r.renderState.GetPanOffsetX()
+	panY := r.renderState.GetPanOffsetY()
+
+	if sw <= w {
+		offsetX = w/2 - sw/2
+	} else {
+		offsetX = math.Max(w-sw, math.Min(0, w/2-sw/2+panX))
+	}
+
+	if sh <= h {
+		offsetY = h/2 - sh/2
+	} else {
+		offsetY = math.Max(h-sh, math.Min(0, h/2-sh/2+panY))
+	}
+
+	return scale, offsetX, offsetY
+}
+
+func (r *Renderer) drawDisplayImageTiles(screen *ebiten.Image, img DisplayImage, imageX, imageY int, layout displayLayout, scale, offsetX, offsetY float64) {
+	centerX := float64(layout.canvasW) / 2
+	centerY := float64(layout.canvasH) / 2
+
+	for _, tile := range img.Tiles() {
+		if tile.Image == nil {
+			continue
+		}
+
+		op := &ebiten.DrawImageOptions{}
+		op.Filter = ebiten.FilterLinear
+		op.GeoM.Translate(float64(imageX+tile.X), float64(imageY+tile.Y))
+		op.GeoM.Translate(-centerX, -centerY)
+
+		if r.renderState.IsFlippedH() {
+			op.GeoM.Scale(-1, 1)
+		}
+		if r.renderState.IsFlippedV() {
+			op.GeoM.Scale(1, -1)
+		}
+		if angle := r.renderState.GetRotationAngle(); angle != 0 {
+			op.GeoM.Rotate(float64(angle) * math.Pi / 180)
+		}
+
+		op.GeoM.Translate(float64(layout.transformedW)/2, float64(layout.transformedH)/2)
+		op.GeoM.Scale(scale, scale)
+		op.GeoM.Translate(offsetX, offsetY)
+		screen.DrawImage(tile.Image, op)
+	}
 }

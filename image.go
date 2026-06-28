@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	imagedraw "image/draw"
 	"io"
-	"math"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -21,7 +21,6 @@ import (
 	"github.com/hajimehoshi/ebiten/v2"
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/nwaples/rardecode"
-	"golang.org/x/image/draw"
 )
 
 type ImagePath struct {
@@ -66,7 +65,64 @@ type PreloadStats struct {
 	LastDirection NavigationDirection
 }
 
-const defaultMaxImageDimension = 8192
+const (
+	defaultMaxImageDimension = 8192
+	defaultTileSize          = 2048
+	fallbackTileSize         = 1024
+)
+
+type DisplayTile struct {
+	Image *ebiten.Image
+	X     int
+	Y     int
+	W     int
+	H     int
+}
+
+type DisplayImage interface {
+	Bounds() image.Rectangle
+	Tiles() []DisplayTile
+	TileCount() int
+	Deallocate()
+}
+
+type tiledDisplayImage struct {
+	bounds image.Rectangle
+	tiles  []DisplayTile
+}
+
+func (i *tiledDisplayImage) Bounds() image.Rectangle {
+	if i == nil {
+		return image.Rectangle{}
+	}
+	return i.bounds
+}
+
+func (i *tiledDisplayImage) Tiles() []DisplayTile {
+	if i == nil {
+		return nil
+	}
+	return i.tiles
+}
+
+func (i *tiledDisplayImage) TileCount() int {
+	if i == nil {
+		return 0
+	}
+	return len(i.tiles)
+}
+
+func (i *tiledDisplayImage) Deallocate() {
+	if i == nil {
+		return
+	}
+	for _, tile := range i.tiles {
+		if tile.Image != nil {
+			tile.Image.Deallocate()
+		}
+	}
+	i.tiles = nil
+}
 
 // PreloadManager manages asynchronous image preloading
 type PreloadManager struct {
@@ -300,8 +356,8 @@ func (pm *PreloadManager) preloadImage(idx int) {
 
 // ImageManager interface for managing image loading and caching
 type ImageManager interface {
-	GetImage(idx int) *ebiten.Image
-	GetBookModeImages(idx int, rightToLeft bool) (*ebiten.Image, *ebiten.Image)
+	GetImage(idx int) DisplayImage
+	GetBookModeImages(idx int, rightToLeft bool) (DisplayImage, DisplayImage)
 	GetPath(idx int) (ImagePath, bool)
 	SetPaths(paths []ImagePath)
 	GetPathsCount() int
@@ -314,7 +370,7 @@ type ImageManager interface {
 // DefaultImageManager implements ImageManager
 type DefaultImageManager struct {
 	paths              []ImagePath
-	cache              *lru.Cache[string, *ebiten.Image]
+	cache              *lru.Cache[string, DisplayImage]
 	mu                 sync.RWMutex
 	preloadManager     *PreloadManager
 	maxImageDimension  atomic.Int64
@@ -325,7 +381,7 @@ type DefaultImageManager struct {
 	loadCtx            context.Context
 	loadCancel         context.CancelFunc
 	loadWorkerOnce     sync.Once
-	loadingPlaceholder *ebiten.Image
+	loadingPlaceholder DisplayImage
 	asyncRefresh       atomic.Bool
 }
 
@@ -337,14 +393,14 @@ type loadRequest struct {
 
 // NewImageManager creates a new DefaultImageManager
 func NewImageManager(cacheSize int) ImageManager {
-	cache, err := lru.NewWithEvict[string, *ebiten.Image](cacheSize, func(_ string, img *ebiten.Image) {
+	cache, err := lru.NewWithEvict[string, DisplayImage](cacheSize, func(_ string, img DisplayImage) {
 		if img != nil {
 			img.Deallocate()
 		}
 	})
 	if err != nil {
 		errorKV("cache", "cache_create_failed", "requested_size", cacheSize, "error", err)
-		cache, _ = lru.NewWithEvict[string, *ebiten.Image](16, func(_ string, img *ebiten.Image) {
+		cache, _ = lru.NewWithEvict[string, DisplayImage](16, func(_ string, img DisplayImage) {
 			if img != nil {
 				img.Deallocate()
 			}
@@ -356,14 +412,14 @@ func NewImageManager(cacheSize int) ImageManager {
 
 // NewImageManagerWithPreload creates a new DefaultImageManager with preload configuration
 func NewImageManagerWithPreload(cacheSize int, preloadCount int, preloadEnabled bool) ImageManager {
-	cache, err := lru.NewWithEvict[string, *ebiten.Image](cacheSize, func(_ string, img *ebiten.Image) {
+	cache, err := lru.NewWithEvict[string, DisplayImage](cacheSize, func(_ string, img DisplayImage) {
 		if img != nil {
 			img.Deallocate()
 		}
 	})
 	if err != nil {
 		errorKV("cache", "cache_create_failed", "requested_size", cacheSize, "error", err)
-		cache, _ = lru.NewWithEvict[string, *ebiten.Image](16, func(_ string, img *ebiten.Image) {
+		cache, _ = lru.NewWithEvict[string, DisplayImage](16, func(_ string, img DisplayImage) {
 			if img != nil {
 				img.Deallocate()
 			}
@@ -379,7 +435,7 @@ func NewImageManagerWithPreload(cacheSize int, preloadCount int, preloadEnabled 
 	return manager
 }
 
-func newDefaultImageManager(cache *lru.Cache[string, *ebiten.Image]) *DefaultImageManager {
+func newDefaultImageManager(cache *lru.Cache[string, DisplayImage]) *DefaultImageManager {
 	loadCtx, loadCancel := context.WithCancel(context.Background())
 	manager := &DefaultImageManager{
 		paths:              []ImagePath{},
@@ -395,8 +451,8 @@ func newDefaultImageManager(cache *lru.Cache[string, *ebiten.Image]) *DefaultIma
 	return manager
 }
 
-// SetMaxImageDimension updates the maximum permitted decoded image dimension before handing to Ebiten.
-// A value of 0 disables pre-scaling and relies on Ebiten's own limits.
+// SetMaxImageDimension updates the dimension threshold that switches decoded images to tiled rendering.
+// A value of 0 uses the default threshold.
 func (m *DefaultImageManager) SetMaxImageDimension(limit int) {
 	if limit < 0 {
 		limit = 0
@@ -448,7 +504,7 @@ func (m *DefaultImageManager) processLoadRequest(req loadRequest) {
 			"source", loadSource(req.preload),
 			"error", err,
 		)
-		errorImg := CreateErrorImage(400, 300, req.path.Path, err.Error())
+		errorImg := createDisplayImageFromEbitenImage(CreateErrorImage(400, 300, req.path.Path, err.Error()))
 		m.cache.Add(req.cacheKey, errorImg)
 		m.asyncRefresh.Store(true)
 		m.recordPreloadResult(req.preload, false)
@@ -556,10 +612,27 @@ func (m *DefaultImageManager) recordPreloadResult(preload bool, success bool) {
 	m.preloadManager.recordResult(success, len(m.preloadRequests))
 }
 
-func createLoadingPlaceholder() *ebiten.Image {
+func createLoadingPlaceholder() DisplayImage {
 	img := ebiten.NewImage(200, 150)
 	img.Fill(color.RGBA{45, 45, 45, 255})
-	return img
+	return createDisplayImageFromEbitenImage(img)
+}
+
+func createDisplayImageFromEbitenImage(img *ebiten.Image) DisplayImage {
+	if img == nil {
+		return nil
+	}
+	bounds := img.Bounds()
+	return &tiledDisplayImage{
+		bounds: image.Rect(0, 0, bounds.Dx(), bounds.Dy()),
+		tiles: []DisplayTile{{
+			Image: img,
+			X:     0,
+			Y:     0,
+			W:     bounds.Dx(),
+			H:     bounds.Dy(),
+		}},
+	}
 }
 
 func (m *DefaultImageManager) ConsumeAsyncRefresh() bool {
@@ -607,8 +680,8 @@ func (m *DefaultImageManager) GetPath(idx int) (ImagePath, bool) {
 	return m.getPath(idx)
 }
 
-func (m *DefaultImageManager) GetBookModeImages(idx int, rightToLeft bool) (*ebiten.Image, *ebiten.Image) {
-	var leftImg, rightImg *ebiten.Image
+func (m *DefaultImageManager) GetBookModeImages(idx int, rightToLeft bool) (DisplayImage, DisplayImage) {
+	var leftImg, rightImg DisplayImage
 
 	if rightToLeft {
 		// Right-to-left reading (Japanese manga style): [next][current]
@@ -623,7 +696,7 @@ func (m *DefaultImageManager) GetBookModeImages(idx int, rightToLeft bool) (*ebi
 	return leftImg, rightImg
 }
 
-func (m *DefaultImageManager) GetImage(idx int) *ebiten.Image {
+func (m *DefaultImageManager) GetImage(idx int) DisplayImage {
 	m.mu.RLock()
 	if idx < 0 || idx >= len(m.paths) {
 		m.mu.RUnlock()
@@ -659,7 +732,7 @@ func (m *DefaultImageManager) getPath(idx int) (ImagePath, bool) {
 
 // Image loading functions
 
-func (m *DefaultImageManager) loadImageFromBytes(data []byte, path string) (*ebiten.Image, error) {
+func (m *DefaultImageManager) loadImageFromBytes(data []byte, path string) (DisplayImage, error) {
 	decoded, err := imgdecode.DecodeBytes(data, path)
 	if err != nil {
 		return nil, fmt.Errorf("decoding %s: %v", path, err)
@@ -667,7 +740,7 @@ func (m *DefaultImageManager) loadImageFromBytes(data []byte, path string) (*ebi
 	return m.createEbitenImageFromDecoded(decoded, path)
 }
 
-func (m *DefaultImageManager) loadImageFromZip(archivePath, entryPath string) (*ebiten.Image, error) {
+func (m *DefaultImageManager) loadImageFromZip(archivePath, entryPath string) (DisplayImage, error) {
 	r, err := zip.OpenReader(archivePath)
 	if err != nil {
 		return nil, err
@@ -693,7 +766,7 @@ func (m *DefaultImageManager) loadImageFromZip(archivePath, entryPath string) (*
 	return nil, fmt.Errorf("entry %s not found in %s", entryPath, archivePath)
 }
 
-func (m *DefaultImageManager) loadImageFromRar(archivePath, entryPath string) (*ebiten.Image, error) {
+func (m *DefaultImageManager) loadImageFromRar(archivePath, entryPath string) (DisplayImage, error) {
 	f, err := os.Open(archivePath)
 	if err != nil {
 		return nil, err
@@ -725,7 +798,7 @@ func (m *DefaultImageManager) loadImageFromRar(archivePath, entryPath string) (*
 	return nil, fmt.Errorf("entry %s not found in %s", entryPath, archivePath)
 }
 
-func (m *DefaultImageManager) loadImageFrom7z(archivePath, entryPath string) (*ebiten.Image, error) {
+func (m *DefaultImageManager) loadImageFrom7z(archivePath, entryPath string) (DisplayImage, error) {
 	r, err := sevenzip.OpenReader(archivePath)
 	if err != nil {
 		return nil, err
@@ -751,7 +824,7 @@ func (m *DefaultImageManager) loadImageFrom7z(archivePath, entryPath string) (*e
 	return nil, fmt.Errorf("entry %s not found in %s", entryPath, archivePath)
 }
 
-func (m *DefaultImageManager) loadImage(imagePath ImagePath) (*ebiten.Image, error) {
+func (m *DefaultImageManager) loadImage(imagePath ImagePath) (DisplayImage, error) {
 	if imagePath.ArchivePath == "" {
 		decoded, err := imgdecode.DecodeFile(imagePath.Path)
 		if err != nil {
@@ -773,34 +846,115 @@ func (m *DefaultImageManager) loadImage(imagePath ImagePath) (*ebiten.Image, err
 	}
 }
 
-func (m *DefaultImageManager) createEbitenImageFromDecoded(src image.Image, origin string) (*ebiten.Image, error) {
+func (m *DefaultImageManager) createEbitenImageFromDecoded(src image.Image, origin string) (DisplayImage, error) {
 	if src == nil {
 		return nil, fmt.Errorf("decoded image is nil for %s", origin)
 	}
 
 	limit := m.preferredMaxDimension()
-	if limit > 0 {
-		bounds := src.Bounds()
-		width := bounds.Dx()
-		height := bounds.Dy()
-		if width > limit || height > limit {
-			resized, changed := resizeImageToFit(src, limit)
-			if changed {
-				newBounds := resized.Bounds()
-				infoKV("cache", "image_downscaled",
-					"path", origin,
-					"width", width,
-					"height", height,
-					"new_width", newBounds.Dx(),
-					"new_height", newBounds.Dy(),
-					"limit", limit,
-				)
-				src = resized
+	bounds := src.Bounds()
+	width := bounds.Dx()
+	height := bounds.Dy()
+	if limit > 0 && (width > limit || height > limit) {
+		infoKV("cache", "image_tiling",
+			"path", origin,
+			"width", width,
+			"height", height,
+			"limit", limit,
+			"tile_size", defaultTileSize,
+		)
+		return createTiledDisplayImage(src, defaultTileSize)
+	}
+
+	img, err := newDisplayImageFromImage(src)
+	if err == nil {
+		return img, nil
+	}
+
+	warnKV("cache", "image_single_texture_failed",
+		"path", origin,
+		"width", width,
+		"height", height,
+		"error", err,
+		"fallback", "tiled",
+	)
+	return createTiledDisplayImage(src, fallbackTileSize)
+}
+
+func newDisplayImageFromImage(src image.Image) (DisplayImage, error) {
+	var img *ebiten.Image
+	var recovered any
+	func() {
+		defer func() {
+			recovered = recover()
+		}()
+		img = ebiten.NewImageFromImage(src)
+	}()
+	if recovered != nil {
+		return nil, fmt.Errorf("creating ebiten image: %v", recovered)
+	}
+	return createDisplayImageFromEbitenImage(img), nil
+}
+
+func createTiledDisplayImage(src image.Image, tileSize int) (DisplayImage, error) {
+	if tileSize <= 0 {
+		tileSize = fallbackTileSize
+	}
+
+	bounds := src.Bounds()
+	width := bounds.Dx()
+	height := bounds.Dy()
+	if width <= 0 || height <= 0 {
+		return nil, fmt.Errorf("invalid image bounds: %v", bounds)
+	}
+
+	result := &tiledDisplayImage{
+		bounds: image.Rect(0, 0, width, height),
+		tiles:  make([]DisplayTile, 0, ((width+tileSize-1)/tileSize)*((height+tileSize-1)/tileSize)),
+	}
+
+	for y := 0; y < height; y += tileSize {
+		tileH := min(tileSize, height-y)
+		for x := 0; x < width; x += tileSize {
+			tileW := min(tileSize, width-x)
+			tileRect := image.Rect(bounds.Min.X+x, bounds.Min.Y+y, bounds.Min.X+x+tileW, bounds.Min.Y+y+tileH)
+			tileSrc := image.NewNRGBA(image.Rect(0, 0, tileW, tileH))
+			imagedraw.Draw(tileSrc, tileSrc.Bounds(), src, tileRect.Min, imagedraw.Src)
+
+			tileImg, err := newUnmanagedEbitenImage(tileSrc)
+			if err != nil {
+				result.Deallocate()
+				if tileSize > fallbackTileSize {
+					return createTiledDisplayImage(src, fallbackTileSize)
+				}
+				return nil, err
 			}
+			result.tiles = append(result.tiles, DisplayTile{
+				Image: tileImg,
+				X:     x,
+				Y:     y,
+				W:     tileW,
+				H:     tileH,
+			})
 		}
 	}
 
-	return ebiten.NewImageFromImage(src), nil
+	return result, nil
+}
+
+func newUnmanagedEbitenImage(src image.Image) (*ebiten.Image, error) {
+	var img *ebiten.Image
+	var recovered any
+	func() {
+		defer func() {
+			recovered = recover()
+		}()
+		img = ebiten.NewImageFromImageWithOptions(src, &ebiten.NewImageFromImageOptions{Unmanaged: true})
+	}()
+	if recovered != nil {
+		return nil, fmt.Errorf("creating tiled ebiten image: %v", recovered)
+	}
+	return img, nil
 }
 
 func (m *DefaultImageManager) preferredMaxDimension() int {
@@ -811,34 +965,6 @@ func (m *DefaultImageManager) preferredMaxDimension() int {
 		return size
 	}
 	return defaultMaxImageDimension
-}
-
-func resizeImageToFit(src image.Image, limit int) (image.Image, bool) {
-	if limit <= 0 {
-		return src, false
-	}
-
-	bounds := src.Bounds()
-	width := bounds.Dx()
-	height := bounds.Dy()
-	if width <= limit && height <= limit {
-		return src, false
-	}
-
-	scale := float64(limit) / float64(width)
-	if height > width {
-		scale = float64(limit) / float64(height)
-	}
-	if scale >= 1.0 {
-		return src, false
-	}
-
-	newW := int(math.Max(1, math.Round(float64(width)*scale)))
-	newH := int(math.Max(1, math.Round(float64(height)*scale)))
-
-	dst := image.NewRGBA(image.Rect(0, 0, newW, newH))
-	draw.ApproxBiLinear.Scale(dst, dst.Bounds(), src, bounds, draw.Over, nil)
-	return dst, true
 }
 
 func queryEbitenMaxImageSize() (int, bool) {

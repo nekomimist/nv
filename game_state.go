@@ -3,8 +3,6 @@ package main
 import (
 	"fmt"
 	"time"
-
-	"github.com/hajimehoshi/ebiten/v2"
 )
 
 const (
@@ -22,8 +20,8 @@ type DisplayMetadata struct {
 
 // DisplayContent represents what should be displayed on screen.
 type DisplayContent struct {
-	LeftImage  *ebiten.Image   // Primary image (always present for single/left side of book)
-	RightImage *ebiten.Image   // Secondary image (only present in book mode, nil for single)
+	LeftImage  DisplayImage    // Primary image (always present for single/left side of book)
+	RightImage DisplayImage    // Secondary image (only present in book mode, nil for single)
 	Metadata   DisplayMetadata // Display metadata for info overlay
 }
 

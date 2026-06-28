@@ -255,7 +255,7 @@ func loadConfigFromPath(configPath string) ConfigLoadResult {
 		BookMode:             false,         // Default to single page mode
 		Fullscreen:           false,         // Default to windowed mode
 		CacheSize:            16,            // Default cache size for images
-		MaxImageDimension:    0,             // Default: rely on Ebiten/config-driven detection
+		MaxImageDimension:    0,             // Default: use the built-in tiling threshold
 		TransitionFrames:     0,             // Default: no forced transition frames
 		PreloadEnabled:       true,          // Default: enable preloading
 		InitialZoomMode:      "fit_window",  // Default: fit to window

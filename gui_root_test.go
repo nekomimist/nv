@@ -1,17 +1,18 @@
 package main
 
 import (
+	"image"
 	"testing"
 
 	"github.com/hajimehoshi/ebiten/v2"
 )
 
 func TestGUI_NavigateSingleUsesActionSemantics(t *testing.T) {
-	images := []*ebiten.Image{
-		ebiten.NewImage(100, 150),
-		ebiten.NewImage(100, 150),
-		ebiten.NewImage(100, 150),
-		ebiten.NewImage(100, 150),
+	images := []DisplayImage{
+		testDisplayImage(100, 150),
+		testDisplayImage(100, 150),
+		testDisplayImage(100, 150),
+		testDisplayImage(100, 150),
 	}
 	manager := &stubImageManager{
 		paths: []ImagePath{
@@ -43,11 +44,11 @@ func TestGUI_NavigateSingleUsesActionSemantics(t *testing.T) {
 }
 
 func TestGUI_NavigateNextKeepsSpreadBehavior(t *testing.T) {
-	images := []*ebiten.Image{
-		ebiten.NewImage(100, 150),
-		ebiten.NewImage(100, 150),
-		ebiten.NewImage(100, 150),
-		ebiten.NewImage(100, 150),
+	images := []DisplayImage{
+		testDisplayImage(100, 150),
+		testDisplayImage(100, 150),
+		testDisplayImage(100, 150),
+		testDisplayImage(100, 150),
 	}
 	manager := &stubImageManager{
 		paths: []ImagePath{
@@ -120,9 +121,9 @@ func TestGUI_CalculateDisplayContentUsesNavigationPlan(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			images := []*ebiten.Image{
-				ebiten.NewImage(tt.leftW, tt.leftH),
-				ebiten.NewImage(tt.rightW, tt.rightH),
+			images := []DisplayImage{
+				testDisplayImage(tt.leftW, tt.leftH),
+				testDisplayImage(tt.rightW, tt.rightH),
 			}
 			manager := &stubImageManager{
 				paths: []ImagePath{
@@ -229,9 +230,9 @@ func TestGUI_BuildPageNumberStringUsesScreenOrder(t *testing.T) {
 }
 
 func TestGUI_ToggleReadingDirectionRecalculatesDisplayContent(t *testing.T) {
-	images := []*ebiten.Image{
-		ebiten.NewImage(100, 150),
-		ebiten.NewImage(100, 150),
+	images := []DisplayImage{
+		testDisplayImage(100, 150),
+		testDisplayImage(100, 150),
 	}
 	manager := &stubImageManager{
 		paths: []ImagePath{
@@ -272,9 +273,9 @@ func TestGUI_ToggleReadingDirectionRecalculatesDisplayContent(t *testing.T) {
 }
 
 func TestGUI_MarkCurrentAsPreJoinedSpreadBreaksCurrentPair(t *testing.T) {
-	images := []*ebiten.Image{
-		ebiten.NewImage(200, 150),
-		ebiten.NewImage(210, 150),
+	images := []DisplayImage{
+		testDisplayImage(200, 150),
+		testDisplayImage(210, 150),
 	}
 	manager := &stubImageManager{
 		paths: []ImagePath{
@@ -329,5 +330,30 @@ func TestGUI_ImageManager(t *testing.T) {
 	leftImg, rightImg := imageManager.GetBookModeImages(0, false)
 	if leftImg != nil || rightImg != nil {
 		t.Logf("Images are nil as expected (no actual image files)")
+	}
+}
+
+func TestGUI_CreateDisplayImageTilesWhenOverLimit(t *testing.T) {
+	manager := NewImageManager(1).(*DefaultImageManager)
+	manager.SetMaxImageDimension(3)
+	t.Cleanup(func() {
+		manager.StopPreload()
+	})
+
+	src := image.NewNRGBA(image.Rect(0, 0, defaultTileSize+1, 4))
+	img, err := manager.createEbitenImageFromDecoded(src, "large.png")
+	if err != nil {
+		t.Fatalf("createEbitenImageFromDecoded() error = %v", err)
+	}
+	t.Cleanup(img.Deallocate)
+
+	if got, want := img.Bounds().Dx(), defaultTileSize+1; got != want {
+		t.Fatalf("width = %d, want %d", got, want)
+	}
+	if got, want := img.Bounds().Dy(), 4; got != want {
+		t.Fatalf("height = %d, want %d", got, want)
+	}
+	if img.TileCount() <= 1 {
+		t.Fatalf("expected tiled image, got %d tile(s)", img.TileCount())
 	}
 }

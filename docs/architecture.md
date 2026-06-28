@@ -121,7 +121,8 @@ Two modes bypass the generic action flow for practical reasons:
 - async cache-miss loading
 - preload queue management
 - LRU cache eviction
-- large-image downscaling before Ebiten image creation
+- large-image tiling before Ebiten image creation when dimensions exceed the
+  configured threshold
 
 Actual file/byte decoding is delegated to `internal/imgdecode` so that the
 decode path can be tested and benchmarked without importing Ebiten. The
@@ -199,7 +200,7 @@ The repo now treats tests in three practical buckets:
 - logic-oriented root-package tests
   - named `TestPure...` in the root package
   - cover config validation, path collection, sorting, and other
-    behavior that avoids constructing `*ebiten.Image`, but they still
+    behavior that avoids constructing Ebiten-backed display images, but they still
     build the root package and therefore still need an environment where
     Ebiten package startup succeeds
 - GUI-dependent root-package tests

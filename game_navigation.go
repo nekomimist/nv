@@ -6,7 +6,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/hajimehoshi/ebiten/v2"
 	"nv/navlogic"
 )
 
@@ -45,7 +44,7 @@ func (g *Game) pageMetricsAt(idx int) navlogic.PageMetrics {
 	}
 }
 
-func (g *Game) displayImageAt(idx int) *ebiten.Image {
+func (g *Game) displayImageAt(idx int) DisplayImage {
 	if idx < 0 {
 		return nil
 	}

@@ -117,7 +117,7 @@ func TestLogDisplayPlanEmitsStructuredNavigationEvents(t *testing.T) {
 	g := &Game{
 		imageManager: &stubImageManager{
 			paths:  []ImagePath{{Path: "left.png"}, {Path: "right.png"}},
-			images: []*ebiten.Image{left, right},
+			images: testDisplayImages(left, right),
 		},
 		zoomState: NewZoomState(),
 		config: Config{
@@ -147,7 +147,7 @@ func TestLogDisplayPlanEmitsStructuredNavigationEvents(t *testing.T) {
 }
 
 func TestDefaultImageManagerGetImageLogsCacheMiss(t *testing.T) {
-	cache, err := lru.NewWithEvict[string, *ebiten.Image](2, func(_ string, img *ebiten.Image) {
+	cache, err := lru.NewWithEvict[string, DisplayImage](2, func(_ string, img DisplayImage) {
 		if img != nil {
 			img.Deallocate()
 		}

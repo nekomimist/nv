@@ -4,18 +4,30 @@ import "github.com/hajimehoshi/ebiten/v2"
 
 type stubImageManager struct {
 	paths             []ImagePath
-	images            []*ebiten.Image
+	images            []DisplayImage
 	preloadDirections []NavigationDirection
 }
 
-func (m *stubImageManager) GetImage(idx int) *ebiten.Image {
+func testDisplayImage(w, h int) DisplayImage {
+	return createDisplayImageFromEbitenImage(ebiten.NewImage(w, h))
+}
+
+func testDisplayImages(images ...*ebiten.Image) []DisplayImage {
+	result := make([]DisplayImage, 0, len(images))
+	for _, img := range images {
+		result = append(result, createDisplayImageFromEbitenImage(img))
+	}
+	return result
+}
+
+func (m *stubImageManager) GetImage(idx int) DisplayImage {
 	if idx < 0 || idx >= len(m.images) {
 		return nil
 	}
 	return m.images[idx]
 }
 
-func (m *stubImageManager) GetBookModeImages(idx int, rightToLeft bool) (*ebiten.Image, *ebiten.Image) {
+func (m *stubImageManager) GetBookModeImages(idx int, rightToLeft bool) (DisplayImage, DisplayImage) {
 	if rightToLeft {
 		return m.GetImage(idx + 1), m.GetImage(idx)
 	}
