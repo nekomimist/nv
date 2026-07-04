@@ -1273,3 +1273,19 @@ func TestPureMousebindingManagerRebuildsParsedOnUpdate(t *testing.T) {
 		t.Fatalf("updated parsed state incorrect: %+v", mm.parsed)
 	}
 }
+
+func TestPureWheelOnlyFrameDoesNotDeferActionThatAlsoUsesLeftClick(t *testing.T) {
+	handler := &InputHandler{
+		mousebindingManager: NewMousebindingManager(map[string][]string{
+			"next": {"LeftClick", "WheelDown"},
+		}, GetDefaultMouseSettings()),
+	}
+
+	if handler.shouldDeferLeftClickAction("next", false) {
+		t.Fatalf("wheel-only next action was incorrectly deferred as a left-click action")
+	}
+
+	if !handler.shouldDeferLeftClickAction("next", true) {
+		t.Fatalf("left-click next action was not deferred")
+	}
+}

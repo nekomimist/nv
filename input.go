@@ -250,9 +250,12 @@ func (h *InputHandler) handleMouseInput() bool {
 	}
 
 	// Process non-LeftClick mouse actions immediately
+	leftJustPressed := inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft)
 	for _, actionDef := range actionDefinitions {
-		// Skip LeftClick actions - they are handled by the conflict resolution system
-		if h.isLeftClickAction(actionDef.Name) {
+		// Skip LeftClick-triggered actions only on the press frame. Actions
+		// that also bind non-left inputs, such as WheelDown for "next", must
+		// still be evaluated on wheel-only frames.
+		if h.shouldDeferLeftClickAction(actionDef.Name, leftJustPressed) {
 			continue
 		}
 
@@ -284,6 +287,10 @@ func (h *InputHandler) isLeftClickAction(actionName string) bool {
 		}
 	}
 	return false
+}
+
+func (h *InputHandler) shouldDeferLeftClickAction(actionName string, leftJustPressed bool) bool {
+	return leftJustPressed && h.isLeftClickAction(actionName)
 }
 
 // handlePendingMouseAction processes pending mouse actions (delayed execution)
