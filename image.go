@@ -407,7 +407,7 @@ func NewImageManager(cacheSize int) ImageManager {
 		})
 	}
 
-	return newDefaultImageManager(cache)
+	return newDefaultImageManager(cache, 0)
 }
 
 // NewImageManagerWithPreload creates a new DefaultImageManager with preload configuration
@@ -426,7 +426,7 @@ func NewImageManagerWithPreload(cacheSize int, preloadCount int, preloadEnabled 
 		})
 	}
 
-	manager := newDefaultImageManager(cache)
+	manager := newDefaultImageManager(cache, preloadCount)
 
 	// Initialize preload manager with configuration
 	manager.preloadManager = NewPreloadManager(manager, preloadCount)
@@ -435,13 +435,36 @@ func NewImageManagerWithPreload(cacheSize int, preloadCount int, preloadEnabled 
 	return manager
 }
 
-func newDefaultImageManager(cache *lru.Cache[string, DisplayImage]) *DefaultImageManager {
+// Preload request queue capacity bounds. The floor keeps the plain
+// NewImageManager path (no preload configuration) unchanged, while the
+// cap matches the maximum legal config PreloadCount.
+const (
+	minPreloadQueueCapacity = 8
+	maxPreloadQueueCapacity = 16
+)
+
+// preloadQueueCapacity sizes the preload request channel from the
+// configured preload count so PreloadCount values above the previous
+// hardcoded capacity of 8 no longer cause preload requests to be
+// silently dropped.
+func preloadQueueCapacity(preloadCount int) int {
+	capacity := preloadCount
+	if capacity < minPreloadQueueCapacity {
+		capacity = minPreloadQueueCapacity
+	}
+	if capacity > maxPreloadQueueCapacity {
+		capacity = maxPreloadQueueCapacity
+	}
+	return capacity
+}
+
+func newDefaultImageManager(cache *lru.Cache[string, DisplayImage], preloadCount int) *DefaultImageManager {
 	loadCtx, loadCancel := context.WithCancel(context.Background())
 	manager := &DefaultImageManager{
 		paths:              []ImagePath{},
 		cache:              cache,
 		loadRequests:       make(chan loadRequest, 8),
-		preloadRequests:    make(chan loadRequest, 8),
+		preloadRequests:    make(chan loadRequest, preloadQueueCapacity(preloadCount)),
 		inflight:           make(map[string]struct{}),
 		loadCtx:            loadCtx,
 		loadCancel:         loadCancel,

@@ -156,7 +156,7 @@ func TestDefaultImageManagerGetImageLogsCacheMiss(t *testing.T) {
 		t.Fatalf("failed to create cache: %v", err)
 	}
 
-	manager := newDefaultImageManager(cache)
+	manager := newDefaultImageManager(cache, 0)
 	t.Cleanup(func() {
 		manager.StopPreload()
 	})

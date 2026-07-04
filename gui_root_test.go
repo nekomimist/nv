@@ -305,6 +305,42 @@ func TestGUI_ImageManager(t *testing.T) {
 	}
 }
 
+func TestGUI_ImageManagerPreloadQueueCapacity(t *testing.T) {
+	tests := []struct {
+		name         string
+		preloadCount int
+		wantCap      int
+	}{
+		{name: "below_floor", preloadCount: 1, wantCap: 8},
+		{name: "at_floor", preloadCount: 8, wantCap: 8},
+		{name: "above_floor", preloadCount: 16, wantCap: 16},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			manager := NewImageManagerWithPreload(4, tt.preloadCount, true).(*DefaultImageManager)
+			t.Cleanup(func() {
+				manager.StopPreload()
+			})
+
+			if got := cap(manager.preloadRequests); got != tt.wantCap {
+				t.Fatalf("cap(preloadRequests) = %d, want %d", got, tt.wantCap)
+			}
+		})
+	}
+}
+
+func TestGUI_ImageManagerPlainConstructorKeepsPreloadQueueFloor(t *testing.T) {
+	manager := NewImageManager(4).(*DefaultImageManager)
+	t.Cleanup(func() {
+		manager.StopPreload()
+	})
+
+	if got, want := cap(manager.preloadRequests), 8; got != want {
+		t.Fatalf("cap(preloadRequests) = %d, want %d", got, want)
+	}
+}
+
 func TestGUI_CreateDisplayImageTilesWhenOverLimit(t *testing.T) {
 	manager := NewImageManager(1).(*DefaultImageManager)
 	manager.SetMaxImageDimension(3)
