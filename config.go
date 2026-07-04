@@ -279,30 +279,39 @@ func backfillBindings(cfg *Config) {
 func validateConfig(cfg *Config) []string {
 	var warnings []string
 
-	// Validate minimum size
-	if cfg.WindowWidth < minWidth {
-		cfg.WindowWidth = defaultWidth
+	// Validate window size: reset below the floor (corrupt/nonsense),
+	// clamp above the ceiling (excessive).
+	if cfg.WindowWidth < windowWidthBound.min {
+		cfg.WindowWidth = windowWidthBound.def
+	} else if cfg.WindowWidth > windowWidthBound.max {
+		cfg.WindowWidth = windowWidthBound.max
 	}
-	if cfg.WindowHeight < minHeight {
-		cfg.WindowHeight = defaultHeight
+	if cfg.WindowHeight < windowHeightBound.min {
+		cfg.WindowHeight = windowHeightBound.def
+	} else if cfg.WindowHeight > windowHeightBound.max {
+		cfg.WindowHeight = windowHeightBound.max
 	}
 
-	// Validate default window size
-	if cfg.DefaultWindowWidth < minWidth {
-		cfg.DefaultWindowWidth = defaultWidth
+	// Validate default window size: same reset/clamp policy as above.
+	if cfg.DefaultWindowWidth < defaultWindowWidthBound.min {
+		cfg.DefaultWindowWidth = defaultWindowWidthBound.def
+	} else if cfg.DefaultWindowWidth > defaultWindowWidthBound.max {
+		cfg.DefaultWindowWidth = defaultWindowWidthBound.max
 	}
-	if cfg.DefaultWindowHeight < minHeight {
-		cfg.DefaultWindowHeight = defaultHeight
+	if cfg.DefaultWindowHeight < defaultWindowHeightBound.min {
+		cfg.DefaultWindowHeight = defaultWindowHeightBound.def
+	} else if cfg.DefaultWindowHeight > defaultWindowHeightBound.max {
+		cfg.DefaultWindowHeight = defaultWindowHeightBound.max
 	}
 
 	// Validate aspect ratio threshold
-	if cfg.AspectRatioThreshold <= 1.0 {
-		cfg.AspectRatioThreshold = 1.5
+	if cfg.AspectRatioThreshold <= aspectRatioThresholdBound.min {
+		cfg.AspectRatioThreshold = aspectRatioThresholdBound.def
 	}
 
 	// Validate font size (minimum 12px for readability)
-	if cfg.FontSize <= 12.0 {
-		cfg.FontSize = 24.0
+	if cfg.FontSize <= fontSizeBound.min {
+		cfg.FontSize = fontSizeBound.def
 	}
 
 	// Validate sort method
@@ -310,30 +319,33 @@ func validateConfig(cfg *Config) []string {
 		cfg.SortMethod = SortNatural
 	}
 
-	// Validate cache size (minimum 1, maximum 64)
-	if cfg.CacheSize < 1 {
-		cfg.CacheSize = 16
-	} else if cfg.CacheSize > 64 {
-		cfg.CacheSize = 64
+	// Validate cache size
+	if cfg.CacheSize < cacheSizeBound.min {
+		cfg.CacheSize = cacheSizeBound.def
+	} else if cfg.CacheSize > cacheSizeBound.max {
+		cfg.CacheSize = cacheSizeBound.max
 	}
 
-	// Validate max image dimension (0 disables limit, otherwise positive)
-	if cfg.MaxImageDimension < 0 {
-		cfg.MaxImageDimension = 0
+	// Validate max image dimension (0 disables limit, otherwise positive
+	// up to the ceiling).
+	if cfg.MaxImageDimension < maxImageDimensionBound.min {
+		cfg.MaxImageDimension = maxImageDimensionBound.def
+	} else if cfg.MaxImageDimension > maxImageDimensionBound.max {
+		cfg.MaxImageDimension = maxImageDimensionBound.max
 	}
 
-	// Validate transition frames (minimum 0, maximum 60)
-	if cfg.TransitionFrames < 0 {
-		cfg.TransitionFrames = 0
-	} else if cfg.TransitionFrames > 60 {
-		cfg.TransitionFrames = 60
+	// Validate transition frames
+	if cfg.TransitionFrames < transitionFramesBound.min {
+		cfg.TransitionFrames = transitionFramesBound.def
+	} else if cfg.TransitionFrames > transitionFramesBound.max {
+		cfg.TransitionFrames = transitionFramesBound.max
 	}
 
-	// Validate preload count (minimum 1, maximum 16)
-	if cfg.PreloadCount < 1 {
-		cfg.PreloadCount = 4
-	} else if cfg.PreloadCount > 16 {
-		cfg.PreloadCount = 16
+	// Validate preload count
+	if cfg.PreloadCount < preloadCountBound.min {
+		cfg.PreloadCount = preloadCountBound.def
+	} else if cfg.PreloadCount > preloadCountBound.max {
+		cfg.PreloadCount = preloadCountBound.max
 	}
 
 	// Validate initial zoom mode

@@ -307,6 +307,115 @@ func TestPureDefaultWindowSizeValidation(t *testing.T) {
 	}
 }
 
+func TestPureConfigValidationCeilings(t *testing.T) {
+	tests := []struct {
+		name                  string
+		configJSON            string
+		expectedWidth         int
+		expectedHeight        int
+		expectedDefaultWidth  int
+		expectedDefaultHeight int
+		expectedMaxImageDim   int
+		expectedFontSize      float64
+	}{
+		{
+			name:                  "Window width above ceiling clamps",
+			configJSON:            `{"window_width": 999999}`,
+			expectedWidth:         8192,
+			expectedHeight:        defaultHeight,
+			expectedDefaultWidth:  defaultWidth,
+			expectedDefaultHeight: defaultHeight,
+			expectedMaxImageDim:   0,
+			expectedFontSize:      24.0,
+		},
+		{
+			name:                  "Window height above ceiling clamps",
+			configJSON:            `{"window_height": 999999}`,
+			expectedWidth:         defaultWidth,
+			expectedHeight:        8192,
+			expectedDefaultWidth:  defaultWidth,
+			expectedDefaultHeight: defaultHeight,
+			expectedMaxImageDim:   0,
+			expectedFontSize:      24.0,
+		},
+		{
+			name:                  "Default window width above ceiling clamps",
+			configJSON:            `{"default_window_width": 999999}`,
+			expectedWidth:         defaultWidth,
+			expectedHeight:        defaultHeight,
+			expectedDefaultWidth:  8192,
+			expectedDefaultHeight: defaultHeight,
+			expectedMaxImageDim:   0,
+			expectedFontSize:      24.0,
+		},
+		{
+			name:                  "Default window height above ceiling clamps",
+			configJSON:            `{"default_window_height": 999999}`,
+			expectedWidth:         defaultWidth,
+			expectedHeight:        defaultHeight,
+			expectedDefaultWidth:  defaultWidth,
+			expectedDefaultHeight: 8192,
+			expectedMaxImageDim:   0,
+			expectedFontSize:      24.0,
+		},
+		{
+			name:                  "Max image dimension above ceiling clamps",
+			configJSON:            `{"max_image_dimension": 999999}`,
+			expectedWidth:         defaultWidth,
+			expectedHeight:        defaultHeight,
+			expectedDefaultWidth:  defaultWidth,
+			expectedDefaultHeight: defaultHeight,
+			expectedMaxImageDim:   16383,
+			expectedFontSize:      24.0,
+		},
+		{
+			// 11.0 sits strictly between the settings UI's old floor
+			// (10.0) and the unified floor (12.0); it must still reset
+			// to the default font size at load time.
+			name:                  "Font size between old and unified floor resets to default",
+			configJSON:            `{"font_size": 11.0}`,
+			expectedWidth:         defaultWidth,
+			expectedHeight:        defaultHeight,
+			expectedDefaultWidth:  defaultWidth,
+			expectedDefaultHeight: defaultHeight,
+			expectedMaxImageDim:   0,
+			expectedFontSize:      24.0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tempDir := t.TempDir()
+			configPath := filepath.Join(tempDir, ".nv.json")
+
+			if err := os.WriteFile(configPath, []byte(tt.configJSON), 0644); err != nil {
+				t.Fatalf("Failed to write test config: %v", err)
+			}
+
+			config := loadConfigFromPath(configPath).Config
+
+			if config.WindowWidth != tt.expectedWidth {
+				t.Errorf("Expected width %d, got %d", tt.expectedWidth, config.WindowWidth)
+			}
+			if config.WindowHeight != tt.expectedHeight {
+				t.Errorf("Expected height %d, got %d", tt.expectedHeight, config.WindowHeight)
+			}
+			if config.DefaultWindowWidth != tt.expectedDefaultWidth {
+				t.Errorf("Expected default width %d, got %d", tt.expectedDefaultWidth, config.DefaultWindowWidth)
+			}
+			if config.DefaultWindowHeight != tt.expectedDefaultHeight {
+				t.Errorf("Expected default height %d, got %d", tt.expectedDefaultHeight, config.DefaultWindowHeight)
+			}
+			if config.MaxImageDimension != tt.expectedMaxImageDim {
+				t.Errorf("Expected max image dimension %d, got %d", tt.expectedMaxImageDim, config.MaxImageDimension)
+			}
+			if config.FontSize != tt.expectedFontSize {
+				t.Errorf("Expected font size %.1f, got %.1f", tt.expectedFontSize, config.FontSize)
+			}
+		})
+	}
+}
+
 func TestPureNormalizeConfigPath(t *testing.T) {
 	tempDir := t.TempDir()
 	configDir := filepath.Join(tempDir, "configs")

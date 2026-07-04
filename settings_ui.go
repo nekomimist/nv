@@ -193,15 +193,15 @@ func (g *Game) settingsAdjust(left bool) {
 
 	switch name {
 	case "WindowWidth":
-		c.WindowWidth = clampInt(c.WindowWidth+stepSign*intStep, minWidth, 8192)
+		c.WindowWidth = clampInt(c.WindowWidth+stepSign*intStep, windowWidthBound.min, windowWidthBound.max)
 	case "WindowHeight":
-		c.WindowHeight = clampInt(c.WindowHeight+stepSign*intStep, minHeight, 8192)
+		c.WindowHeight = clampInt(c.WindowHeight+stepSign*intStep, windowHeightBound.min, windowHeightBound.max)
 	case "DefaultWindowWidth":
-		c.DefaultWindowWidth = clampInt(c.DefaultWindowWidth+stepSign*intStep, minWidth, 8192)
+		c.DefaultWindowWidth = clampInt(c.DefaultWindowWidth+stepSign*intStep, defaultWindowWidthBound.min, defaultWindowWidthBound.max)
 	case "DefaultWindowHeight":
-		c.DefaultWindowHeight = clampInt(c.DefaultWindowHeight+stepSign*intStep, minHeight, 8192)
+		c.DefaultWindowHeight = clampInt(c.DefaultWindowHeight+stepSign*intStep, defaultWindowHeightBound.min, defaultWindowHeightBound.max)
 	case "FontSize":
-		c.FontSize = clampFloat(c.FontSize+float64(stepSign)*floatStep, 10.0, 72.0)
+		c.FontSize = clampFloat(c.FontSize+float64(stepSign)*floatStep, fontSizeBound.min, fontSizeBound.max)
 	case "BookMode":
 		c.BookMode = !c.BookMode
 	case "RightToLeft":
@@ -213,7 +213,7 @@ func (g *Game) settingsAdjust(left bool) {
 			c.SortMethod = (c.SortMethod + 1) % 3
 		}
 	case "AspectRatioThreshold":
-		c.AspectRatioThreshold = clampFloat(c.AspectRatioThreshold+float64(stepSign)*0.1, 1.0, 3.0)
+		c.AspectRatioThreshold = clampFloat(c.AspectRatioThreshold+float64(stepSign)*0.1, aspectRatioThresholdBound.min, aspectRatioThresholdBound.max)
 	case "InitialZoomMode":
 		modes := []string{"fit_window", "fit_width", "fit_height", "actual_size"}
 		cur := 0
@@ -234,8 +234,7 @@ func (g *Game) settingsAdjust(left bool) {
 	case "FitHeightAlignLeft":
 		c.FitHeightAlignLeft = !c.FitHeightAlignLeft
 	case "MaxImageDimension":
-		const minMaxImageDimension = 512
-		const maxMaxImageDimension = 16383
+		const minMaxImageDimension = 512 // UI-only "auto" collapse threshold
 		if c.MaxImageDimension == 0 {
 			if left {
 				break
@@ -247,18 +246,18 @@ func (g *Game) settingsAdjust(left bool) {
 		if newValue <= minMaxImageDimension {
 			c.MaxImageDimension = 0
 		} else {
-			c.MaxImageDimension = clampInt(newValue, minMaxImageDimension, maxMaxImageDimension)
+			c.MaxImageDimension = clampInt(newValue, minMaxImageDimension, maxImageDimensionBound.max)
 		}
 	case "CacheSize (restart)":
-		c.CacheSize = clampInt(c.CacheSize+stepSign*1, 1, 64)
+		c.CacheSize = clampInt(c.CacheSize+stepSign*1, cacheSizeBound.min, cacheSizeBound.max)
 	case "TransitionFrames":
-		c.TransitionFrames = clampInt(c.TransitionFrames+stepSign*1, 0, 60)
+		c.TransitionFrames = clampInt(c.TransitionFrames+stepSign*1, transitionFramesBound.min, transitionFramesBound.max)
 	case "Fullscreen":
 		c.Fullscreen = !c.Fullscreen
 	case "PreloadEnabled":
 		c.PreloadEnabled = !c.PreloadEnabled
 	case "PreloadCount":
-		c.PreloadCount = clampInt(c.PreloadCount+stepSign*1, 1, 16)
+		c.PreloadCount = clampInt(c.PreloadCount+stepSign*1, preloadCountBound.min, preloadCountBound.max)
 	case "Mouse.EnableMouse":
 		c.MouseSettings.EnableMouse = !c.MouseSettings.EnableMouse
 	case "Mouse.WheelSensitivity":
