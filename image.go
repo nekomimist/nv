@@ -1,26 +1,21 @@
 package main
 
 import (
-	"archive/zip"
 	"context"
 	"fmt"
 	"image"
 	"image/color"
 	imagedraw "image/draw"
-	"io"
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"sync"
 	"sync/atomic"
 
 	"nv/internal/imgdecode"
 
-	"github.com/bodgit/sevenzip"
 	"github.com/hajimehoshi/ebiten/v2"
 	lru "github.com/hashicorp/golang-lru/v2"
-	"github.com/nwaples/rardecode"
 )
 
 type ImagePath struct {
@@ -383,6 +378,9 @@ type DefaultImageManager struct {
 	loadWorkerOnce     sync.Once
 	loadingPlaceholder DisplayImage
 	asyncRefresh       atomic.Bool
+	// archiveCache is owned exclusively by asyncLoadWorker; see the
+	// ownership note on archiveHandleCache.
+	archiveCache *archiveHandleCache
 }
 
 type loadRequest struct {
@@ -469,6 +467,7 @@ func newDefaultImageManager(cache *lru.Cache[string, DisplayImage], preloadCount
 		loadCtx:            loadCtx,
 		loadCancel:         loadCancel,
 		loadingPlaceholder: createLoadingPlaceholder(),
+		archiveCache:       newArchiveHandleCache(),
 	}
 	manager.startLoadWorker()
 	return manager
@@ -490,6 +489,7 @@ func (m *DefaultImageManager) startLoadWorker() {
 }
 
 func (m *DefaultImageManager) asyncLoadWorker() {
+	defer m.archiveCache.closeAll()
 	for {
 		select {
 		case <-m.loadCtx.Done():
@@ -765,90 +765,6 @@ func (m *DefaultImageManager) loadImageFromBytes(data []byte, path string) (Disp
 	return m.createEbitenImageFromDecoded(decoded, path)
 }
 
-func (m *DefaultImageManager) loadImageFromZip(archivePath, entryPath string) (DisplayImage, error) {
-	r, err := zip.OpenReader(archivePath)
-	if err != nil {
-		return nil, err
-	}
-	defer r.Close()
-
-	for _, f := range r.File {
-		if f.Name == entryPath {
-			rc, err := f.Open()
-			if err != nil {
-				return nil, err
-			}
-			defer rc.Close()
-
-			data, err := io.ReadAll(rc)
-			if err != nil {
-				return nil, err
-			}
-
-			return m.loadImageFromBytes(data, entryPath)
-		}
-	}
-	return nil, fmt.Errorf("entry %s not found in %s", entryPath, archivePath)
-}
-
-func (m *DefaultImageManager) loadImageFromRar(archivePath, entryPath string) (DisplayImage, error) {
-	f, err := os.Open(archivePath)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-
-	r, err := rardecode.NewReader(f, "")
-	if err != nil {
-		return nil, err
-	}
-
-	for {
-		header, err := r.Next()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return nil, err
-		}
-
-		if header.Name == entryPath {
-			data, err := io.ReadAll(r)
-			if err != nil {
-				return nil, err
-			}
-			return m.loadImageFromBytes(data, entryPath)
-		}
-	}
-	return nil, fmt.Errorf("entry %s not found in %s", entryPath, archivePath)
-}
-
-func (m *DefaultImageManager) loadImageFrom7z(archivePath, entryPath string) (DisplayImage, error) {
-	r, err := sevenzip.OpenReader(archivePath)
-	if err != nil {
-		return nil, err
-	}
-	defer r.Close()
-
-	for _, f := range r.File {
-		if f.Name == entryPath {
-			rc, err := f.Open()
-			if err != nil {
-				return nil, err
-			}
-			defer rc.Close()
-
-			data, err := io.ReadAll(rc)
-			if err != nil {
-				return nil, err
-			}
-
-			return m.loadImageFromBytes(data, entryPath)
-		}
-	}
-	return nil, fmt.Errorf("entry %s not found in %s", entryPath, archivePath)
-}
-
 func (m *DefaultImageManager) loadImage(imagePath ImagePath) (DisplayImage, error) {
 	if imagePath.ArchivePath == "" {
 		decoded, err := imgdecode.DecodeFile(imagePath.Path)
@@ -858,17 +774,11 @@ func (m *DefaultImageManager) loadImage(imagePath ImagePath) (DisplayImage, erro
 		return m.createEbitenImageFromDecoded(decoded, imagePath.Path)
 	}
 
-	ext := strings.ToLower(filepath.Ext(imagePath.ArchivePath))
-	switch ext {
-	case ".zip":
-		return m.loadImageFromZip(imagePath.ArchivePath, imagePath.EntryPath)
-	case ".rar":
-		return m.loadImageFromRar(imagePath.ArchivePath, imagePath.EntryPath)
-	case ".7z":
-		return m.loadImageFrom7z(imagePath.ArchivePath, imagePath.EntryPath)
-	default:
-		return nil, fmt.Errorf("unsupported archive format: %s", ext)
+	data, err := m.archiveCache.readEntry(imagePath.ArchivePath, imagePath.EntryPath)
+	if err != nil {
+		return nil, err
 	}
+	return m.loadImageFromBytes(data, imagePath.EntryPath)
 }
 
 func (m *DefaultImageManager) createEbitenImageFromDecoded(src image.Image, origin string) (DisplayImage, error) {
@@ -1021,73 +931,24 @@ func queryEbitenMaxImageSize() (int, bool) {
 
 // File collection functions
 
-func extractImagesFromZip(archivePath string) ([]ImagePath, error) {
-	r, err := zip.OpenReader(archivePath)
+// extractImagesFromArchive enumerates archivePath's supported image
+// entries via a one-shot archiveHandle. This runs on the UI goroutine and
+// must not touch the worker-owned archiveHandleCache: it opens its own
+// handle and closes it immediately after enumeration.
+func extractImagesFromArchive(archivePath string) ([]ImagePath, error) {
+	handle, err := openArchiveHandle(archivePath)
 	if err != nil {
 		return nil, err
 	}
-	defer r.Close()
+	defer handle.Close()
 
 	var images []ImagePath
-	for _, f := range r.File {
-		if !f.FileInfo().IsDir() && isSupportedExt(f.Name) {
+	for _, entry := range handle.Entries() {
+		if !entry.IsDir && isSupportedExt(entry.Name) {
 			images = append(images, ImagePath{
-				Path:        archivePath + ":" + f.Name,
+				Path:        archivePath + ":" + entry.Name,
 				ArchivePath: archivePath,
-				EntryPath:   f.Name,
-			})
-		}
-	}
-	return images, nil
-}
-
-func extractImagesFromRar(archivePath string) ([]ImagePath, error) {
-	f, err := os.Open(archivePath)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-
-	r, err := rardecode.NewReader(f, "")
-	if err != nil {
-		return nil, err
-	}
-
-	var images []ImagePath
-	for {
-		header, err := r.Next()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return nil, err
-		}
-
-		if !header.IsDir && isSupportedExt(header.Name) {
-			images = append(images, ImagePath{
-				Path:        archivePath + ":" + header.Name,
-				ArchivePath: archivePath,
-				EntryPath:   header.Name,
-			})
-		}
-	}
-	return images, nil
-}
-
-func extractImagesFrom7z(archivePath string) ([]ImagePath, error) {
-	r, err := sevenzip.OpenReader(archivePath)
-	if err != nil {
-		return nil, err
-	}
-	defer r.Close()
-
-	var images []ImagePath
-	for _, f := range r.File {
-		if !f.FileInfo().IsDir() && isSupportedExt(f.Name) {
-			images = append(images, ImagePath{
-				Path:        archivePath + ":" + f.Name,
-				ArchivePath: archivePath,
-				EntryPath:   f.Name,
+				EntryPath:   entry.Name,
 			})
 		}
 	}
@@ -1099,21 +960,7 @@ func processArchive(archivePath string) ([]ImagePath, error) {
 		return []ImagePath{}, nil
 	}
 
-	var archiveImages []ImagePath
-	var err error
-
-	ext := strings.ToLower(filepath.Ext(archivePath))
-	switch ext {
-	case ".zip":
-		archiveImages, err = extractImagesFromZip(archivePath)
-	case ".rar":
-		archiveImages, err = extractImagesFromRar(archivePath)
-	case ".7z":
-		archiveImages, err = extractImagesFrom7z(archivePath)
-	default:
-		return []ImagePath{}, fmt.Errorf("unsupported archive format: %s", ext)
-	}
-
+	archiveImages, err := extractImagesFromArchive(archivePath)
 	if err != nil {
 		errorKV("collection", "archive_process_failed", "archive_path", archivePath, "error", err)
 		return []ImagePath{}, err
