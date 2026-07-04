@@ -1,7 +1,6 @@
 package main
 
 import (
-	"strings"
 	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
@@ -45,6 +44,7 @@ type MousebindingManager struct {
 	mouseMapping       map[string]ebiten.MouseButton
 	settings           MouseSettings
 	doubleClickTracker DoubleClickTracker
+	parsed             map[string][]MouseCombination
 }
 
 // NewMousebindingManager creates a new MousebindingManager
@@ -58,47 +58,51 @@ func NewMousebindingManager(mousebindings map[string][]string, settings MouseSet
 			clickCount:    0,
 		},
 	}
+	mm.rebuildParsed()
 	return mm
 }
 
-// parseMouseString parses a mouse string like "Shift+LeftClick" or "WheelUp" into a MouseCombination
-func (mm *MousebindingManager) parseMouseString(mouseStr string) (*MouseCombination, bool) {
-	parts := strings.Split(mouseStr, "+")
-	if len(parts) == 0 {
-		return nil, false
+// rebuildParsed parses the current mousebindings map into MouseCombinations
+// once, so CheckAction doesn't need to re-parse mouse strings on every
+// frame. Invalid strings are skipped here exactly as CheckAction skipped
+// them before pre-parsing existed.
+func (mm *MousebindingManager) rebuildParsed() {
+	parsed := make(map[string][]MouseCombination, len(mm.mousebindings))
+	for action, mouseStrings := range mm.mousebindings {
+		combos := make([]MouseCombination, 0, len(mouseStrings))
+		for _, mouseStr := range mouseStrings {
+			if combination, valid := mm.parseMouseString(mouseStr); valid {
+				combos = append(combos, *combination)
+			}
+		}
+		parsed[action] = combos
 	}
+	mm.parsed = parsed
+}
 
-	combination := &MouseCombination{}
+// parseMouseString parses a mouse string like "Shift+LeftClick" or "WheelUp"
+// into a MouseCombination. Unknown modifier tokens are silently ignored (not
+// treated as a parse failure); only an unrecognized trailing action name
+// fails the parse.
+func (mm *MousebindingManager) parseMouseString(mouseStr string) (*MouseCombination, bool) {
+	name, shift, ctrl, alt, _ := splitModifiers(mouseStr)
 
-	// Last part should be the actual mouse action
-	actionName := parts[len(parts)-1]
+	combination := &MouseCombination{Shift: shift, Ctrl: ctrl, Alt: alt}
 
 	// Handle wheel actions
-	if delta, exists := mouseWheelActionDeltas[actionName]; exists {
+	if delta, exists := mouseWheelActionDeltas[name]; exists {
 		combination.IsWheel = true
 		combination.WheelDeltaX = delta.x
 		combination.WheelDeltaY = delta.y
-	} else if button, exists := mouseDoubleClickToButton[actionName]; exists {
+	} else if button, exists := mouseDoubleClickToButton[name]; exists {
 		combination.IsDoubleClick = true
 		combination.Button = button
 	} else {
-		button, exists := mm.mouseMapping[actionName]
+		button, exists := mm.mouseMapping[name]
 		if !exists {
 			return nil, false
 		}
 		combination.Button = button
-	}
-
-	// Check for modifiers
-	for i := 0; i < len(parts)-1; i++ {
-		switch modifier := strings.ToLower(parts[i]); modifier {
-		case "shift":
-			combination.Shift = true
-		case "ctrl":
-			combination.Ctrl = true
-		case "alt":
-			combination.Alt = true
-		}
 	}
 
 	return combination, true
@@ -193,14 +197,13 @@ func (mm *MousebindingManager) checkDoubleClick(button ebiten.MouseButton) bool 
 
 // CheckAction checks if any mouse binding for the given action is triggered
 func (mm *MousebindingManager) CheckAction(action string) bool {
-	mouseStrings, exists := mm.mousebindings[action]
+	combos, exists := mm.parsed[action]
 	if !exists {
 		return false
 	}
 
-	for _, mouseStr := range mouseStrings {
-		combination, valid := mm.parseMouseString(mouseStr)
-		if valid && mm.isMouseActionTriggered(combination) {
+	for i := range combos {
+		if mm.isMouseActionTriggered(&combos[i]) {
 			return true
 		}
 	}
@@ -225,6 +228,7 @@ func (mm *MousebindingManager) GetMousebindings() map[string][]string {
 // UpdateMousebindings updates the mouse bindings map
 func (mm *MousebindingManager) UpdateMousebindings(mousebindings map[string][]string) {
 	mm.mousebindings = mousebindings
+	mm.rebuildParsed()
 }
 
 // UpdateSettings updates the mouse settings

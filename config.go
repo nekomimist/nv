@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 // Window size constants
@@ -71,26 +70,19 @@ func validateMousebindings(mousebindings map[string][]string) error {
 
 // validateMouseString validates a single mouse string format
 func validateMouseString(mouseStr string) error {
-	parts := strings.Split(mouseStr, "+")
-	if len(parts) == 0 {
-		return fmt.Errorf("empty mouse string")
-	}
+	name, _, _, _, ok := splitModifiers(mouseStr)
 
-	// Last part should be the actual mouse action
-	actionName := parts[len(parts)-1]
-	if _, ok := mouseActionToButton[actionName]; !ok {
-		if _, ok := mouseWheelActionDeltas[actionName]; !ok {
-			if _, ok := mouseDoubleClickToButton[actionName]; !ok {
-				return fmt.Errorf("unknown mouse action: %s", actionName)
+	// The trailing part should be a recognized mouse action
+	if _, exists := mouseActionToButton[name]; !exists {
+		if _, exists := mouseWheelActionDeltas[name]; !exists {
+			if _, exists := mouseDoubleClickToButton[name]; !exists {
+				return fmt.Errorf("unknown mouse action: %s", name)
 			}
 		}
 	}
 
-	for i := 0; i < len(parts)-1; i++ {
-		modifier := strings.ToLower(parts[i])
-		if !isValidBindingModifier(modifier) {
-			return fmt.Errorf("unknown modifier: %s", parts[i])
-		}
+	if !ok {
+		return fmt.Errorf("unknown modifier: %s", firstInvalidModifierToken(mouseStr))
 	}
 
 	return nil
@@ -98,23 +90,15 @@ func validateMouseString(mouseStr string) error {
 
 // validateKeyString validates a single key string format
 func validateKeyString(keyStr string) error {
-	parts := strings.Split(keyStr, "+")
-	if len(parts) == 0 {
-		return fmt.Errorf("empty key string")
+	name, _, _, _, ok := splitModifiers(keyStr)
+
+	// The trailing part should be a recognized key
+	if _, exists := keyNameToEbitenKey[name]; !exists {
+		return fmt.Errorf("unknown key: %s", name)
 	}
 
-	// Last part should be the actual key
-	keyName := parts[len(parts)-1]
-	if _, ok := keyNameToEbitenKey[keyName]; !ok {
-		return fmt.Errorf("unknown key: %s", keyName)
-	}
-
-	// Check modifiers
-	for i := 0; i < len(parts)-1; i++ {
-		modifier := strings.ToLower(parts[i])
-		if !isValidBindingModifier(modifier) {
-			return fmt.Errorf("unknown modifier: %s", parts[i])
-		}
+	if !ok {
+		return fmt.Errorf("unknown modifier: %s", firstInvalidModifierToken(keyStr))
 	}
 
 	return nil

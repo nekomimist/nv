@@ -1,6 +1,10 @@
 package main
 
-import "github.com/hajimehoshi/ebiten/v2"
+import (
+	"strings"
+
+	"github.com/hajimehoshi/ebiten/v2"
+)
 
 type mouseWheelDelta struct {
 	x float64
@@ -88,4 +92,48 @@ func isValidBindingModifier(modifier string) bool {
 	default:
 		return false
 	}
+}
+
+// splitModifiers splits a binding string like "Shift+Ctrl+KeyB" into its
+// trailing name ("KeyB") and modifier flags. Modifier tokens (every part
+// except the last) are matched case-insensitively against "shift", "ctrl",
+// and "alt"; recognized tokens set the corresponding flag. ok is false if
+// any modifier token is not one of those three, but name/shift/ctrl/alt are
+// still populated from whatever tokens *were* recognized, so tolerant
+// callers can ignore ok and proceed with a best-effort parse (this matches
+// the historical behavior of parseKeyString/parseMouseString, which ignore
+// unknown modifiers rather than failing outright; strict callers such as
+// validateKeyString/validateMouseString treat ok == false as an error).
+func splitModifiers(s string) (name string, shift, ctrl, alt bool, ok bool) {
+	parts := strings.Split(s, "+")
+	name = parts[len(parts)-1]
+	ok = true
+
+	for i := 0; i < len(parts)-1; i++ {
+		switch strings.ToLower(parts[i]) {
+		case "shift":
+			shift = true
+		case "ctrl":
+			ctrl = true
+		case "alt":
+			alt = true
+		default:
+			ok = false
+		}
+	}
+
+	return name, shift, ctrl, alt, ok
+}
+
+// firstInvalidModifierToken returns the original (non-lowercased) text of
+// the first unrecognized modifier token in s, for use in error messages.
+// Only meaningful when splitModifiers(s) reports ok == false.
+func firstInvalidModifierToken(s string) string {
+	parts := strings.Split(s, "+")
+	for i := 0; i < len(parts)-1; i++ {
+		if !isValidBindingModifier(strings.ToLower(parts[i])) {
+			return parts[i]
+		}
+	}
+	return ""
 }

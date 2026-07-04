@@ -1,8 +1,6 @@
 package main
 
 import (
-	"strings"
-
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
 )
@@ -11,6 +9,7 @@ import (
 type KeybindingManager struct {
 	keybindings map[string][]string
 	keyMapping  map[string]ebiten.Key
+	parsed      map[string][]KeyCombination
 }
 
 // NewKeybindingManager creates a new KeybindingManager
@@ -19,7 +18,26 @@ func NewKeybindingManager(keybindings map[string][]string) *KeybindingManager {
 		keybindings: keybindings,
 		keyMapping:  keyNameToEbitenKey,
 	}
+	km.rebuildParsed()
 	return km
+}
+
+// rebuildParsed parses the current keybindings map into KeyCombinations once,
+// so CheckAction doesn't need to re-parse key strings on every frame. Invalid
+// strings are skipped here exactly as CheckAction skipped them before
+// pre-parsing existed.
+func (km *KeybindingManager) rebuildParsed() {
+	parsed := make(map[string][]KeyCombination, len(km.keybindings))
+	for action, keyStrings := range km.keybindings {
+		combos := make([]KeyCombination, 0, len(keyStrings))
+		for _, keyStr := range keyStrings {
+			if combination, valid := km.parseKeyString(keyStr); valid {
+				combos = append(combos, *combination)
+			}
+		}
+		parsed[action] = combos
+	}
+	km.parsed = parsed
 }
 
 // KeyCombination represents a key with optional modifiers
@@ -30,36 +48,18 @@ type KeyCombination struct {
 	Alt   bool
 }
 
-// parseKeyString parses a key string like "Shift+KeyB" into a KeyCombination
+// parseKeyString parses a key string like "Shift+KeyB" into a KeyCombination.
+// Unknown modifier tokens are silently ignored (not treated as a parse
+// failure); only an unrecognized trailing key name fails the parse.
 func (km *KeybindingManager) parseKeyString(keyStr string) (*KeyCombination, bool) {
-	parts := strings.Split(keyStr, "+")
-	if len(parts) == 0 {
-		return nil, false
-	}
+	name, shift, ctrl, alt, _ := splitModifiers(keyStr)
 
-	combination := &KeyCombination{}
-
-	// Last part should be the actual key
-	keyName := parts[len(parts)-1]
-	key, exists := km.keyMapping[keyName]
+	key, exists := km.keyMapping[name]
 	if !exists {
 		return nil, false
 	}
-	combination.Key = key
 
-	// Check for modifiers
-	for i := 0; i < len(parts)-1; i++ {
-		switch modifier := strings.ToLower(parts[i]); modifier {
-		case "shift":
-			combination.Shift = true
-		case "ctrl":
-			combination.Ctrl = true
-		case "alt":
-			combination.Alt = true
-		}
-	}
-
-	return combination, true
+	return &KeyCombination{Key: key, Shift: shift, Ctrl: ctrl, Alt: alt}, true
 }
 
 // isKeyPressed checks if a key combination is currently being pressed
@@ -96,14 +96,13 @@ func (km *KeybindingManager) isKeyPressed(combination *KeyCombination) bool {
 
 // CheckAction checks if any keybinding for the given action is pressed
 func (km *KeybindingManager) CheckAction(action string) bool {
-	keyStrings, exists := km.keybindings[action]
+	combos, exists := km.parsed[action]
 	if !exists {
 		return false
 	}
 
-	for _, keyStr := range keyStrings {
-		combination, valid := km.parseKeyString(keyStr)
-		if valid && km.isKeyPressed(combination) {
+	for i := range combos {
+		if km.isKeyPressed(&combos[i]) {
 			return true
 		}
 	}
@@ -128,4 +127,5 @@ func (km *KeybindingManager) GetKeybindings() map[string][]string {
 // UpdateKeybindings updates the keybindings map
 func (km *KeybindingManager) UpdateKeybindings(keybindings map[string][]string) {
 	km.keybindings = keybindings
+	km.rebuildParsed()
 }

@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+
+	"github.com/hajimehoshi/ebiten/v2"
 )
 
 func TestPureApplyConfigResultUpdatesStatus(t *testing.T) {
@@ -1078,5 +1080,87 @@ func TestPureMouseSettingsValidation(t *testing.T) {
 				t.Errorf("WheelInverted: expected %t, got %t", tt.expectedOutput.WheelInverted, result.WheelInverted)
 			}
 		})
+	}
+}
+
+func TestPureSplitModifiers(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantName  string
+		wantShift bool
+		wantCtrl  bool
+		wantAlt   bool
+		wantOK    bool
+	}{
+		{name: "no modifiers", input: "KeyB", wantName: "KeyB", wantOK: true},
+		{name: "one modifier", input: "Shift+KeyB", wantName: "KeyB", wantShift: true, wantOK: true},
+		{name: "two modifiers", input: "Shift+Ctrl+KeyB", wantName: "KeyB", wantShift: true, wantCtrl: true, wantOK: true},
+		{name: "three modifiers", input: "Shift+Ctrl+Alt+KeyB", wantName: "KeyB", wantShift: true, wantCtrl: true, wantAlt: true, wantOK: true},
+		{name: "modifier case insensitive", input: "SHIFT+KeyB", wantName: "KeyB", wantShift: true, wantOK: true},
+		{name: "duplicate modifier", input: "Shift+Shift+KeyB", wantName: "KeyB", wantShift: true, wantOK: true},
+		{name: "unknown modifier", input: "Foo+KeyB", wantName: "KeyB", wantOK: false},
+		{name: "unknown modifier among valid ones", input: "Shift+Foo+KeyB", wantName: "KeyB", wantShift: true, wantOK: false},
+		{name: "empty string", input: "", wantName: "", wantOK: true},
+		{name: "modifier-only string", input: "Shift", wantName: "Shift", wantOK: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			name, shift, ctrl, alt, ok := splitModifiers(tt.input)
+			if name != tt.wantName || shift != tt.wantShift || ctrl != tt.wantCtrl || alt != tt.wantAlt || ok != tt.wantOK {
+				t.Errorf("splitModifiers(%q) = (%q, %t, %t, %t, %t), want (%q, %t, %t, %t, %t)",
+					tt.input, name, shift, ctrl, alt, ok,
+					tt.wantName, tt.wantShift, tt.wantCtrl, tt.wantAlt, tt.wantOK)
+			}
+		})
+	}
+}
+
+func TestPureKeybindingManagerRebuildsParsedOnUpdate(t *testing.T) {
+	km := NewKeybindingManager(map[string][]string{
+		"next": {"Space"},
+	})
+
+	if combos := km.parsed["next"]; len(combos) != 1 || combos[0].Key != ebiten.KeySpace {
+		t.Fatalf("initial parsed state incorrect: %+v", km.parsed)
+	}
+	if _, exists := km.parsed["previous"]; exists {
+		t.Fatalf("unexpected parsed entry for 'previous' before update: %+v", km.parsed)
+	}
+
+	km.UpdateKeybindings(map[string][]string{
+		"previous": {"Backspace"},
+	})
+
+	if _, exists := km.parsed["next"]; exists {
+		t.Fatalf("stale parsed entry for 'next' survived UpdateKeybindings: %+v", km.parsed)
+	}
+	if combos := km.parsed["previous"]; len(combos) != 1 || combos[0].Key != ebiten.KeyBackspace {
+		t.Fatalf("updated parsed state incorrect: %+v", km.parsed)
+	}
+}
+
+func TestPureMousebindingManagerRebuildsParsedOnUpdate(t *testing.T) {
+	mm := NewMousebindingManager(map[string][]string{
+		"next": {"LeftClick"},
+	}, GetDefaultMouseSettings())
+
+	if combos := mm.parsed["next"]; len(combos) != 1 || combos[0].Button != ebiten.MouseButtonLeft {
+		t.Fatalf("initial parsed state incorrect: %+v", mm.parsed)
+	}
+	if _, exists := mm.parsed["previous"]; exists {
+		t.Fatalf("unexpected parsed entry for 'previous' before update: %+v", mm.parsed)
+	}
+
+	mm.UpdateMousebindings(map[string][]string{
+		"previous": {"WheelDown"},
+	})
+
+	if _, exists := mm.parsed["next"]; exists {
+		t.Fatalf("stale parsed entry for 'next' survived UpdateMousebindings: %+v", mm.parsed)
+	}
+	if combos := mm.parsed["previous"]; len(combos) != 1 || !combos[0].IsWheel {
+		t.Fatalf("updated parsed state incorrect: %+v", mm.parsed)
 	}
 }
