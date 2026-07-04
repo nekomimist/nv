@@ -362,7 +362,7 @@ func (g *Game) clampPanToLimits() {
 		g.zoomState.PanOffsetY = 0
 	}
 
-	if prevPanX != g.zoomState.PanOffsetX || prevPanY != g.zoomState.PanOffsetY {
+	if debugMode && (prevPanX != g.zoomState.PanOffsetX || prevPanY != g.zoomState.PanOffsetY) {
 		debugKV("viewport", "pan_clamped",
 			"mode", g.zoomState.Mode,
 			"prev_pan_x", prevPanX,

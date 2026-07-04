@@ -538,14 +538,16 @@ func (m *DefaultImageManager) processLoadRequest(req loadRequest) {
 	m.asyncRefresh.Store(true)
 	m.recordPreloadResult(req.preload, true)
 
-	var mem runtime.MemStats
-	runtime.ReadMemStats(&mem)
-	debugKV("cache", "cache_load_complete",
-		"path", req.cacheKey,
-		"source", loadSource(req.preload),
-		"cache_len", m.cache.Len(),
-		"mem_mb", mem.Alloc/1024/1024,
-	)
+	if debugMode {
+		var mem runtime.MemStats
+		runtime.ReadMemStats(&mem)
+		debugKV("cache", "cache_load_complete",
+			"path", req.cacheKey,
+			"source", loadSource(req.preload),
+			"cache_len", m.cache.Len(),
+			"mem_mb", mem.Alloc/1024/1024,
+		)
+	}
 }
 
 func (m *DefaultImageManager) requestAsyncLoad(imagePath ImagePath) {
@@ -936,15 +938,27 @@ func createTiledDisplayImage(src image.Image, tileSize int) (DisplayImage, error
 		tiles:  make([]DisplayTile, 0, ((width+tileSize-1)/tileSize)*((height+tileSize-1)/tileSize)),
 	}
 
+	// Reused scratch buffer for full-size interior tiles. Edge tiles (the
+	// last row/column, smaller than tileSize) still allocate a
+	// right-sized buffer below. imagedraw.Src fully overwrites the
+	// buffer on every draw (no stale-pixel bleed), and
+	// ebiten.NewImageFromImageWithOptions (via newUnmanagedEbitenImage)
+	// copies pixel data synchronously without retaining the source
+	// image, so reusing this buffer across tiles is safe.
+	tileScratch := image.NewNRGBA(image.Rect(0, 0, tileSize, tileSize))
+
 	for y := 0; y < height; y += tileSize {
 		tileH := min(tileSize, height-y)
 		for x := 0; x < width; x += tileSize {
 			tileW := min(tileSize, width-x)
 			tileRect := image.Rect(bounds.Min.X+x, bounds.Min.Y+y, bounds.Min.X+x+tileW, bounds.Min.Y+y+tileH)
-			tileSrc := image.NewNRGBA(image.Rect(0, 0, tileW, tileH))
-			imagedraw.Draw(tileSrc, tileSrc.Bounds(), src, tileRect.Min, imagedraw.Src)
+			tileSrc := tileScratch
+			if tileW != tileSize || tileH != tileSize {
+				tileSrc = image.NewNRGBA(image.Rect(0, 0, tileW, tileH))
+			}
+			imagedraw.Draw(tileSrc, image.Rect(0, 0, tileW, tileH), src, tileRect.Min, imagedraw.Src)
 
-			tileImg, err := newUnmanagedEbitenImage(tileSrc)
+			tileImg, err := newUnmanagedEbitenImageFn(tileSrc)
 			if err != nil {
 				result.Deallocate()
 				if tileSize > fallbackTileSize {
@@ -964,6 +978,15 @@ func createTiledDisplayImage(src image.Image, tileSize int) (DisplayImage, error
 
 	return result, nil
 }
+
+// newUnmanagedEbitenImageFn converts a tile's pixel buffer into an
+// unmanaged ebiten image. It is a package variable (rather than a direct
+// call to newUnmanagedEbitenImage) purely so tests can intercept the
+// buffer that would be converted: reading a real ebiten.Image's pixels
+// back requires an active Ebiten game loop, which isn't running under
+// `go test`, so this is the only way to verify tile pixel content in a
+// regression test.
+var newUnmanagedEbitenImageFn = newUnmanagedEbitenImage
 
 func newUnmanagedEbitenImage(src image.Image) (*ebiten.Image, error) {
 	var img *ebiten.Image

@@ -67,7 +67,9 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		g.renderer.Draw(screen)
 		g.renderer.lastSnapshot = currentSnapshot
 		g.renderer.hasSnapshot = true
-		debugKV("renderer", "redraw", "reason", redrawReason, "width", w, "height", h, "force_redraw_frames", g.forceRedrawFrames)
+		if debugMode {
+			debugKV("renderer", "redraw", "reason", redrawReason, "width", w, "height", h, "force_redraw_frames", g.forceRedrawFrames)
+		}
 
 		if g.forceRedrawFrames > 0 {
 			g.forceRedrawFrames--

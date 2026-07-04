@@ -2,7 +2,10 @@ package main
 
 import (
 	"image"
+	"image/color"
 	"testing"
+
+	"github.com/hajimehoshi/ebiten/v2"
 )
 
 func TestGUI_NavigateSingleUsesActionSemantics(t *testing.T) {
@@ -363,5 +366,97 @@ func TestGUI_CreateDisplayImageTilesWhenOverLimit(t *testing.T) {
 	}
 	if img.TileCount() <= 1 {
 		t.Fatalf("expected tiled image, got %d tile(s)", img.TileCount())
+	}
+}
+
+// TestGUI_CreateTiledDisplayImageTilesHaveDistinctContent guards against the
+// "every tile shows the last tile's content" bug class: it would surface if
+// the scratch buffer reused for full-size interior tiles (see
+// createTiledDisplayImage) ever leaked stale pixels into a later tile.
+//
+// Reading pixels back from a real *ebiten.Image (e.g. via Image.At) requires
+// an active Ebiten game loop, which isn't running under `go test` here, so
+// this intercepts newUnmanagedEbitenImageFn to capture (a copy of) each
+// tile's pixel buffer at the exact point production code would hand it off
+// for conversion -- which is what the buffer-reuse optimization must get
+// right.
+func TestGUI_CreateTiledDisplayImageTilesHaveDistinctContent(t *testing.T) {
+	const tileSize = 4
+
+	// Three vertical stripes: two full-size interior tiles (which share the
+	// reused scratch buffer) plus one narrower edge tile, each a distinct
+	// solid color.
+	stripes := []struct {
+		x, w  int
+		color color.NRGBA
+	}{
+		{x: 0, w: tileSize, color: color.NRGBA{255, 0, 0, 255}},
+		{x: tileSize, w: tileSize, color: color.NRGBA{0, 255, 0, 255}},
+		{x: 2 * tileSize, w: 2, color: color.NRGBA{0, 0, 255, 255}},
+	}
+	width := 2*tileSize + 2
+	height := tileSize
+
+	src := image.NewNRGBA(image.Rect(0, 0, width, height))
+	for _, s := range stripes {
+		for y := 0; y < height; y++ {
+			for x := s.x; x < s.x+s.w; x++ {
+				src.SetNRGBA(x, y, s.color)
+			}
+		}
+	}
+
+	type capturedTile struct {
+		w, h, stride int
+		pix          []byte
+	}
+	var captured []capturedTile
+
+	originalConverter := newUnmanagedEbitenImageFn
+	newUnmanagedEbitenImageFn = func(tileSrc image.Image) (*ebiten.Image, error) {
+		nrgba := tileSrc.(*image.NRGBA)
+		b := nrgba.Bounds()
+		captured = append(captured, capturedTile{
+			w:      b.Dx(),
+			h:      b.Dy(),
+			stride: nrgba.Stride,
+			pix:    append([]byte(nil), nrgba.Pix...), // copy: scratch buffer may be reused next iteration
+		})
+		return originalConverter(tileSrc)
+	}
+	t.Cleanup(func() {
+		newUnmanagedEbitenImageFn = originalConverter
+	})
+
+	result, err := createTiledDisplayImage(src, tileSize)
+	if err != nil {
+		t.Fatalf("createTiledDisplayImage() error = %v", err)
+	}
+	t.Cleanup(result.Deallocate)
+
+	tiles := result.Tiles()
+	if len(tiles) != len(stripes) || len(captured) != len(stripes) {
+		t.Fatalf("got %d tile(s) and %d captured buffer(s), want %d each", len(tiles), len(captured), len(stripes))
+	}
+
+	for i, s := range stripes {
+		tile := tiles[i]
+		c := captured[i]
+
+		if tile.X != s.x || tile.W != s.w || tile.H != height {
+			t.Fatalf("tile[%d] = {X:%d W:%d H:%d}, want {X:%d W:%d H:%d}", i, tile.X, tile.W, tile.H, s.x, s.w, height)
+		}
+		if c.w != s.w || c.h != height {
+			t.Fatalf("captured tile[%d] size = %dx%d, want %dx%d", i, c.w, c.h, s.w, height)
+		}
+		for y := 0; y < c.h; y++ {
+			for x := 0; x < c.w; x++ {
+				off := y*c.stride + x*4
+				got := color.NRGBA{c.pix[off], c.pix[off+1], c.pix[off+2], c.pix[off+3]}
+				if got != s.color {
+					t.Fatalf("tile[%d] pixel (%d,%d) = %v, want %v", i, x, y, got, s.color)
+				}
+			}
+		}
 	}
 }
