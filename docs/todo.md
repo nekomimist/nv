@@ -89,6 +89,40 @@ inspection and cross-review comparison on March 12, 2026.
     runtime, navigation, loop, viewport, and `Game` state files instead
     of the old monolithic `main.go` design.
 
+- July 4, 2026: Removed the dead pre-tile renderer draw paths.
+  - Result: the obsolete rotation/book-mode texture-cache implementation
+    and the tests that only exercised it were deleted; the live tile-based
+    draw path is the single rendering implementation.
+
+- July 4, 2026: Stopped re-parsing input binding strings every frame.
+  - Result: key and mouse bindings pre-parse once when bindings are set,
+    modifier splitting is shared between runtime parsing and config
+    validation, and frames with no input skip the binding scan entirely.
+
+- July 4, 2026: Sized the preload queue from the configured PreloadCount.
+  - Result: PreloadCount values above 8 are no longer silently truncated
+    by a hardcoded channel capacity.
+
+- July 4, 2026: Removed avoidable hot-path allocations and debug-only work.
+  - Result: navigation state capture, settings list lookups, render-state
+    snapshots, and tile scratch buffers no longer allocate redundantly,
+    and memory-stats collection plus per-frame debug logs are gated
+    behind debug mode.
+
+- July 4, 2026: Split config loading and single-sourced validation bounds.
+  - Result: `loadConfigFromPath` now composes `defaultConfig`,
+    `backfillBindings`, and `validateConfig`; numeric bounds live in
+    `bounds.go` shared with the settings UI; and previously missing
+    load-time ceilings (window sizes, max image dimension) plus the
+    font-size floor mismatch are closed.
+
+- July 4, 2026: Factored archive access behind a shared cached handle
+  abstraction.
+  - Result: ZIP/RAR/7z enumeration and entry reads share one
+    `archiveHandle` abstraction, and a bounded worker-owned handle cache
+    avoids re-opening archives and re-decompressing solid RAR/7z content
+    on every image load.
+
 ## Medium Priority
 
 - Reassess the remaining `Game` shell and ownership boundaries.
@@ -112,12 +146,6 @@ inspection and cross-review comparison on March 12, 2026.
     make isolated testing and dependency ownership harder to reason about.
   - Done when: remaining globals are either documented as intentional or
     replaced by explicit dependencies.
-
-- Reduce archive-format duplication where it pays off.
-  - Why: ZIP, RAR, and 7z handling currently repeat the same control flow
-    for entry enumeration and extraction.
-  - Done when: shared archive behavior is factored behind a smaller common
-    abstraction without changing supported formats.
 
 ## Reviewed But Deferred
 

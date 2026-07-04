@@ -30,7 +30,9 @@ A quick orientation for humans and AI agents working on this repo. Short, factua
 - `actions.go`: Central action catalog, default bindings, and action dispatch.
 - `keybinding.go`, `mousebinding.go`, `input_bindings.go`: Binding parsing, validation, shared input names, and mouse settings.
 - `config.go`: Config load/save, defaults, validation, and config path handling.
+- `bounds.go`: Shared numeric bounds (min/max/default) used by config validation and settings UI clamps.
 - `image.go`: Image collection from files/directories/archives, async loading, preload queue, LRU cache, and Ebiten image creation.
+- `archive.go`, `archive_cache.go`: Shared ZIP/RAR/7z read abstraction (`archiveHandle`) and the bounded archive-handle cache owned by the async load worker.
 - `internal/imgdecode/`: Stdlib/native PNG/JPEG decode boundary, tests, and benchmarks.
 - `navlogic/`: Headless-safe book-mode/navigation planning logic and tests.
 - `single_instance*.go`: Platform-specific single-instance lock and argument forwarding.

@@ -8,7 +8,8 @@ The current design centers on a still-large `Game` type in
 rendering, input, image loading, sorting, and configuration split into
 separate root-level files.
 
-These notes summarize the design as observed on March 15, 2026.
+These notes summarize the design as observed on March 15, 2026, with
+updates from the July 4, 2026 performance and refactoring pass.
 
 ## Current Layout
 
@@ -43,10 +44,14 @@ These notes summarize the design as observed on March 15, 2026.
 - `image.go`
   - Image collection from files, directories, and archives
   - Async loading, preload queue, LRU cache
-  - Archive support for ZIP, RAR, and 7z
+- `archive.go`, `archive_cache.go`
+  - Shared ZIP/RAR/7z read abstraction (`archiveHandle`)
+  - Bounded archive-handle cache owned by the async load worker
 - `config.go`
   - JSON config load/save
   - Default filling and validation
+- `bounds.go`
+  - Shared numeric bounds used by config validation and settings UI
 - `sort_strategy.go`
   - Sort strategy abstraction and implementations
 
@@ -123,6 +128,9 @@ Two modes bypass the generic action flow for practical reasons:
 - LRU cache eviction
 - large-image tiling before Ebiten image creation when dimensions exceed the
   configured threshold
+- bounded reuse of open archive handles (via `archive_cache.go`) so
+  sequential reads through solid RAR/7z archives do not re-decompress
+  preceding entries on every load
 
 Actual file/byte decoding is delegated to `internal/imgdecode` so that the
 decode path can be tested and benchmarked without importing Ebiten. The
