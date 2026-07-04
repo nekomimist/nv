@@ -53,8 +53,12 @@ func configureLogOutput(path string) (*os.File, error) {
 		return nil, err
 	}
 
-	log.SetOutput(io.MultiWriter(os.Stderr, file))
+	log.SetOutput(logFileWriter(file, os.Stderr))
 	return file, nil
+}
+
+func logFileWriter(file io.Writer, console io.Writer) io.Writer {
+	return io.MultiWriter(file, console)
 }
 
 func formatLogLine(level logLevel, component, event string, kv ...any) string {

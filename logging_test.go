@@ -213,6 +213,19 @@ func TestConfigureLogOutputWritesToFile(t *testing.T) {
 	}
 }
 
+func TestLogFileWriterWritesFileBeforeConsole(t *testing.T) {
+	var file bytes.Buffer
+	writer := logFileWriter(&file, errWriter{})
+
+	_, err := writer.Write([]byte("hello"))
+	if err == nil {
+		t.Fatal("expected console write error")
+	}
+	if got := file.String(); got != "hello" {
+		t.Fatalf("file output = %q, want %q", got, "hello")
+	}
+}
+
 func captureLogOutput(t *testing.T, debug bool, fn func()) string {
 	t.Helper()
 
@@ -231,4 +244,10 @@ func captureLogOutput(t *testing.T, debug bool, fn func()) string {
 
 	fn()
 	return buf.String()
+}
+
+type errWriter struct{}
+
+func (errWriter) Write(_ []byte) (int, error) {
+	return 0, errors.New("write failed")
 }
