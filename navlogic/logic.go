@@ -71,7 +71,7 @@ func PlanDisplay(state State, lookup MetricsLookup) DisplayPlan {
 		return plan
 	}
 
-	leftIdx, rightIdx := pairIndices(state, state.Index)
+	leftIdx, rightIdx := PairIndices(state, state.Index)
 	leftMetrics := lookup(leftIdx)
 	rightMetrics := lookup(rightIdx)
 	if ShouldUseBookMode(leftMetrics, rightMetrics, state.AspectRatioThreshold, state.LearnedSpreadAspects) {
@@ -106,7 +106,7 @@ func SetCurrentIndex(state State, targetIdx int, lookup MetricsLookup) State {
 	targetIdx = clampIndex(targetIdx, state.PageCount)
 	if state.BookMode && targetIdx == state.PageCount-1 {
 		if targetIdx > 0 {
-			leftIdx, rightIdx := pairIndices(state, targetIdx-1)
+			leftIdx, rightIdx := PairIndices(state, targetIdx-1)
 			if ShouldUseBookMode(lookup(leftIdx), lookup(rightIdx), state.AspectRatioThreshold, state.LearnedSpreadAspects) {
 				state.Index = targetIdx - 1
 				state.TempSingleMode = false
@@ -240,7 +240,7 @@ func ToggleBookMode(state State, lookup MetricsLookup) State {
 	}
 
 	if state.Index == state.PageCount-1 {
-		leftIdx, rightIdx := pairIndices(state, state.Index-1)
+		leftIdx, rightIdx := PairIndices(state, state.Index-1)
 		if ShouldUseBookMode(lookup(leftIdx), lookup(rightIdx), state.AspectRatioThreshold, state.LearnedSpreadAspects) {
 			state.Index--
 			state.TempSingleMode = false
@@ -349,7 +349,7 @@ func clampIndex(idx, pageCount int) int {
 	return idx
 }
 
-func pairIndices(state State, idx int) (int, int) {
+func PairIndices(state State, idx int) (int, int) {
 	if state.RightToLeft {
 		return idx + 1, idx
 	}

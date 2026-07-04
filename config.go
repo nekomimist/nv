@@ -23,21 +23,6 @@ const (
 	SortEntryOrder = 2 // Maintain original order (no sort)
 )
 
-// getDefaultKeybindings returns the default keybinding configuration
-func getDefaultKeybindings() map[string][]string {
-	return GetDefaultKeybindings()
-}
-
-// getDefaultMousebindings returns the default mouse binding configuration
-func getDefaultMousebindings() map[string][]string {
-	return GetDefaultMousebindings()
-}
-
-// getDefaultMouseSettings returns the default mouse settings
-func getDefaultMouseSettings() MouseSettings {
-	return GetDefaultMouseSettings()
-}
-
 // validateKeybindings validates the keybindings configuration
 func validateKeybindings(keybindings map[string][]string) error {
 	// Check for valid key formats and detect conflicts
@@ -230,6 +215,7 @@ func getConfigPath() string {
 		// Fallback: use ~/.config on Unix-like systems
 		homeDir, err := os.UserHomeDir()
 		if err != nil {
+			warnKV("config", "home_dir_lookup_failed", "error", err, "fallback", "config.json")
 			return "config.json" // fallback to current directory
 		}
 		configDir = filepath.Join(homeDir, ".config")
@@ -262,9 +248,9 @@ func loadConfigFromPath(configPath string) ConfigLoadResult {
 		FitWidthAlignTop:     false,
 		FitHeightAlignLeft:   false,
 		PreloadCount:         4,                         // Default: preload up to 4 images
-		Keybindings:          getDefaultKeybindings(),   // Default keybindings
-		Mousebindings:        getDefaultMousebindings(), // Default mouse bindings
-		MouseSettings:        getDefaultMouseSettings(), // Default mouse settings
+		Keybindings:          GetDefaultKeybindings(),   // Default keybindings
+		Mousebindings:        GetDefaultMousebindings(), // Default mouse bindings
+		MouseSettings:        GetDefaultMouseSettings(), // Default mouse settings
 	}
 
 	result := ConfigLoadResult{
@@ -366,10 +352,10 @@ func loadConfigFromPath(configPath string) ConfigLoadResult {
 
 	// Validate keybindings - ensure defaults exist for missing actions
 	if config.Keybindings == nil {
-		config.Keybindings = getDefaultKeybindings()
+		config.Keybindings = GetDefaultKeybindings()
 	} else {
 		// Fill in missing keybindings with defaults
-		defaults := getDefaultKeybindings()
+		defaults := GetDefaultKeybindings()
 		for action, defaultKeys := range defaults {
 			if _, exists := config.Keybindings[action]; !exists {
 				config.Keybindings[action] = defaultKeys
@@ -379,7 +365,7 @@ func loadConfigFromPath(configPath string) ConfigLoadResult {
 		// Validate keybindings and resolve conflicts
 		if err := validateKeybindings(config.Keybindings); err != nil {
 			warnKV("config", "keybindings_invalid", "error", err, "reason", "use_defaults")
-			config.Keybindings = getDefaultKeybindings()
+			config.Keybindings = GetDefaultKeybindings()
 			result.Status = "Warning"
 			result.Warnings = append(result.Warnings, fmt.Sprintf("Keybinding errors: %v", err))
 		}
@@ -387,10 +373,10 @@ func loadConfigFromPath(configPath string) ConfigLoadResult {
 
 	// Validate mousebindings - ensure defaults exist for missing actions
 	if config.Mousebindings == nil {
-		config.Mousebindings = getDefaultMousebindings()
+		config.Mousebindings = GetDefaultMousebindings()
 	} else {
 		// Fill in missing mousebindings with defaults
-		mouseDefaults := getDefaultMousebindings()
+		mouseDefaults := GetDefaultMousebindings()
 		for action, defaultMouseActions := range mouseDefaults {
 			if _, exists := config.Mousebindings[action]; !exists {
 				config.Mousebindings[action] = defaultMouseActions
@@ -400,7 +386,7 @@ func loadConfigFromPath(configPath string) ConfigLoadResult {
 		// Validate mousebindings and resolve conflicts
 		if err := validateMousebindings(config.Mousebindings); err != nil {
 			warnKV("config", "mousebindings_invalid", "error", err, "reason", "use_defaults")
-			config.Mousebindings = getDefaultMousebindings()
+			config.Mousebindings = GetDefaultMousebindings()
 			result.Status = "Warning"
 			result.Warnings = append(result.Warnings, fmt.Sprintf("Mousebinding errors: %v", err))
 		}

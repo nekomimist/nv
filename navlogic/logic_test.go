@@ -159,6 +159,28 @@ func verifyBackwardCoverage(t *testing.T, kinds []testPageKind, start State) {
 	}
 }
 
+func TestPairIndices(t *testing.T) {
+	tests := []struct {
+		name      string
+		state     State
+		idx       int
+		wantLeft  int
+		wantRight int
+	}{
+		{"ltr pairs idx with idx+1", State{RightToLeft: false}, 4, 4, 5},
+		{"rtl pairs idx+1 with idx", State{RightToLeft: true}, 4, 5, 4},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotLeft, gotRight := PairIndices(tt.state, tt.idx)
+			if gotLeft != tt.wantLeft || gotRight != tt.wantRight {
+				t.Fatalf("PairIndices() = (%d, %d), want (%d, %d)", gotLeft, gotRight, tt.wantLeft, tt.wantRight)
+			}
+		})
+	}
+}
+
 func TestShouldUseBookMode(t *testing.T) {
 	tests := []struct {
 		name     string

@@ -91,7 +91,7 @@ func (g *Game) logDisplayPlan(context string, state navlogic.State, plan navlogi
 
 	leftIdx, rightIdx := plan.LeftIndex, plan.RightIndex
 	if plan.ActualImages != 2 {
-		leftIdx, rightIdx = pairedIndicesForLog(state)
+		leftIdx, rightIdx = navlogic.PairIndices(state, state.Index)
 	}
 	leftMetrics := g.pageMetricsAt(leftIdx)
 	rightMetrics := g.pageMetricsAt(rightIdx)
@@ -110,13 +110,6 @@ func (g *Game) logDisplayPlan(context string, state navlogic.State, plan navlogi
 		"threshold", state.AspectRatioThreshold,
 		"reason", decision.Reason,
 	)
-}
-
-func pairedIndicesForLog(state navlogic.State) (int, int) {
-	if state.RightToLeft {
-		return state.Index + 1, state.Index
-	}
-	return state.Index, state.Index + 1
 }
 
 func (g *Game) addLearnedSpreadAspect(aspect float64) bool {

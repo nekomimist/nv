@@ -167,7 +167,7 @@ func (g *Game) GetOverlayMessageTime() time.Time {
 func (g *Game) IsInSettingsMode() bool { return g.showSettings }
 
 // RenderState additions for settings overlay
-func (g *Game) IsShowingSettings() bool  { return g.showSettings }
+func (g *Game) IsShowingSettings() bool  { return g.IsInSettingsMode() }
 func (g *Game) GetPendingConfig() Config { return g.pendingConfig }
 func (g *Game) GetSettingsIndex() int    { return g.settingsIndex }
 
