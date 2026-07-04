@@ -59,6 +59,7 @@ type InputHandler struct {
 	mousebindingManager *MousebindingManager
 	dragState           *DragState          // Mouse drag state for pan operations
 	pendingMouseAction  *PendingMouseAction // Delayed mouse action to resolve drag/click conflicts
+	pressedKeysScratch  []ebiten.Key        // Reused buffer for the per-frame "any key pressed" check
 }
 
 // NewInputHandler creates a new InputHandler
@@ -81,6 +82,10 @@ func (h *InputHandler) HandleInput() bool {
 		return false
 	}
 
+	if !h.frameHasPossibleInput() {
+		return false
+	}
+
 	// Process keyboard input first
 	if h.handleKeyboardInput() {
 		return true
@@ -88,6 +93,66 @@ func (h *InputHandler) HandleInput() bool {
 
 	// Process mouse input if keyboard didn't handle anything
 	return h.handleMouseInput()
+}
+
+// frameHasPossibleInput reports whether this frame could possibly produce
+// input-driven work, letting HandleInput skip its full keyboard/mouse scan
+// on frames where nothing changed. It must return true (never skip) when any
+// of the following hold, since HandleInput relies on catching each of them:
+//   - any keyboard key is currently held down: covers plain key presses,
+//     modifier+key combos, and the digit/navigation keys read by page-input
+//     mode and settings mode. inpututil.IsKeyJustPressed always implies the
+//     key is currently pressed, so "pressed" is a safe superset of "just
+//     pressed" for every keyboard check in this file.
+//   - a binding-relevant mouse button is currently held or was just released
+//     this frame: "held" is what keeps an in-progress drag alive and what
+//     handlePendingMouseAction watches for to know a click hasn't resolved
+//     yet; "just released" is the exact frame handlePendingMouseAction fires
+//     a pending click and drag-end resolves (on the release frame,
+//     IsMouseButtonPressed is already false, so the held-check alone would
+//     miss it).
+//   - the mouse wheel moved this frame: wheel bindings have no "just
+//     pressed" analogue, Wheel() is the only signal.
+//   - a drag is already in progress: implied by the left button being held
+//     (above), kept as an explicit, effectively-free check in case drag
+//     state is ever driven by something other than a held button.
+//   - a left-click action is pending (double-click/drag-vs-click
+//     resolution): today this only resolves on a button state change
+//     (caught above), but the flag is kept as an explicit check since a
+//     future time-based resolution would otherwise be silently skipped on
+//     idle frames.
+//   - page-number input mode or the settings screen is active: today both
+//     are handled purely through key checks already covered above, but kept
+//     explicit in case either grows non-keyboard-driven behavior.
+func (h *InputHandler) frameHasPossibleInput() bool {
+	h.pressedKeysScratch = inpututil.AppendPressedKeys(h.pressedKeysScratch[:0])
+	if len(h.pressedKeysScratch) > 0 {
+		return true
+	}
+
+	for _, btn := range mouseActionToButton {
+		if ebiten.IsMouseButtonPressed(btn) || inpututil.IsMouseButtonJustReleased(btn) {
+			return true
+		}
+	}
+
+	if wheelX, wheelY := ebiten.Wheel(); wheelX != 0 || wheelY != 0 {
+		return true
+	}
+
+	if h.dragState.IsDragging {
+		return true
+	}
+
+	if h.pendingMouseAction.HasPending {
+		return true
+	}
+
+	if h.inputState.IsInPageInputMode() || h.inputState.IsInSettingsMode() {
+		return true
+	}
+
+	return false
 }
 
 // handleKeyboardInput processes all keyboard input for the current frame
