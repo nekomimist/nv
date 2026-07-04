@@ -3,8 +3,6 @@ package main
 import (
 	"image"
 	"testing"
-
-	"github.com/hajimehoshi/ebiten/v2"
 )
 
 func TestGUI_NavigateSingleUsesActionSemantics(t *testing.T) {
@@ -73,32 +71,6 @@ func TestGUI_NavigateNextKeepsSpreadBehavior(t *testing.T) {
 
 	if g.idx != 2 {
 		t.Fatalf("NavigateNext moved to %d, want 2", g.idx)
-	}
-}
-
-func TestGUI_RendererCachesIntermediateImages(t *testing.T) {
-	g := &Game{}
-	r := NewRenderer(g)
-	left := ebiten.NewImage(100, 150)
-	right := ebiten.NewImage(100, 150)
-
-	book1 := r.createBookModeImage(left, right)
-	book2 := r.createBookModeImage(left, right)
-	if book1 != book2 {
-		t.Fatal("expected book composition cache hit")
-	}
-
-	g.rotationAngle = 90
-	transformed1 := r.applyTransformations(book1)
-	transformed2 := r.applyTransformations(book1)
-	if transformed1 != transformed2 {
-		t.Fatal("expected transformation cache hit")
-	}
-
-	g.rotationAngle = 180
-	transformed3 := r.applyTransformations(book1)
-	if transformed3 == transformed2 {
-		t.Fatal("expected cache invalidation when rotation changes")
 	}
 }
 

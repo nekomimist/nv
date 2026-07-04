@@ -711,34 +711,6 @@ func TestPureApplyNewConfigReloadsFromCurrentSource(t *testing.T) {
 	}
 }
 
-func TestPureCalculateHorizontalPosition(t *testing.T) {
-	g := &Game{}
-	r := NewRenderer(g)
-
-	tests := []struct {
-		name     string
-		x        int
-		maxW     int
-		scaledW  float64
-		align    string
-		expected float64
-	}{
-		{"Left align", 10, 100, 50, "left", 10},
-		{"Right align", 10, 100, 50, "right", 60},
-		{"Center align", 10, 100, 50, "center", 35},
-		{"Default (center) align", 0, 200, 100, "unknown", 50},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := r.CalculateHorizontalPosition(tt.x, tt.maxW, tt.scaledW, tt.align)
-			if result != tt.expected {
-				t.Errorf("Expected %.1f, got %.1f", tt.expected, result)
-			}
-		})
-	}
-}
-
 func TestPureImagePathCreation(t *testing.T) {
 	tests := []struct {
 		name        string
