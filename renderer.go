@@ -36,7 +36,8 @@ var (
 type Renderer struct {
 	renderState    RenderState
 	helpFontSource *text.GoTextFaceSource
-	lastSnapshot   *RenderStateSnapshot // Previous frame's state for comparison
+	lastSnapshot   RenderStateSnapshot // Previous frame's state for comparison
+	hasSnapshot    bool                // Whether lastSnapshot holds a valid snapshot
 }
 
 // NewRenderer creates a new Renderer
@@ -133,8 +134,9 @@ func (r *Renderer) drawSettingsOverlay(screen *ebiten.Image) {
 	// Dim background and panel
 	DrawFilledRect(screen, 0, 0, w, h, bgColorLight)
 
+	items := settingsListOrder()
 	panelW := math.Min(700, w*0.9)
-	panelH := math.Min(0.9*h, 60+float64(len(settingsListOrder()))*28+40)
+	panelH := math.Min(0.9*h, 60+float64(len(items))*28+40)
 	panelX := (w - panelW) / 2
 	panelY := (h - panelH) / 2
 	DrawFilledRect(screen, panelX, panelY, panelW, panelH, bgColorDark)
@@ -146,7 +148,6 @@ func (r *Renderer) drawSettingsOverlay(screen *ebiten.Image) {
 	DrawText(screen, hint, hintFont, panelX+panelW-hw-16, panelY+20+(22-hh)/2, colorLightGray)
 
 	// List items
-	items := settingsListOrder()
 	startY := panelY + 60
 	rowH := 26.0
 	nameX := panelX + 24
@@ -160,7 +161,7 @@ func (r *Renderer) drawSettingsOverlay(screen *ebiten.Image) {
 		if i == sel {
 			DrawFilledRect(screen, panelX+8, y-4, panelW-16, rowH, selColor)
 		}
-		val := getSettingValueStringFromConfig(cfg, i)
+		val := getSettingValueStringFromConfig(cfg, name)
 		DrawText(screen, name, itemFont, nameX, y, colorWhite)
 		DrawText(screen, val, itemFont, valX, y, colorCyan)
 	}

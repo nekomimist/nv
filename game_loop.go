@@ -9,7 +9,7 @@ import (
 func (g *Game) Update() error {
 	if g.applyPendingOpenRequests() {
 		g.wasInputHandled = true
-		g.renderer.lastSnapshot = nil
+		g.renderer.hasSnapshot = false
 	}
 
 	if !g.wasInputHandled {
@@ -23,7 +23,7 @@ func (g *Game) Update() error {
 
 	if g.imageManager.ConsumeAsyncRefresh() {
 		g.calculateDisplayContent()
-		g.renderer.lastSnapshot = nil
+		g.renderer.hasSnapshot = false
 		debugKV("cache", "async_refresh", "idx", g.idx)
 	}
 
@@ -51,13 +51,13 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	redrawReason := ""
 
 	if g.wasInputHandled ||
-		g.renderer.lastSnapshot == nil ||
+		!g.renderer.hasSnapshot ||
 		!currentSnapshot.Equals(g.renderer.lastSnapshot) ||
 		g.forceRedrawFrames > 0 {
 		switch {
 		case g.wasInputHandled:
 			redrawReason = "input_handled"
-		case g.renderer.lastSnapshot == nil:
+		case !g.renderer.hasSnapshot:
 			redrawReason = "missing_snapshot"
 		case !currentSnapshot.Equals(g.renderer.lastSnapshot):
 			redrawReason = "snapshot_changed"
@@ -66,6 +66,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		}
 		g.renderer.Draw(screen)
 		g.renderer.lastSnapshot = currentSnapshot
+		g.renderer.hasSnapshot = true
 		debugKV("renderer", "redraw", "reason", redrawReason, "width", w, "height", h, "force_redraw_frames", g.forceRedrawFrames)
 
 		if g.forceRedrawFrames > 0 {

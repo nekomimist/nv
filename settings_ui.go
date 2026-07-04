@@ -45,9 +45,9 @@ func settingsListOrder() []string {
 
 // (moved) settings overlay drawing lives in renderer.go
 
-// getSettingValueString returns human-friendly value for the i-th item
-func getSettingValueStringFromConfig(c Config, i int) string {
-	switch settingsListOrder()[i] {
+// getSettingValueString returns human-friendly value for the named item
+func getSettingValueStringFromConfig(c Config, name string) string {
+	switch name {
 	case "WindowWidth":
 		return fmt.Sprintf("%d", c.WindowWidth)
 	case "WindowHeight":
@@ -165,6 +165,8 @@ func clampFloat(v, lo, hi float64) float64 {
 // settingsAdjust changes current item by delta (int) or deltaF (float)
 func (g *Game) settingsAdjust(left bool) {
 	idx := g.settingsIndex
+	order := settingsListOrder()
+	name := order[idx]
 	c := g.pendingConfig
 	stepSign := 1
 	if left {
@@ -189,7 +191,7 @@ func (g *Game) settingsAdjust(left bool) {
 		floatStep = 0.05
 	}
 
-	switch settingsListOrder()[idx] {
+	switch name {
 	case "WindowWidth":
 		c.WindowWidth = clampInt(c.WindowWidth+stepSign*intStep, minWidth, 8192)
 	case "WindowHeight":
@@ -276,9 +278,9 @@ func (g *Game) settingsAdjust(left bool) {
 	}
 	g.pendingConfig = c
 	debugKV("config", "settings_adjust",
-		"setting", settingsListOrder()[idx],
+		"setting", name,
 		"direction", map[bool]string{true: "left", false: "right"}[left],
-		"value", getSettingValueStringFromConfig(g.pendingConfig, idx),
+		"value", getSettingValueStringFromConfig(g.pendingConfig, name),
 	)
 }
 

@@ -175,7 +175,7 @@ func (g *Game) showOverlayMessage(message string) {
 
 func (g *Game) toggleBookMode() {
 	prevState := g.navigationState()
-	nextState := navlogic.ToggleBookMode(g.navigationState(), g.pageMetricsAt)
+	nextState := navlogic.ToggleBookMode(prevState, g.pageMetricsAt)
 	g.applyNavigationState(nextState)
 	if g.bookMode {
 		g.showOverlayMessage("Book Mode: ON")
@@ -264,7 +264,7 @@ func (g *Game) processPageInput() {
 
 func (g *Game) jumpToPage(pageNum int) {
 	prevState := g.navigationState()
-	nextState, boundary := navlogic.JumpToPage(g.navigationState(), pageNum, g.pageMetricsAt)
+	nextState, boundary := navlogic.JumpToPage(prevState, pageNum, g.pageMetricsAt)
 	if boundary == navlogic.BoundaryPageNotFound {
 		g.showOverlayMessage(fmt.Sprintf("Page %d not found (1-%d)", pageNum, g.imageManager.GetPathsCount()))
 		debugKV("nav", "jump_to_page", "requested_page", pageNum, "boundary", boundary, "reason", "page_not_found")
@@ -287,7 +287,7 @@ func (g *Game) jumpToPage(pageNum int) {
 
 func (g *Game) navigateNext(singleStep bool) {
 	prevState := g.navigationState()
-	nextState, boundary := navlogic.NavigateNext(g.navigationState(), g.pageMetricsAt, singleStep)
+	nextState, boundary := navlogic.NavigateNext(prevState, g.pageMetricsAt, singleStep)
 	if boundary == navlogic.BoundaryLastPage {
 		debugKV("nav", "navigate_next", "single_step", singleStep, "prev_idx", prevState.Index, "boundary", boundary)
 		g.showOverlayMessage("Last page")
@@ -311,7 +311,7 @@ func (g *Game) navigateNext(singleStep bool) {
 
 func (g *Game) navigatePrevious(singleStep bool) {
 	prevState := g.navigationState()
-	nextState, boundary := navlogic.NavigatePrevious(g.navigationState(), g.pageMetricsAt, singleStep)
+	nextState, boundary := navlogic.NavigatePrevious(prevState, g.pageMetricsAt, singleStep)
 	if boundary == navlogic.BoundaryFirstPage {
 		debugKV("nav", "navigate_previous", "single_step", singleStep, "prev_idx", prevState.Index, "boundary", boundary)
 		g.showOverlayMessage("First page")

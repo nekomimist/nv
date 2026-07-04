@@ -186,13 +186,7 @@ func (g *Game) expandToDirectoryAndJump() {
 		return
 	}
 
-	originalFileIndex := -1
-	for i, imagePath := range newPaths {
-		if imagePath.Path == originalFilePath {
-			originalFileIndex = i
-			break
-		}
-	}
+	originalFileIndex := findImagePathIndex(newPaths, originalFilePath)
 
 	if originalFileIndex == -1 {
 		g.showOverlayMessage("Original file not found in directory")

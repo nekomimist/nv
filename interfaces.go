@@ -63,8 +63,8 @@ type RenderStateSnapshot struct {
 
 // NewRenderStateSnapshot creates a lightweight snapshot of non-key-input state
 // Only tracks fields that can change without key input
-func NewRenderStateSnapshot(state RenderState, windowWidth, windowHeight int) *RenderStateSnapshot {
-	return &RenderStateSnapshot{
+func NewRenderStateSnapshot(state RenderState, windowWidth, windowHeight int) RenderStateSnapshot {
+	return RenderStateSnapshot{
 		OverlayMessage:     state.GetOverlayMessage(),
 		OverlayMessageTime: state.GetOverlayMessageTime(),
 		WindowWidth:        windowWidth,
@@ -73,11 +73,7 @@ func NewRenderStateSnapshot(state RenderState, windowWidth, windowHeight int) *R
 }
 
 // Equals checks if two snapshots are equal
-func (s *RenderStateSnapshot) Equals(other *RenderStateSnapshot) bool {
-	if other == nil {
-		return false
-	}
-
+func (s RenderStateSnapshot) Equals(other RenderStateSnapshot) bool {
 	// Helper function to check if overlay message is effectively active
 	isOverlayActive := func(message string, messageTime time.Time) bool {
 		return message != "" && time.Since(messageTime) < overlayMessageDuration
