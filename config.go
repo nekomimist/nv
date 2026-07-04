@@ -212,8 +212,11 @@ func loadConfig() ConfigLoadResult {
 	return loadConfigFromPath(getConfigPath())
 }
 
-func loadConfigFromPath(configPath string) ConfigLoadResult {
-	config := Config{
+// defaultConfig returns the built-in default configuration used both as
+// the starting point for loading (before file/JSON overrides are applied)
+// and as the fallback whenever a value must be reset.
+func defaultConfig() Config {
+	return Config{
 		WindowWidth:          defaultWidth,
 		WindowHeight:         defaultHeight,
 		DefaultWindowWidth:   defaultWidth,  // Default window width
@@ -236,6 +239,138 @@ func loadConfigFromPath(configPath string) ConfigLoadResult {
 		Mousebindings:        GetDefaultMousebindings(), // Default mouse bindings
 		MouseSettings:        GetDefaultMouseSettings(), // Default mouse settings
 	}
+}
+
+// backfillBindings ensures cfg.Keybindings and cfg.Mousebindings are
+// non-nil and contain an entry for every action known to the defaults,
+// filling in any actions missing from a loaded config.
+func backfillBindings(cfg *Config) {
+	// Keybindings - ensure defaults exist for missing actions
+	if cfg.Keybindings == nil {
+		cfg.Keybindings = GetDefaultKeybindings()
+	} else {
+		// Fill in missing keybindings with defaults
+		defaults := GetDefaultKeybindings()
+		for action, defaultKeys := range defaults {
+			if _, exists := cfg.Keybindings[action]; !exists {
+				cfg.Keybindings[action] = defaultKeys
+			}
+		}
+	}
+
+	// Mousebindings - ensure defaults exist for missing actions
+	if cfg.Mousebindings == nil {
+		cfg.Mousebindings = GetDefaultMousebindings()
+	} else {
+		// Fill in missing mousebindings with defaults
+		mouseDefaults := GetDefaultMousebindings()
+		for action, defaultMouseActions := range mouseDefaults {
+			if _, exists := cfg.Mousebindings[action]; !exists {
+				cfg.Mousebindings[action] = defaultMouseActions
+			}
+		}
+	}
+}
+
+// validateConfig clamps/resets numeric and enum fields to valid ranges
+// and validates keybinding/mousebinding conflicts (assuming defaults have
+// already been backfilled). It mutates cfg in place and returns warning
+// messages for any problems that required falling back to defaults.
+func validateConfig(cfg *Config) []string {
+	var warnings []string
+
+	// Validate minimum size
+	if cfg.WindowWidth < minWidth {
+		cfg.WindowWidth = defaultWidth
+	}
+	if cfg.WindowHeight < minHeight {
+		cfg.WindowHeight = defaultHeight
+	}
+
+	// Validate default window size
+	if cfg.DefaultWindowWidth < minWidth {
+		cfg.DefaultWindowWidth = defaultWidth
+	}
+	if cfg.DefaultWindowHeight < minHeight {
+		cfg.DefaultWindowHeight = defaultHeight
+	}
+
+	// Validate aspect ratio threshold
+	if cfg.AspectRatioThreshold <= 1.0 {
+		cfg.AspectRatioThreshold = 1.5
+	}
+
+	// Validate font size (minimum 12px for readability)
+	if cfg.FontSize <= 12.0 {
+		cfg.FontSize = 24.0
+	}
+
+	// Validate sort method
+	if cfg.SortMethod < SortNatural || cfg.SortMethod > SortEntryOrder {
+		cfg.SortMethod = SortNatural
+	}
+
+	// Validate cache size (minimum 1, maximum 64)
+	if cfg.CacheSize < 1 {
+		cfg.CacheSize = 16
+	} else if cfg.CacheSize > 64 {
+		cfg.CacheSize = 64
+	}
+
+	// Validate max image dimension (0 disables limit, otherwise positive)
+	if cfg.MaxImageDimension < 0 {
+		cfg.MaxImageDimension = 0
+	}
+
+	// Validate transition frames (minimum 0, maximum 60)
+	if cfg.TransitionFrames < 0 {
+		cfg.TransitionFrames = 0
+	} else if cfg.TransitionFrames > 60 {
+		cfg.TransitionFrames = 60
+	}
+
+	// Validate preload count (minimum 1, maximum 16)
+	if cfg.PreloadCount < 1 {
+		cfg.PreloadCount = 4
+	} else if cfg.PreloadCount > 16 {
+		cfg.PreloadCount = 16
+	}
+
+	// Validate initial zoom mode
+	validZoomModes := []string{"fit_window", "fit_width", "fit_height", "actual_size"}
+	isValid := false
+	for _, mode := range validZoomModes {
+		if cfg.InitialZoomMode == mode {
+			isValid = true
+			break
+		}
+	}
+	if !isValid {
+		cfg.InitialZoomMode = "fit_window"
+	}
+
+	// Validate keybindings and resolve conflicts (defaults already backfilled)
+	if err := validateKeybindings(cfg.Keybindings); err != nil {
+		warnKV("config", "keybindings_invalid", "error", err, "reason", "use_defaults")
+		cfg.Keybindings = GetDefaultKeybindings()
+		warnings = append(warnings, fmt.Sprintf("Keybinding errors: %v", err))
+	}
+
+	// Validate mousebindings and resolve conflicts (defaults already backfilled)
+	if err := validateMousebindings(cfg.Mousebindings); err != nil {
+		warnKV("config", "mousebindings_invalid", "error", err, "reason", "use_defaults")
+		cfg.Mousebindings = GetDefaultMousebindings()
+		warnings = append(warnings, fmt.Sprintf("Mousebinding errors: %v", err))
+	}
+
+	// Validate mouse settings
+	cfg.MouseSettings = validateMouseSettings(cfg.MouseSettings)
+
+	return warnings
+}
+
+func loadConfigFromPath(configPath string) ConfigLoadResult {
+	config := defaultConfig()
 
 	result := ConfigLoadResult{
 		Config:   config,
@@ -264,120 +399,11 @@ func loadConfigFromPath(configPath string) ConfigLoadResult {
 		return result
 	}
 
-	// Validate minimum size
-	if config.WindowWidth < minWidth {
-		config.WindowWidth = defaultWidth
+	backfillBindings(&config)
+	if warnings := validateConfig(&config); len(warnings) > 0 {
+		result.Status = "Warning"
+		result.Warnings = append(result.Warnings, warnings...)
 	}
-	if config.WindowHeight < minHeight {
-		config.WindowHeight = defaultHeight
-	}
-
-	// Validate default window size
-	if config.DefaultWindowWidth < minWidth {
-		config.DefaultWindowWidth = defaultWidth
-	}
-	if config.DefaultWindowHeight < minHeight {
-		config.DefaultWindowHeight = defaultHeight
-	}
-
-	// Validate aspect ratio threshold
-	if config.AspectRatioThreshold <= 1.0 {
-		config.AspectRatioThreshold = 1.5
-	}
-
-	// Validate font size (minimum 12px for readability)
-	if config.FontSize <= 12.0 {
-		config.FontSize = 24.0
-	}
-
-	// Validate sort method
-	if config.SortMethod < SortNatural || config.SortMethod > SortEntryOrder {
-		config.SortMethod = SortNatural
-	}
-
-	// Validate cache size (minimum 1, maximum 64)
-	if config.CacheSize < 1 {
-		config.CacheSize = 16
-	} else if config.CacheSize > 64 {
-		config.CacheSize = 64
-	}
-
-	// Validate max image dimension (0 disables limit, otherwise positive)
-	if config.MaxImageDimension < 0 {
-		config.MaxImageDimension = 0
-	}
-
-	// Validate transition frames (minimum 0, maximum 60)
-	if config.TransitionFrames < 0 {
-		config.TransitionFrames = 0
-	} else if config.TransitionFrames > 60 {
-		config.TransitionFrames = 60
-	}
-
-	// Validate preload count (minimum 1, maximum 16)
-	if config.PreloadCount < 1 {
-		config.PreloadCount = 4
-	} else if config.PreloadCount > 16 {
-		config.PreloadCount = 16
-	}
-
-	// Validate initial zoom mode
-	validZoomModes := []string{"fit_window", "fit_width", "fit_height", "actual_size"}
-	isValid := false
-	for _, mode := range validZoomModes {
-		if config.InitialZoomMode == mode {
-			isValid = true
-			break
-		}
-	}
-	if !isValid {
-		config.InitialZoomMode = "fit_window"
-	}
-
-	// Validate keybindings - ensure defaults exist for missing actions
-	if config.Keybindings == nil {
-		config.Keybindings = GetDefaultKeybindings()
-	} else {
-		// Fill in missing keybindings with defaults
-		defaults := GetDefaultKeybindings()
-		for action, defaultKeys := range defaults {
-			if _, exists := config.Keybindings[action]; !exists {
-				config.Keybindings[action] = defaultKeys
-			}
-		}
-
-		// Validate keybindings and resolve conflicts
-		if err := validateKeybindings(config.Keybindings); err != nil {
-			warnKV("config", "keybindings_invalid", "error", err, "reason", "use_defaults")
-			config.Keybindings = GetDefaultKeybindings()
-			result.Status = "Warning"
-			result.Warnings = append(result.Warnings, fmt.Sprintf("Keybinding errors: %v", err))
-		}
-	}
-
-	// Validate mousebindings - ensure defaults exist for missing actions
-	if config.Mousebindings == nil {
-		config.Mousebindings = GetDefaultMousebindings()
-	} else {
-		// Fill in missing mousebindings with defaults
-		mouseDefaults := GetDefaultMousebindings()
-		for action, defaultMouseActions := range mouseDefaults {
-			if _, exists := config.Mousebindings[action]; !exists {
-				config.Mousebindings[action] = defaultMouseActions
-			}
-		}
-
-		// Validate mousebindings and resolve conflicts
-		if err := validateMousebindings(config.Mousebindings); err != nil {
-			warnKV("config", "mousebindings_invalid", "error", err, "reason", "use_defaults")
-			config.Mousebindings = GetDefaultMousebindings()
-			result.Status = "Warning"
-			result.Warnings = append(result.Warnings, fmt.Sprintf("Mousebinding errors: %v", err))
-		}
-	}
-
-	// Validate mouse settings
-	config.MouseSettings = validateMouseSettings(config.MouseSettings)
 
 	// Update the result with the final config
 	result.Config = config
