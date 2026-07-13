@@ -64,6 +64,7 @@ const (
 	defaultMaxImageDimension = 8192
 	defaultTileSize          = 2048
 	fallbackTileSize         = 1024
+	tileGutterSize           = 1
 )
 
 type DisplayTile struct {
@@ -72,6 +73,8 @@ type DisplayTile struct {
 	Y     int
 	W     int
 	H     int
+	SrcX  int // Core-image origin within Image, excluding its sampling gutter.
+	SrcY  int
 }
 
 type DisplayImage interface {
@@ -835,6 +838,10 @@ func createTiledDisplayImage(src image.Image, tileSize int) (DisplayImage, error
 	if tileSize <= 0 {
 		tileSize = fallbackTileSize
 	}
+	coreTileSize := tileSize - 2*tileGutterSize
+	if coreTileSize <= 0 {
+		return nil, fmt.Errorf("tile size %d is too small for %d-pixel gutters", tileSize, tileGutterSize)
+	}
 
 	bounds := src.Bounds()
 	width := bounds.Dx()
@@ -845,28 +852,40 @@ func createTiledDisplayImage(src image.Image, tileSize int) (DisplayImage, error
 
 	result := &tiledDisplayImage{
 		bounds: image.Rect(0, 0, width, height),
-		tiles:  make([]DisplayTile, 0, ((width+tileSize-1)/tileSize)*((height+tileSize-1)/tileSize)),
+		tiles:  make([]DisplayTile, 0, ((width+coreTileSize-1)/coreTileSize)*((height+coreTileSize-1)/coreTileSize)),
 	}
 
-	// Reused scratch buffer for full-size interior tiles. Edge tiles (the
-	// last row/column, smaller than tileSize) still allocate a
-	// right-sized buffer below. imagedraw.Src fully overwrites the
-	// buffer on every draw (no stale-pixel bleed), and
+	// tileSize is the maximum texture dimension, including a one-pixel
+	// sampling gutter on every side. Keeping the texture at or below a
+	// power-of-two boundary avoids a 2048-wide tile being rounded up to a
+	// 4096-wide GPU texture just to accommodate its gutters.
+	//
+	// Reuse a scratch buffer for full-size tiles. Edge tiles, whose core is
+	// smaller than coreTileSize, allocate a right-sized buffer below.
+	// drawTileWithClampedGutter fully overwrites the buffer on every draw, and
 	// ebiten.NewImageFromImageWithOptions (via newUnmanagedEbitenImage)
 	// copies pixel data synchronously without retaining the source
 	// image, so reusing this buffer across tiles is safe.
 	tileScratch := image.NewNRGBA(image.Rect(0, 0, tileSize, tileSize))
 
-	for y := 0; y < height; y += tileSize {
-		tileH := min(tileSize, height-y)
-		for x := 0; x < width; x += tileSize {
-			tileW := min(tileSize, width-x)
-			tileRect := image.Rect(bounds.Min.X+x, bounds.Min.Y+y, bounds.Min.X+x+tileW, bounds.Min.Y+y+tileH)
+	for y := 0; y < height; y += coreTileSize {
+		tileH := min(coreTileSize, height-y)
+		for x := 0; x < width; x += coreTileSize {
+			tileW := min(coreTileSize, width-x)
+			textureW := tileW + 2*tileGutterSize
+			textureH := tileH + 2*tileGutterSize
 			tileSrc := tileScratch
-			if tileW != tileSize || tileH != tileSize {
-				tileSrc = image.NewNRGBA(image.Rect(0, 0, tileW, tileH))
+			if textureW != tileSize || textureH != tileSize {
+				tileSrc = image.NewNRGBA(image.Rect(0, 0, textureW, textureH))
 			}
-			imagedraw.Draw(tileSrc, image.Rect(0, 0, tileW, tileH), src, tileRect.Min, imagedraw.Src)
+
+			sampleRect := image.Rect(
+				bounds.Min.X+x-tileGutterSize,
+				bounds.Min.Y+y-tileGutterSize,
+				bounds.Min.X+x+tileW+tileGutterSize,
+				bounds.Min.Y+y+tileH+tileGutterSize,
+			)
+			drawTileWithClampedGutter(tileSrc, src, sampleRect)
 
 			tileImg, err := newUnmanagedEbitenImageFn(tileSrc)
 			if err != nil {
@@ -882,11 +901,48 @@ func createTiledDisplayImage(src image.Image, tileSize int) (DisplayImage, error
 				Y:     y,
 				W:     tileW,
 				H:     tileH,
+				SrcX:  tileGutterSize,
+				SrcY:  tileGutterSize,
 			})
 		}
 	}
 
 	return result, nil
+}
+
+// drawTileWithClampedGutter copies srcRect into dst. The part of srcRect
+// outside src.Bounds is filled by extending the nearest edge pixel, matching
+// clamp-to-edge sampling at the outer boundary of the complete image.
+func drawTileWithClampedGutter(dst *image.NRGBA, src image.Image, srcRect image.Rectangle) {
+	srcBounds := src.Bounds()
+	clipped := srcRect.Intersect(srcBounds)
+	dstMin := clipped.Min.Sub(srcRect.Min)
+	dstRect := image.Rectangle{Min: dstMin, Max: dstMin.Add(clipped.Size())}
+	imagedraw.Draw(dst, dstRect, src, clipped.Min, imagedraw.Src)
+
+	for y := dstRect.Min.Y; y < dstRect.Max.Y; y++ {
+		row := y * dst.Stride
+		leftPixel := row + dstRect.Min.X*4
+		for x := 0; x < dstRect.Min.X; x++ {
+			copy(dst.Pix[row+x*4:row+x*4+4], dst.Pix[leftPixel:leftPixel+4])
+		}
+
+		rightPixel := row + (dstRect.Max.X-1)*4
+		for x := dstRect.Max.X; x < dst.Bounds().Dx(); x++ {
+			copy(dst.Pix[row+x*4:row+x*4+4], dst.Pix[rightPixel:rightPixel+4])
+		}
+	}
+
+	rowBytes := dst.Bounds().Dx() * 4
+	firstRow := dstRect.Min.Y * dst.Stride
+	for y := 0; y < dstRect.Min.Y; y++ {
+		copy(dst.Pix[y*dst.Stride:y*dst.Stride+rowBytes], dst.Pix[firstRow:firstRow+rowBytes])
+	}
+
+	lastRow := (dstRect.Max.Y - 1) * dst.Stride
+	for y := dstRect.Max.Y; y < dst.Bounds().Dy(); y++ {
+		copy(dst.Pix[y*dst.Stride:y*dst.Stride+rowBytes], dst.Pix[lastRow:lastRow+rowBytes])
+	}
 }
 
 // newUnmanagedEbitenImageFn converts a tile's pixel buffer into an

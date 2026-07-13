@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"image"
 	"image/color"
 	"math"
 	"sort"
@@ -38,6 +39,7 @@ type Renderer struct {
 	helpFontSource *text.GoTextFaceSource
 	lastSnapshot   RenderStateSnapshot // Previous frame's state for comparison
 	hasSnapshot    bool                // Whether lastSnapshot holds a valid snapshot
+	tilePointCache map[image.Point]tileScreenPoint
 }
 
 // NewRenderer creates a new Renderer
@@ -51,6 +53,7 @@ func NewRenderer(renderState RenderState) *Renderer {
 	return &Renderer{
 		renderState:    renderState,
 		helpFontSource: s,
+		tilePointCache: make(map[image.Point]tileScreenPoint),
 	}
 }
 
@@ -704,6 +707,13 @@ type displayLayout struct {
 	rightY       int
 }
 
+type tileScreenPoint struct {
+	x float32
+	y float32
+}
+
+var tileTriangleIndices = []uint16{0, 1, 2, 1, 2, 3}
+
 // drawImagesDirect draws images (single or book mode) without any mode checking.
 func (r *Renderer) drawImagesDirect(screen *ebiten.Image, leftImg, rightImg DisplayImage) {
 	if leftImg == nil {
@@ -712,9 +722,11 @@ func (r *Renderer) drawImagesDirect(screen *ebiten.Image, leftImg, rightImg Disp
 
 	layout := r.calculateDisplayLayout(leftImg, rightImg)
 	scale, offsetX, offsetY := r.calculateDisplayTransform(screen, layout.transformedW, layout.transformedH)
-	r.drawDisplayImageTiles(screen, leftImg, layout.leftX, layout.leftY, layout, scale, offsetX, offsetY)
+	transform := r.calculateCanvasTransform(layout, scale, offsetX, offsetY)
+	clear(r.tilePointCache)
+	r.drawDisplayImageTiles(screen, leftImg, layout.leftX, layout.leftY, layout, scale, offsetX, offsetY, transform)
 	if rightImg != nil {
-		r.drawDisplayImageTiles(screen, rightImg, layout.rightX, layout.rightY, layout, scale, offsetX, offsetY)
+		r.drawDisplayImageTiles(screen, rightImg, layout.rightX, layout.rightY, layout, scale, offsetX, offsetY, transform)
 	}
 }
 
@@ -791,33 +803,115 @@ func (r *Renderer) calculateDisplayTransform(screen *ebiten.Image, imageW, image
 	return scale, offsetX, offsetY
 }
 
-func (r *Renderer) drawDisplayImageTiles(screen *ebiten.Image, img DisplayImage, imageX, imageY int, layout displayLayout, scale, offsetX, offsetY float64) {
+func (r *Renderer) calculateCanvasTransform(layout displayLayout, scale, offsetX, offsetY float64) ebiten.GeoM {
+	return r.calculateImageTransform(layout, scale, offsetX, offsetY, 0, 0)
+}
+
+func (r *Renderer) calculateImageTransform(layout displayLayout, scale, offsetX, offsetY, imageX, imageY float64) ebiten.GeoM {
 	centerX := float64(layout.canvasW) / 2
 	centerY := float64(layout.canvasH) / 2
+	var transform ebiten.GeoM
+	transform.Translate(imageX, imageY)
+	transform.Translate(-centerX, -centerY)
 
-	for _, tile := range img.Tiles() {
+	if r.renderState.IsFlippedH() {
+		transform.Scale(-1, 1)
+	}
+	if r.renderState.IsFlippedV() {
+		transform.Scale(1, -1)
+	}
+	if angle := r.renderState.GetRotationAngle(); angle != 0 {
+		transform.Rotate(float64(angle) * math.Pi / 180)
+	}
+
+	transform.Translate(float64(layout.transformedW)/2, float64(layout.transformedH)/2)
+	transform.Scale(scale, scale)
+	transform.Translate(offsetX, offsetY)
+	return transform
+}
+
+func (r *Renderer) drawDisplayImageTiles(screen *ebiten.Image, img DisplayImage, imageX, imageY int, layout displayLayout, scale, offsetX, offsetY float64, transform ebiten.GeoM) {
+	tiles := img.Tiles()
+	if len(tiles) == 1 && tiles[0].SrcX == 0 && tiles[0].SrcY == 0 {
+		tile := tiles[0]
+		if tile.Image == nil {
+			return
+		}
+
+		op := &ebiten.DrawImageOptions{Filter: ebiten.FilterLinear}
+		op.GeoM = r.calculateImageTransform(
+			layout,
+			scale,
+			offsetX,
+			offsetY,
+			float64(imageX+tile.X),
+			float64(imageY+tile.Y),
+		)
+		screen.DrawImage(tile.Image, op)
+		return
+	}
+
+	op := &ebiten.DrawTrianglesOptions{Filter: ebiten.FilterLinear}
+	for _, tile := range tiles {
 		if tile.Image == nil {
 			continue
 		}
 
-		op := &ebiten.DrawImageOptions{}
-		op.Filter = ebiten.FilterLinear
-		op.GeoM.Translate(float64(imageX+tile.X), float64(imageY+tile.Y))
-		op.GeoM.Translate(-centerX, -centerY)
+		vertices := r.displayTileVertices(tile, imageX, imageY, transform)
+		screen.DrawTriangles(vertices[:], tileTriangleIndices, tile.Image, op)
+	}
+}
 
-		if r.renderState.IsFlippedH() {
-			op.GeoM.Scale(-1, 1)
-		}
-		if r.renderState.IsFlippedV() {
-			op.GeoM.Scale(1, -1)
-		}
-		if angle := r.renderState.GetRotationAngle(); angle != 0 {
-			op.GeoM.Rotate(float64(angle) * math.Pi / 180)
-		}
+func (r *Renderer) displayTileVertices(tile DisplayTile, imageX, imageY int, transform ebiten.GeoM) [4]ebiten.Vertex {
+	x0 := imageX + tile.X
+	y0 := imageY + tile.Y
+	x1 := x0 + tile.W
+	y1 := y0 + tile.H
 
-		op.GeoM.Translate(float64(layout.transformedW)/2, float64(layout.transformedH)/2)
-		op.GeoM.Scale(scale, scale)
-		op.GeoM.Translate(offsetX, offsetY)
-		screen.DrawImage(tile.Image, op)
+	p00 := r.transformedTilePoint(image.Pt(x0, y0), transform)
+	p10 := r.transformedTilePoint(image.Pt(x1, y0), transform)
+	p01 := r.transformedTilePoint(image.Pt(x0, y1), transform)
+	p11 := r.transformedTilePoint(image.Pt(x1, y1), transform)
+
+	sx0 := float32(tile.SrcX)
+	sy0 := float32(tile.SrcY)
+	sx1 := sx0 + float32(tile.W)
+	sy1 := sy0 + float32(tile.H)
+
+	return [4]ebiten.Vertex{
+		newTileVertex(p00, sx0, sy0),
+		newTileVertex(p10, sx1, sy0),
+		newTileVertex(p01, sx0, sy1),
+		newTileVertex(p11, sx1, sy1),
+	}
+}
+
+func (r *Renderer) transformedTilePoint(point image.Point, transform ebiten.GeoM) tileScreenPoint {
+	// Sharing the already-rounded float32 result is essential: independently
+	// transforming the bottom of one tile and the top of the next can put the
+	// two DrawImage quads on opposite sides of Ebitengine's vertex snapping.
+	if transformed, ok := r.tilePointCache[point]; ok {
+		return transformed
+	}
+
+	x, y := transform.Apply(float64(point.X), float64(point.Y))
+	transformed := tileScreenPoint{x: float32(x), y: float32(y)}
+	if r.tilePointCache == nil {
+		r.tilePointCache = make(map[image.Point]tileScreenPoint)
+	}
+	r.tilePointCache[point] = transformed
+	return transformed
+}
+
+func newTileVertex(dst tileScreenPoint, srcX, srcY float32) ebiten.Vertex {
+	return ebiten.Vertex{
+		DstX:   dst.x,
+		DstY:   dst.y,
+		SrcX:   srcX,
+		SrcY:   srcY,
+		ColorR: 1,
+		ColorG: 1,
+		ColorB: 1,
+		ColorA: 1,
 	}
 }

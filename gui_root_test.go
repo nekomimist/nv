@@ -3,6 +3,7 @@ package main
 import (
 	"image"
 	"image/color"
+	"math"
 	"testing"
 
 	"github.com/hajimehoshi/ebiten/v2"
@@ -369,40 +370,32 @@ func TestGUI_CreateDisplayImageTilesWhenOverLimit(t *testing.T) {
 	}
 }
 
-// TestGUI_CreateTiledDisplayImageTilesHaveDistinctContent guards against the
-// "every tile shows the last tile's content" bug class: it would surface if
-// the scratch buffer reused for full-size interior tiles (see
-// createTiledDisplayImage) ever leaked stale pixels into a later tile.
+// TestGUI_CreateTiledDisplayImageTilesHaveDistinctContentAndGutters guards
+// both the reusable scratch buffer and the sampling gutters around each tile.
 //
 // Reading pixels back from a real *ebiten.Image (e.g. via Image.At) requires
 // an active Ebiten game loop, which isn't running under `go test` here, so
 // this intercepts newUnmanagedEbitenImageFn to capture (a copy of) each
 // tile's pixel buffer at the exact point production code would hand it off
-// for conversion -- which is what the buffer-reuse optimization must get
-// right.
-func TestGUI_CreateTiledDisplayImageTilesHaveDistinctContent(t *testing.T) {
-	const tileSize = 4
-
-	// Three vertical stripes: two full-size interior tiles (which share the
-	// reused scratch buffer) plus one narrower edge tile, each a distinct
-	// solid color.
-	stripes := []struct {
-		x, w  int
-		color color.NRGBA
-	}{
-		{x: 0, w: tileSize, color: color.NRGBA{255, 0, 0, 255}},
-		{x: tileSize, w: tileSize, color: color.NRGBA{0, 255, 0, 255}},
-		{x: 2 * tileSize, w: 2, color: color.NRGBA{0, 0, 255, 255}},
-	}
-	width := 2*tileSize + 2
-	height := tileSize
-
-	src := image.NewNRGBA(image.Rect(0, 0, width, height))
-	for _, s := range stripes {
-		for y := 0; y < height; y++ {
-			for x := s.x; x < s.x+s.w; x++ {
-				src.SetNRGBA(x, y, s.color)
-			}
+// for conversion -- which is what buffer reuse and gutter generation must
+// get right.
+func TestGUI_CreateTiledDisplayImageTilesHaveDistinctContentAndGutters(t *testing.T) {
+	const (
+		tileSize = 6
+		width    = 10
+		height   = 6
+	)
+	coreTileSize := tileSize - 2*tileGutterSize
+	srcBounds := image.Rect(11, 17, 11+width, 17+height)
+	src := image.NewNRGBA(srcBounds)
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			src.SetNRGBA(srcBounds.Min.X+x, srcBounds.Min.Y+y, color.NRGBA{
+				R: uint8(17*x + 3),
+				G: uint8(29*y + 5),
+				B: uint8(x + 7*y),
+				A: 255,
+			})
 		}
 	}
 
@@ -435,28 +428,106 @@ func TestGUI_CreateTiledDisplayImageTilesHaveDistinctContent(t *testing.T) {
 	t.Cleanup(result.Deallocate)
 
 	tiles := result.Tiles()
-	if len(tiles) != len(stripes) || len(captured) != len(stripes) {
-		t.Fatalf("got %d tile(s) and %d captured buffer(s), want %d each", len(tiles), len(captured), len(stripes))
+	wantTileCount := ((width + coreTileSize - 1) / coreTileSize) * ((height + coreTileSize - 1) / coreTileSize)
+	if len(tiles) != wantTileCount || len(captured) != wantTileCount {
+		t.Fatalf("got %d tile(s) and %d captured buffer(s), want %d each", len(tiles), len(captured), wantTileCount)
 	}
 
-	for i, s := range stripes {
-		tile := tiles[i]
+	coverage := make([]int, width*height)
+	for i, tile := range tiles {
 		c := captured[i]
 
-		if tile.X != s.x || tile.W != s.w || tile.H != height {
-			t.Fatalf("tile[%d] = {X:%d W:%d H:%d}, want {X:%d W:%d H:%d}", i, tile.X, tile.W, tile.H, s.x, s.w, height)
+		wantW := min(coreTileSize, width-tile.X)
+		wantH := min(coreTileSize, height-tile.Y)
+		if tile.W != wantW || tile.H != wantH || tile.SrcX != tileGutterSize || tile.SrcY != tileGutterSize {
+			t.Fatalf("tile[%d] = %+v, want W=%d H=%d Src=(%d,%d)", i, tile, wantW, wantH, tileGutterSize, tileGutterSize)
 		}
-		if c.w != s.w || c.h != height {
-			t.Fatalf("captured tile[%d] size = %dx%d, want %dx%d", i, c.w, c.h, s.w, height)
+		if c.w != tile.W+2*tileGutterSize || c.h != tile.H+2*tileGutterSize {
+			t.Fatalf("captured tile[%d] size = %dx%d, want %dx%d", i, c.w, c.h, tile.W+2*tileGutterSize, tile.H+2*tileGutterSize)
 		}
+		if c.w > tileSize || c.h > tileSize {
+			t.Fatalf("captured tile[%d] exceeds texture limit: %dx%d > %d", i, c.w, c.h, tileSize)
+		}
+
 		for y := 0; y < c.h; y++ {
 			for x := 0; x < c.w; x++ {
 				off := y*c.stride + x*4
 				got := color.NRGBA{c.pix[off], c.pix[off+1], c.pix[off+2], c.pix[off+3]}
-				if got != s.color {
-					t.Fatalf("tile[%d] pixel (%d,%d) = %v, want %v", i, x, y, got, s.color)
+				sourceX := max(0, min(width-1, tile.X+x-tile.SrcX))
+				sourceY := max(0, min(height-1, tile.Y+y-tile.SrcY))
+				want := src.NRGBAAt(srcBounds.Min.X+sourceX, srcBounds.Min.Y+sourceY)
+				if got != want {
+					t.Fatalf("tile[%d] pixel (%d,%d) = %v, want source (%d,%d) = %v", i, x, y, got, sourceX, sourceY, want)
 				}
 			}
 		}
+
+		for y := tile.Y; y < tile.Y+tile.H; y++ {
+			for x := tile.X; x < tile.X+tile.W; x++ {
+				coverage[y*width+x]++
+			}
+		}
+	}
+
+	for i, count := range coverage {
+		if count != 1 {
+			t.Fatalf("source pixel %d covered %d times, want exactly once", i, count)
+		}
+	}
+}
+
+func TestGUI_DisplayTileVerticesShareExactTransformedEdges(t *testing.T) {
+	const coreSize = 2046
+	topLeft := DisplayTile{X: 0, Y: 0, W: coreSize, H: coreSize, SrcX: 1, SrcY: 1}
+	topRight := DisplayTile{X: coreSize, Y: 0, W: 500, H: coreSize, SrcX: 1, SrcY: 1}
+	bottomLeft := DisplayTile{X: 0, Y: coreSize, W: coreSize, H: 700, SrcX: 1, SrcY: 1}
+
+	tests := []struct {
+		name   string
+		scale  float64
+		angle  int
+		flipH  bool
+		flipV  bool
+		offset float64
+	}{
+		{name: "quarter_scale", scale: 0.25, angle: 0, offset: -123.25},
+		{name: "identity_scale", scale: 1, angle: 90, flipH: true, offset: 17.5},
+		{name: "131_percent_repro", scale: 1.31, angle: 0, offset: 635.5 - coreSize*1.31},
+		{name: "rotated_and_flipped", scale: 1.31, angle: 270, flipH: true, flipV: true, offset: -911.5},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			game := &Game{rotationAngle: tt.angle, flipH: tt.flipH, flipV: tt.flipV}
+			renderer := &Renderer{renderState: game, tilePointCache: make(map[image.Point]tileScreenPoint)}
+			layout := displayLayout{canvasW: 5000, canvasH: 7000, transformedW: 5000, transformedH: 7000}
+			if tt.angle == 90 || tt.angle == 270 {
+				layout.transformedW, layout.transformedH = layout.canvasH, layout.canvasW
+			}
+			transform := renderer.calculateCanvasTransform(layout, tt.scale, 73.25, tt.offset)
+
+			leftVertices := renderer.displayTileVertices(topLeft, 19, 23, transform)
+			rightVertices := renderer.displayTileVertices(topRight, 19, 23, transform)
+			bottomVertices := renderer.displayTileVertices(bottomLeft, 19, 23, transform)
+
+			assertSameVertexPosition(t, "horizontal top", leftVertices[1], rightVertices[0])
+			assertSameVertexPosition(t, "horizontal bottom", leftVertices[3], rightVertices[2])
+			assertSameVertexPosition(t, "vertical left", leftVertices[2], bottomVertices[0])
+			assertSameVertexPosition(t, "vertical right", leftVertices[3], bottomVertices[1])
+
+			if got, want := leftVertices[0].SrcX, float32(1); got != want {
+				t.Fatalf("source x = %v, want %v", got, want)
+			}
+			if got, want := leftVertices[3].SrcY, float32(coreSize+1); got != want {
+				t.Fatalf("source y = %v, want %v", got, want)
+			}
+		})
+	}
+}
+
+func assertSameVertexPosition(t *testing.T, name string, a, b ebiten.Vertex) {
+	t.Helper()
+	if math.Float32bits(a.DstX) != math.Float32bits(b.DstX) || math.Float32bits(a.DstY) != math.Float32bits(b.DstY) {
+		t.Fatalf("%s edge differs: (%v,%v) vs (%v,%v)", name, a.DstX, a.DstY, b.DstX, b.DstY)
 	}
 }
