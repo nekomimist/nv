@@ -1,4 +1,4 @@
-//go:build cgo && native_decode
+//go:build linux && cgo && native_decode
 
 package imgdecode
 
