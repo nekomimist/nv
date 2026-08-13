@@ -43,7 +43,7 @@ updates from the July 4, 2026 performance and refactoring pass.
   - Shared action execution dispatch
 - `image.go`
   - Image collection from files, directories, and archives
-  - Async loading, preload queue, LRU cache
+  - Async loading, preload queue, resolution-tiered LRU cache
 - `archive.go`, `archive_cache.go`
   - Shared ZIP/RAR/7z read abstraction (`archiveHandle`)
   - Bounded archive-handle cache owned by the async load worker
@@ -135,15 +135,46 @@ Two modes bypass the generic action flow for practical reasons:
 Actual file/byte decoding is delegated to `internal/imgdecode` so that the
 decode path can be tested and benchmarked without importing Ebiten. The
 default build uses Go's standard image decoders. Builds with the
-`native_decode` tag opt into CGO-backed PNG/JPEG decode:
+`native_decode` tag opt into CGO-backed decode:
 
-- Linux uses libpng and TurboJPEG.
+- Linux uses libpng, libdeflate, TurboJPEG and libwebp.
 - Windows uses Windows Imaging Component.
-- JPEG always tries native decode first in native builds.
+- JPEG and WebP always try native decode first in native builds.
 - PNG only tries native decode for images of at least 1 megapixel; smaller
   PNG files stay on the standard decoder to avoid native setup overhead.
+- On Linux, PNGs that are 8-bit, non-interlaced and free of `tRNS` take a
+  libdeflate path that inflates the whole IDAT stream at once and unfilters
+  straight into premultiplied RGBA. Anything else, and any failure, falls
+  back to libpng.
+- WebP on Windows depends on a WIC WebP codec being installed; without one
+  the decoder fails and the pure-Go decoder takes over.
+
+Native decoders write into a caller-supplied Go buffer and return
+premultiplied `*image.RGBA`, which is the only shape Ebitengine can upload
+without allocating and converting a second full-size copy.
 
 This is the most explicit interface boundary in the repo.
+
+### Images are decoded at display size
+
+`imgdecode.Hint` names the box an image will be displayed in, and
+`imgdecode.Info` reports what was actually produced. JPEG (both platforms)
+and WebP (Linux) can decode smaller; PNG cannot, and reports
+`Reduced: false`, which means "no higher-resolution version exists".
+
+The cache is keyed by `imgCacheKey{path, tier}` with a budget tier and a
+full tier, so both can coexist and a late budget result can never overwrite
+a full-resolution one. `GetImage` prefers the full tier and otherwise
+returns the budget image rather than a placeholder. `EnsureResolution` is
+the separate write-trigger path: when the user zooms past the decoded size
+it queues a full-resolution decode on a low-priority queue, which swaps in
+through the usual async refresh.
+
+Because a texture can now be smaller than its source, zoom and layout are
+measured in source pixels (`DisplayImage.SourceBounds`) while sampling and
+vertices stay in texture pixels; the renderer folds each image's
+texture-to-source ratio into its own draw transform. That is what keeps the
+picture still when a full-resolution decode replaces a budget one.
 
 ## Behavior Notes
 
