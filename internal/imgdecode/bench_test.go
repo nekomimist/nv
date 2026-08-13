@@ -18,6 +18,8 @@ type benchImage struct {
 	data   []byte
 	pixels int64
 	bytes  int64
+	width  int
+	height int
 }
 
 func BenchmarkDecode(b *testing.B) {
@@ -35,6 +37,41 @@ func BenchmarkDecode(b *testing.B) {
 				if img.Bounds().Empty() {
 					b.Fatalf("decoded image is empty")
 				}
+			}
+			b.ReportMetric(float64(tc.pixels*int64(b.N))/b.Elapsed().Seconds()/1_000_000, "MPix/s")
+		})
+	}
+}
+
+// BenchmarkDecodeScaled requests a decode at half of each fixture's native
+// size, so it directly measures Stage 2a's payoff: for a JPEG served by the
+// native decoder, this hint should land on the 1/2 libjpeg-turbo/WIC DCT
+// scaling factor and decode substantially cheaper than BenchmarkDecode's
+// full-resolution pass over the same bytes. htop.png/debian-logo.png (and
+// any other PNG fixture) go through the untouched stdlib decoder either
+// way -- PNG ignores the hint entirely -- so they serve as noise controls:
+// their numbers here should be indistinguishable from BenchmarkDecode's.
+func BenchmarkDecodeScaled(b *testing.B) {
+	for _, tc := range benchmarkImages(b) {
+		if tc.width <= 0 || tc.height <= 0 {
+			continue
+		}
+		hint := Hint{MaxWidth: (tc.width + 1) / 2, MaxHeight: (tc.height + 1) / 2}
+
+		b.Run(tc.name, func(b *testing.B) {
+			b.ReportAllocs()
+			b.SetBytes(tc.bytes)
+			b.ReportMetric(float64(tc.pixels)/1_000_000, "MPix/input")
+
+			for b.Loop() {
+				img, info, err := DecodeBytesScaled(tc.data, tc.name, hint)
+				if err != nil {
+					b.Fatalf("DecodeBytesScaled failed: %v", err)
+				}
+				if img.Bounds().Empty() {
+					b.Fatalf("decoded image is empty")
+				}
+				_ = info
 			}
 			b.ReportMetric(float64(tc.pixels*int64(b.N))/b.Elapsed().Seconds()/1_000_000, "MPix/s")
 		})
@@ -121,6 +158,8 @@ func readBenchFile(tb testing.TB, path string) benchImage {
 		data:   data,
 		pixels: int64(b.Dx()) * int64(b.Dy()),
 		bytes:  int64(len(data)),
+		width:  b.Dx(),
+		height: b.Dy(),
 	}
 }
 
@@ -142,7 +181,7 @@ func mustEncodePNG(tb testing.TB, name string, w, h int) benchImage {
 	if err := png.Encode(stringWriter{&buf}, img); err != nil {
 		tb.Fatalf("encoding synthetic PNG: %v", err)
 	}
-	return benchImage{name: name, data: []byte(buf.String()), pixels: int64(w) * int64(h), bytes: int64(buf.Len())}
+	return benchImage{name: name, data: []byte(buf.String()), pixels: int64(w) * int64(h), bytes: int64(buf.Len()), width: w, height: h}
 }
 
 func mustEncodeJPEG(tb testing.TB, name string, w, h int) benchImage {
@@ -152,7 +191,7 @@ func mustEncodeJPEG(tb testing.TB, name string, w, h int) benchImage {
 	if err := jpeg.Encode(stringWriter{&buf}, img, &jpeg.Options{Quality: 90}); err != nil {
 		tb.Fatalf("encoding synthetic JPEG: %v", err)
 	}
-	return benchImage{name: name, data: []byte(buf.String()), pixels: int64(w) * int64(h), bytes: int64(buf.Len())}
+	return benchImage{name: name, data: []byte(buf.String()), pixels: int64(w) * int64(h), bytes: int64(buf.Len()), width: w, height: h}
 }
 
 func syntheticImage(w, h int) *image.NRGBA {

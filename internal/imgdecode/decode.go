@@ -21,49 +21,94 @@ var errNativeUnavailable = errors.New("native decoder unavailable")
 
 const nativePNGMinPixels = 1_000_000
 
-// DecodeFile decodes an image from a filesystem path.
+// Hint expresses the largest size the caller needs. A zero field means "no
+// limit" -- decode at full resolution on that axis.
+type Hint struct {
+	MaxWidth  int
+	MaxHeight int
+}
+
+// Info describes what a scaled decode actually produced.
+type Info struct {
+	Width, Height             int  // dimensions actually produced
+	SourceWidth, SourceHeight int  // full/native dimensions of the source
+	Reduced                   bool // true when Width/Height < Source*
+}
+
+// DecodeFile decodes an image from a filesystem path at full resolution.
 func DecodeFile(path string) (image.Image, error) {
+	img, _, err := DecodeFileScaled(path, Hint{})
+	return img, err
+}
+
+// DecodeFileScaled decodes an image from a filesystem path, using hint to
+// request a reduced-resolution decode where the underlying decoder supports
+// it. Callers that do not need Info can use DecodeFile instead.
+func DecodeFileScaled(path string, hint Hint) (image.Image, Info, error) {
 	if !nativeEnabled() {
 		f, err := os.Open(path)
 		if err != nil {
-			return nil, err
+			return nil, Info{}, err
 		}
 		defer f.Close()
 
 		img, _, err := image.Decode(f)
 		if err != nil {
-			return nil, err
+			return nil, Info{}, err
 		}
-		return img, nil
+		return img, infoFromImage(img), nil
 	}
 
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, err
+		return nil, Info{}, err
 	}
-	return DecodeBytes(data, path)
+	return DecodeBytesScaled(data, path, hint)
 }
 
-// DecodeBytes decodes an image from memory.
+// DecodeBytes decodes an image from memory at full resolution.
 func DecodeBytes(data []byte, origin string) (image.Image, error) {
+	img, _, err := DecodeBytesScaled(data, origin, Hint{})
+	return img, err
+}
+
+// DecodeBytesScaled decodes an image from memory, using hint to request a
+// reduced-resolution decode where the underlying decoder supports it (JPEG
+// via the native decoder only). Every other path -- PNG, non-JPEG formats,
+// and the stdlib decoder in general -- ignores hint and decodes at full
+// resolution, reporting Info.Reduced == false. Callers that do not need
+// Info can use DecodeBytes instead.
+func DecodeBytesScaled(data []byte, origin string, hint Hint) (image.Image, Info, error) {
 	if !shouldTryNative(data, origin) {
-		return decodeStdlib(data)
+		img, err := decodeStdlib(data)
+		if err != nil {
+			return nil, Info{}, err
+		}
+		return img, infoFromImage(img), nil
 	}
 
-	img, err := decodeNative(data, origin)
+	img, info, err := decodeNative(data, origin, hint)
 	if err == nil {
-		return img, nil
+		return img, info, nil
 	}
 	nativeErr := err
 
 	img, err = decodeStdlib(data)
 	if err != nil {
 		if nativeErr != errNativeUnavailable {
-			return nil, fmt.Errorf("native decode failed: %v; stdlib decode failed: %w", nativeErr, err)
+			return nil, Info{}, fmt.Errorf("native decode failed: %v; stdlib decode failed: %w", nativeErr, err)
 		}
-		return nil, err
+		return nil, Info{}, err
 	}
-	return img, nil
+	return img, infoFromImage(img), nil
+}
+
+// infoFromImage builds the Info for a decode that ignored (or had no) scale
+// hint: the produced image is always the full source resolution.
+func infoFromImage(img image.Image) Info {
+	b := img.Bounds()
+	w, h := b.Dx(), b.Dy()
+	return Info{Width: w, Height: h, SourceWidth: w, SourceHeight: h, Reduced: false}
 }
 
 func shouldTryNative(data []byte, origin string) bool {

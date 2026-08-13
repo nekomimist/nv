@@ -6,8 +6,8 @@ import (
 	"image"
 )
 
-func decodeNative(_ []byte, _ string) (image.Image, error) {
-	return nil, errNativeUnavailable
+func decodeNative(_ []byte, _ string, _ Hint) (image.Image, Info, error) {
+	return nil, Info{}, errNativeUnavailable
 }
 
 func nativeEnabled() bool {
