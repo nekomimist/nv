@@ -9,8 +9,10 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"nv/internal/imgdecode"
 
@@ -392,6 +394,17 @@ type loadRequest struct {
 	preload  bool
 }
 
+// loadTimings records per-phase durations for a single image load, used to
+// emit the "load_timing" debug log line from processLoadRequest. A zero
+// value in a field means that phase either didn't run (e.g. read on the
+// plain-file path, which os.ReadFile inside imgdecode.DecodeFile does not
+// expose separately) or hasn't been measured yet.
+type loadTimings struct {
+	read   time.Duration
+	decode time.Duration
+	upload time.Duration
+}
+
 // NewImageManager creates a new DefaultImageManager
 func NewImageManager(cacheSize int) ImageManager {
 	cache, err := lru.NewWithEvict[string, DisplayImage](cacheSize, func(_ string, img DisplayImage) {
@@ -517,18 +530,20 @@ func (m *DefaultImageManager) asyncLoadWorker() {
 }
 
 func (m *DefaultImageManager) processLoadRequest(req loadRequest) {
+	start := time.Now()
 	defer func() {
 		m.inflightMu.Lock()
 		delete(m.inflight, req.cacheKey)
 		m.inflightMu.Unlock()
 	}()
 
-	img, err := m.loadImage(req.path)
+	img, timings, err := m.loadImage(req.path)
 	if err != nil {
 		errorKV("cache", "cache_load_failed",
 			"path", req.path.Path,
 			"source", loadSource(req.preload),
 			"error", err,
+			"total_ms", formatMillis(time.Since(start)),
 		)
 		errorImg := createDisplayImageFromEbitenImage(CreateErrorImage(400, 300, req.path.Path, err.Error()))
 		m.cache.Add(req.cacheKey, errorImg)
@@ -551,6 +566,26 @@ func (m *DefaultImageManager) processLoadRequest(req loadRequest) {
 			"mem_mb", mem.Alloc/1024/1024,
 		)
 	}
+
+	bounds := img.Bounds()
+	debugKV("cache", "load_timing",
+		"path", req.cacheKey,
+		"source", loadSource(req.preload),
+		"read_ms", formatMillis(timings.read),
+		"decode_ms", formatMillis(timings.decode),
+		"upload_ms", formatMillis(timings.upload),
+		"total_ms", formatMillis(time.Since(start)),
+		"w", bounds.Dx(),
+		"h", bounds.Dy(),
+	)
+}
+
+// formatMillis formats a duration as milliseconds with a fixed two-decimal
+// precision for log output. It's a plain string (not a bare float) so the
+// value round-trips through formatLogValue exactly as written here, rather
+// than through strconv.FormatFloat's shortest-round-trip formatting.
+func formatMillis(d time.Duration) string {
+	return strconv.FormatFloat(float64(d.Nanoseconds())/1e6, 'f', 2, 64)
 }
 
 func (m *DefaultImageManager) requestAsyncLoad(imagePath ImagePath) {
@@ -760,28 +795,50 @@ func (m *DefaultImageManager) getPath(idx int) (ImagePath, bool) {
 
 // Image loading functions
 
-func (m *DefaultImageManager) loadImageFromBytes(data []byte, path string) (DisplayImage, error) {
+func (m *DefaultImageManager) loadImageFromBytes(data []byte, path string) (DisplayImage, loadTimings, error) {
+	var timings loadTimings
+
+	decodeStart := time.Now()
 	decoded, err := imgdecode.DecodeBytes(data, path)
+	timings.decode = time.Since(decodeStart)
 	if err != nil {
-		return nil, fmt.Errorf("decoding %s: %v", path, err)
+		return nil, timings, fmt.Errorf("decoding %s: %v", path, err)
 	}
-	return m.createEbitenImageFromDecoded(decoded, path)
+
+	uploadStart := time.Now()
+	img, err := m.createEbitenImageFromDecoded(decoded, path)
+	timings.upload = time.Since(uploadStart)
+	return img, timings, err
 }
 
-func (m *DefaultImageManager) loadImage(imagePath ImagePath) (DisplayImage, error) {
+func (m *DefaultImageManager) loadImage(imagePath ImagePath) (DisplayImage, loadTimings, error) {
 	if imagePath.ArchivePath == "" {
+		// imgdecode.DecodeFile does its own os.ReadFile internally, so read
+		// time isn't separable from decode time on this path; read_ms stays
+		// zero here (see loadTimings doc comment).
+		decodeStart := time.Now()
 		decoded, err := imgdecode.DecodeFile(imagePath.Path)
+		timings := loadTimings{decode: time.Since(decodeStart)}
 		if err != nil {
-			return nil, fmt.Errorf("decoding %s: %v", imagePath.Path, err)
+			return nil, timings, fmt.Errorf("decoding %s: %v", imagePath.Path, err)
 		}
-		return m.createEbitenImageFromDecoded(decoded, imagePath.Path)
+
+		uploadStart := time.Now()
+		img, err := m.createEbitenImageFromDecoded(decoded, imagePath.Path)
+		timings.upload = time.Since(uploadStart)
+		return img, timings, err
 	}
 
+	readStart := time.Now()
 	data, err := m.archiveCache.readEntry(imagePath.ArchivePath, imagePath.EntryPath)
+	readDur := time.Since(readStart)
 	if err != nil {
-		return nil, err
+		return nil, loadTimings{read: readDur}, err
 	}
-	return m.loadImageFromBytes(data, imagePath.EntryPath)
+
+	img, timings, err := m.loadImageFromBytes(data, imagePath.EntryPath)
+	timings.read = readDur
+	return img, timings, err
 }
 
 func (m *DefaultImageManager) createEbitenImageFromDecoded(src image.Image, origin string) (DisplayImage, error) {
