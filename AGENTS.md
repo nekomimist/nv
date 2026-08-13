@@ -66,7 +66,7 @@ A quick orientation for humans and AI agents working on this repo. Short, factua
 
 ## Platform Notes
 - For Windows builds, install `rsrc`: `go install github.com/akavel/rsrc@latest`.
-- Linux native decode builds need `libpng-dev`, `libturbojpeg0-dev`, `libwebp-dev`, and CGO.
+- Linux native decode builds need `libpng-dev`, `libturbojpeg0-dev`, `libwebp-dev`, `libdeflate-dev`, and CGO.
 - Windows native decode cross-builds from WSL need `gcc-mingw-w64` and `g++-mingw-w64`.
   WebP decoding on Windows depends on a WIC WebP codec being present (Windows
   11, or Windows 10 with the Store "WebP Image Extension") and silently
