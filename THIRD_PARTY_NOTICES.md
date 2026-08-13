@@ -1,10 +1,11 @@
 # Third-Party Notices
 
 The Windows native-decode build (`make windows-native`, the `native_decode`
-build tag on `GOOS=windows`) statically links two third-party C libraries
-into the resulting binary (`nv-native.exe`). Their licence texts, taken
-verbatim from each project's `COPYING` file, are reproduced below. Neither
-library is linked into the default `nv`/`nv.exe`/`nv-native` (Linux)
+build tag on `GOOS=windows`) statically links third-party C code into the
+resulting binary (`nv-native.exe`): the two image libraries below, plus the
+GCC and MinGW-w64 runtimes noted at the end. The image libraries' licence
+texts, taken verbatim from each project's `COPYING` file, are reproduced
+below. Neither is linked into the default `nv`/`nv.exe`/`nv-native` (Linux)
 builds; the Linux native-decode build links libpng, libjpeg-turbo, libwebp,
 and libdeflate as *shared* libraries via `pkg-config` instead, which does
 not require redistributing their licence text alongside the binary.
@@ -84,3 +85,28 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
 Source: https://github.com/webmproject/libwebp (v1.5.0 `COPYING`)
+
+## GCC runtime libraries
+
+The Windows binary is built with the MinGW-w64 GCC toolchain and links
+`libgcc` and `libstdc++` statically (`-static-libgcc -static-libstdc++`,
+see `internal/imgdecode/native_windows.go`), so that it depends only on
+DLLs every Windows installation already has.
+
+License: GPL-3.0-or-later WITH GCC-exception-3.1
+
+Both libraries are covered by the GCC Runtime Library Exception version
+3.1, which grants permission to combine them with independent modules and
+convey the result "under terms of your choice", provided all target code
+was produced by an Eligible Compilation Process. This build qualifies: the
+whole toolchain — MinGW-w64 GCC, the Go toolchain, binutils, libdeflate and
+libwebp — is GCC or other GPL-compatible software. The exception draws no
+distinction between static and dynamic linking, and `libgcc` is linked into
+every GCC-produced binary regardless.
+
+Exception text: https://www.gnu.org/licenses/gcc-exception-3.1.html
+
+The MinGW-w64 C runtime (`libmingw32`, `libmingwex`), also statically
+linked, is distributed under the Zope Public License 2.1 with a number of
+permissive per-file licences; see the `mingw-w64-common` package copyright
+for the full breakdown.
