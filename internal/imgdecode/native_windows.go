@@ -4,7 +4,11 @@ package imgdecode
 
 /*
 #cgo CXXFLAGS: -std=c++17
-#cgo LDFLAGS: -lole32 -luuid -lwindowscodecs
+// Static-link the MinGW runtimes. Without this the binary imports
+// libgcc_s_seh-1.dll and libstdc++-6.dll, which no clean Windows install
+// has, so it only starts on machines where some other MinGW-built
+// application happens to have put them on PATH.
+#cgo LDFLAGS: -lole32 -luuid -lwindowscodecs -static-libgcc -static-libstdc++
 
 #include <stdint.h>
 #include <stdlib.h>
