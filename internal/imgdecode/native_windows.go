@@ -26,11 +26,20 @@ func decodeNative(data []byte, origin string, hint Hint) (image.Image, Info, err
 	if len(data) == 0 {
 		return nil, Info{}, errNativeUnavailable
 	}
+	// WebP is routed into the same WIC pipeline as PNG/JPEG below. There is
+	// no libwebp dependency on Windows: Windows 11 (and Windows 10 with the
+	// Store "WebP Image Extension") ships a WIC WebP codec, but when none is
+	// registered, CreateDecoderFromStream simply fails and nv_wic_query_size
+	// returns a non-zero status, so decodeNative returns an error here and
+	// DecodeBytesScaled's existing fallback serves the pure-Go decoder --
+	// the same graceful degradation PNG/JPEG would get from a broken WIC
+	// install, with no special-casing needed for WebP specifically.
 	lowerOrigin := strings.ToLower(origin)
-	if !isPNGData(data) && !isJPEGData(data) &&
+	if !isPNGData(data) && !isJPEGData(data) && !isWebPData(data) &&
 		!strings.HasSuffix(lowerOrigin, ".png") &&
 		!strings.HasSuffix(lowerOrigin, ".jpg") &&
-		!strings.HasSuffix(lowerOrigin, ".jpeg") {
+		!strings.HasSuffix(lowerOrigin, ".jpeg") &&
+		!strings.HasSuffix(lowerOrigin, ".webp") {
 		return nil, Info{}, errNativeUnavailable
 	}
 

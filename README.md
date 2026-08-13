@@ -106,12 +106,12 @@ go run . [image_files_or_directories...]
 - Go 1.24 or later
 - Platform support: Windows, Linux (macOS untested)
 
-Optional native PNG/JPEG decode builds require CGO:
+Optional native PNG/JPEG/WebP decode builds require CGO:
 
-- Linux: `libpng-dev`, `libturbojpeg0-dev`, and a C compiler
+- Linux: `libpng-dev`, `libturbojpeg0-dev`, `libwebp-dev`, and a C compiler
 - Windows cross-build from Linux/WSL: `gcc-mingw-w64`, `g++-mingw-w64`, and `rsrc`
 
-Native decode is opt-in through the `native_decode` build tag or the `make linux-native` / `make windows-native` targets. JPEG uses the native decoder by default in these builds; PNG uses the native decoder only for images at least 1 megapixel, because small PNG files are often faster with Go's standard decoder.
+Native decode is opt-in through the `native_decode` build tag or the `make linux-native` / `make windows-native` targets. JPEG and WebP use the native decoder by default in these builds; PNG uses the native decoder only for images at least 1 megapixel, because small PNG files are often faster with Go's standard decoder. On Windows, WebP decoding depends on a WIC WebP codec being installed (Windows 11, or Windows 10 with the Store "WebP Image Extension"); when none is present, it silently falls back to the pure-Go decoder like any other unsupported format.
 
 Decode benchmarks:
 

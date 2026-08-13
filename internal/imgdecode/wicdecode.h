@@ -12,8 +12,8 @@ extern "C" {
 // reduced size, the target dimensions nv_wic_decode_rgba should be called
 // with -- without copying any pixels. A non-positive budget dimension means
 // "unconstrained" on that axis. Scaling is only chosen when the source is
-// JPEG; for every other format (PNG especially) out_w/out_h always equal
-// src_w/src_h.
+// JPEG or WebP; for every other format (PNG especially) out_w/out_h always
+// equal src_w/src_h.
 int nv_wic_query_size(const unsigned char *data, size_t len, int budget_w, int budget_h,
                        int *src_w, int *src_h, int *out_w, int *out_h);
 

@@ -3,7 +3,7 @@
 package imgdecode
 
 /*
-#cgo pkg-config: libpng
+#cgo pkg-config: libpng libwebp
 #cgo LDFLAGS: -lturbojpeg
 
 #include <stdint.h>
@@ -12,6 +12,7 @@ package imgdecode
 
 #include <png.h>
 #include <turbojpeg.h>
+#include <webp/decode.h>
 
 typedef struct {
 	const unsigned char *data;
@@ -312,6 +313,64 @@ static int nv_jpeg_decode(const unsigned char *data, size_t len, unsigned char *
 	tjDestroy(handle);
 	return 0;
 }
+
+// nv_webp_query reads just the WebP bitstream header via libwebp's feature-
+// probe API and reports the source dimensions, so the Go side can compute a
+// scaled target size and allocate a destination buffer before decoding.
+// Unlike nv_png_decode above, no separate has-alpha branch is needed here:
+// WebPGetFeatures also reports features.has_alpha, but nv_webp_decode always
+// targets MODE_rgbA (premultiplied RGBA), and for an opaque source
+// premultiplying by alpha=255 is the identity, so the same decode path is
+// already correct whether or not the source carries real alpha.
+static int nv_webp_query(const unsigned char *data, size_t len, int *width, int *height) {
+	WebPBitstreamFeatures features;
+	VP8StatusCode status = WebPGetFeatures(data, len, &features);
+	if (status != VP8_STATUS_OK) {
+		return (int)status;
+	}
+	*width = features.width;
+	*height = features.height;
+	return 0;
+}
+
+// nv_webp_decode decodes directly into the caller-supplied dst buffer as
+// premultiplied RGBA (MODE_rgbA -- the lowercase 'rgbA' spelling denotes
+// premultiplied alpha per webp/decode.h), which is exactly the byte layout
+// Ebiten's *image.RGBA contract expects, so -- unlike the PNG path above --
+// no separate premultiply pass is ever needed here. When width/height differ
+// from the bitstream's own size, libwebp's built-in scaler (use_scaling)
+// produces the reduced output directly as part of the same decode, without
+// ever materializing a full-size intermediate buffer.
+static int nv_webp_decode(const unsigned char *data, size_t len, unsigned char *dst, size_t dst_stride, int width, int height) {
+	WebPDecoderConfig config;
+	if (!WebPInitDecoderConfig(&config)) {
+		return -1;
+	}
+
+	VP8StatusCode status = WebPGetFeatures(data, len, &config.input);
+	if (status != VP8_STATUS_OK) {
+		return (int)status;
+	}
+
+	config.output.colorspace = MODE_rgbA;
+	config.output.is_external_memory = 1;
+	config.output.u.RGBA.rgba = dst;
+	config.output.u.RGBA.stride = (int)dst_stride;
+	config.output.u.RGBA.size = dst_stride * (size_t)height;
+
+	if (width != config.input.width || height != config.input.height) {
+		config.options.use_scaling = 1;
+		config.options.scaled_width = width;
+		config.options.scaled_height = height;
+	}
+
+	status = WebPDecode(data, len, &config);
+	WebPFreeDecBuffer(&config.output);
+	if (status != VP8_STATUS_OK) {
+		return (int)status;
+	}
+	return 0;
+}
 */
 import "C"
 
@@ -336,6 +395,8 @@ func decodeNative(data []byte, origin string, hint Hint) (image.Image, Info, err
 		return decodeNativePNG(data)
 	case isJPEGData(data) || strings.HasSuffix(lowerOrigin, ".jpg") || strings.HasSuffix(lowerOrigin, ".jpeg"):
 		return decodeNativeJPEG(data, hint)
+	case isWebPData(data) || strings.HasSuffix(lowerOrigin, ".webp"):
+		return decodeNativeWebP(data, hint)
 	default:
 		return nil, Info{}, errNativeUnavailable
 	}
@@ -414,6 +475,89 @@ func decodeNativeJPEG(data []byte, hint Hint) (image.Image, Info, error) {
 		Reduced: outWidth < srcWidth || outHeight < srcHeight,
 	}
 	return img, info, nil
+}
+
+func decodeNativeWebP(data []byte, hint Hint) (image.Image, Info, error) {
+	var srcWidth, srcHeight C.int
+	status := C.nv_webp_query(
+		(*C.uchar)(unsafe.Pointer(&data[0])), C.size_t(len(data)),
+		&srcWidth, &srcHeight)
+	if status != 0 {
+		return nil, Info{}, fmt.Errorf("libwebp status %d", int(status))
+	}
+
+	outWidth, outHeight := webpTargetSize(int(srcWidth), int(srcHeight), hint)
+
+	buf, stride, err := newRGBABuffer(outWidth, outHeight)
+	if err != nil {
+		return nil, Info{}, err
+	}
+
+	// buf is a []byte, which contains no Go pointers, and libwebp does not
+	// retain the dst pointer past this call, so passing &buf[0] to cgo
+	// here is safe under cgo's pointer-passing rules.
+	status = C.nv_webp_decode(
+		(*C.uchar)(unsafe.Pointer(&data[0])), C.size_t(len(data)),
+		(*C.uchar)(unsafe.Pointer(&buf[0])), C.size_t(stride),
+		C.int(outWidth), C.int(outHeight))
+	runtime.KeepAlive(buf)
+	if status != 0 {
+		return nil, Info{}, fmt.Errorf("libwebp status %d", int(status))
+	}
+	img := imageFromRGBABuffer(buf, outWidth, outHeight)
+	info := Info{
+		Width: outWidth, Height: outHeight,
+		SourceWidth: int(srcWidth), SourceHeight: int(srcHeight),
+		Reduced: outWidth < int(srcWidth) || outHeight < int(srcHeight),
+	}
+	return img, info, nil
+}
+
+// webpTargetSize picks the smallest size that still covers hint on both
+// axes while preserving the source's aspect ratio. Unlike the JPEG DCT
+// scaler above (which only offers a handful of fixed M/8 factors), libwebp's
+// scaler accepts arbitrary target dimensions, so there is no factor family
+// to snap to here -- the ideal covering size is computed directly. A hint
+// axis <= 0 means "unconstrained" on that axis (Hint's documented zero-value
+// semantics, matching nv_jpeg_query's budget_w/budget_h <= 0 handling). If
+// neither axis is constrained, or the required scale is not actually
+// smaller than 1 (e.g. the hint exceeds the source on every constrained
+// axis), the source's own size is returned unscaled.
+func webpTargetSize(srcW, srcH int, hint Hint) (int, int) {
+	if srcW <= 0 || srcH <= 0 {
+		return srcW, srcH
+	}
+
+	scale := 0.0
+	if hint.MaxWidth > 0 {
+		if s := float64(hint.MaxWidth) / float64(srcW); s > scale {
+			scale = s
+		}
+	}
+	if hint.MaxHeight > 0 {
+		if s := float64(hint.MaxHeight) / float64(srcH); s > scale {
+			scale = s
+		}
+	}
+	if scale <= 0 || scale >= 1 {
+		return srcW, srcH
+	}
+
+	w := int(math.Ceil(float64(srcW) * scale))
+	h := int(math.Ceil(float64(srcH) * scale))
+	if w < 1 {
+		w = 1
+	}
+	if h < 1 {
+		h = 1
+	}
+	if w > srcW {
+		w = srcW
+	}
+	if h > srcH {
+		h = srcH
+	}
+	return w, h
 }
 
 // clampToCInt converts a Go int hint value to C.int (a fixed 32-bit type on

@@ -47,8 +47,22 @@ const GUID kWICPixelFormat32bppPRGBA = {
 // rather than a full-resolution decode followed by software resampling,
 // provided scale_w/scale_h were chosen (see nv_wic_compute_target_size) to
 // match a size the codec can produce natively. src_width/src_height always
-// report the frame's own (unscaled) size and is_jpeg reports the container
-// format, both learned before any scaler is considered.
+// report the frame's own (unscaled) size and supports_native_scaling
+// reports the container format, both learned before any scaler is
+// considered.
+//
+// supports_native_scaling also gates in WebP (GUID_ContainerFormatWebp,
+// confirmed present -- and linkable via -luuid -- in the MinGW-w64
+// wincodec.h/libuuid.a this project cross-compiles against). Whether an
+// installed WIC WebP codec actually implements windowed/DCT-style scaled
+// decoding the way the JPEG codec does is unverified: this path is cross-
+// compiled only and never executed on the machine that built this binary.
+// That uncertainty only affects how much CPU work CopyPixels below does,
+// not correctness -- IWICBitmapScaler is a generic, codec-agnostic
+// component that always produces a correctly resized bitmap regardless of
+// whether its source can satisfy the request natively, and out_w/out_h (and
+// therefore Info.Reduced) come from the scaler's own reported size, so they
+// stay truthful either way.
 //
 // The format converter targets GUID_WICPixelFormat32bppPRGBA (premultiplied
 // RGBA) whenever the source format supports that conversion, so that decode
@@ -72,7 +86,7 @@ struct wic_pipeline {
 	bool premultiplied = false;
 	UINT src_width = 0;
 	UINT src_height = 0;
-	bool is_jpeg = false;
+	bool supports_native_scaling = false;
 
 	// scale_w/scale_h <= 0 means "use the frame's natural size" (no scaler
 	// inserted).
@@ -99,7 +113,9 @@ struct wic_pipeline {
 		if (SUCCEEDED(hr)) {
 			GUID container = {};
 			if (SUCCEEDED(decoder->GetContainerFormat(&container))) {
-				is_jpeg = IsEqualGUID(container, GUID_ContainerFormatJpeg) != FALSE;
+				supports_native_scaling =
+					IsEqualGUID(container, GUID_ContainerFormatJpeg) != FALSE ||
+					IsEqualGUID(container, GUID_ContainerFormatWebp) != FALSE;
 			}
 		}
 		if (SUCCEEDED(hr)) {
@@ -170,12 +186,13 @@ struct wic_pipeline {
 	wic_pipeline &operator=(const wic_pipeline &) = delete;
 };
 
-// nv_wic_compute_target_size picks the target size WIC's JPEG codec can
-// produce natively via DCT scaling: the largest power-of-two division
-// (1/1, 1/2, 1/4, 1/8) of the source whose dimensions still meet the
-// requested budget on every constrained axis (budget_w/budget_h <= 0 means
-// unconstrained on that axis). Falls back to the full source size if no
-// division qualifies (including when the budget exceeds the source size,
+// nv_wic_compute_target_size picks the target size for the scaler inserted
+// in wic_pipeline (native DCT scaling for JPEG; IWICBitmapScaler resampling
+// for WebP, see supports_native_scaling above): the largest power-of-two
+// division (1/1, 1/2, 1/4, 1/8) of the source whose dimensions still meet
+// the requested budget on every constrained axis (budget_w/budget_h <= 0
+// means unconstrained on that axis). Falls back to the full source size if
+// no division qualifies (including when the budget exceeds the source size,
 // which no division can satisfy since none can upscale).
 void nv_wic_compute_target_size(int src_w, int src_h, int budget_w, int budget_h, int *out_w, int *out_h) {
 	static const int divisors[] = {1, 2, 4, 8};
@@ -230,11 +247,11 @@ int nv_wic_query_size(const unsigned char *data, size_t len, int budget_w, int b
 
 	int target_w = *src_w;
 	int target_h = *src_h;
-	if (probe.is_jpeg && (budget_w > 0 || budget_h > 0)) {
+	if (probe.supports_native_scaling && (budget_w > 0 || budget_h > 0)) {
 		nv_wic_compute_target_size(*src_w, *src_h, budget_w, budget_h, &target_w, &target_h);
 	}
-	// Non-JPEG sources (PNG especially) are never scaled: target stays at
-	// the full source size, matching probe.is_jpeg's gate above.
+	// Sources outside supports_native_scaling's gate above (PNG especially)
+	// are never scaled: target stays at the full source size.
 
 	*out_w = target_w;
 	*out_h = target_h;

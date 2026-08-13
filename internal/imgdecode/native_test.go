@@ -255,6 +255,106 @@ func TestDecodeBytesScaledJPEGReducesResolution(t *testing.T) {
 	}
 }
 
+// alphaWebPBase64 is a 3x1 lossless WebP encoding the same three colors
+// (semi-transparent, opaque, fully-transparent) as
+// TestNativeDecodePNGAlphaIsPremultiplied's PNG fixture above, generated
+// offline with libwebp's WebPEncodeLosslessRGBA and, before embedding,
+// decoded with Go's own golang.org/x/image/webp and confirmed pixel-for-
+// pixel identical (all four RGBA channels) to the source NRGBA values below
+// -- the same verification discipline used for interlacedAdam7PNGBase64.
+const alphaWebPBase64 = "UklGRjYAAABXRUJQVlA4TCoAAAAvAgAAEBcgEEiC2J9wILFgsjt/ntgEAkkk+3NNIiAoum65gOo/1CCi/wE="
+
+// TestNativeDecodeWebPAlphaIsPremultiplied is the WebP counterpart of
+// TestNativeDecodePNGAlphaIsPremultiplied above: it proves decodeNative's
+// WebP path also hands back correctly bounded, correctly premultiplied
+// *image.RGBA bytes, via MODE_rgbA rather than libpng's row-transform hook.
+func TestNativeDecodeWebPAlphaIsPremultiplied(t *testing.T) {
+	data, err := base64.StdEncoding.DecodeString(alphaWebPBase64)
+	if err != nil {
+		t.Fatalf("decoding fixture base64: %v", err)
+	}
+
+	img, info, err := decodeNative(data, "alpha.webp", Hint{})
+	if err != nil {
+		t.Fatalf("decodeNative failed: %v", err)
+	}
+	rgba, ok := img.(*image.RGBA)
+	if !ok {
+		t.Fatalf("decoded type = %T, want *image.RGBA", img)
+	}
+	if got, want := rgba.Bounds(), image.Rect(0, 0, 3, 1); got != want {
+		t.Fatalf("bounds = %v, want %v", got, want)
+	}
+	if info.Reduced {
+		t.Fatalf("Info.Reduced = true, want false (no hint was given)")
+	}
+
+	cases := []struct {
+		name string
+		x    int
+		want color.NRGBA
+	}{
+		{"semi-transparent", 0, color.NRGBA{R: 200, G: 0, B: 0, A: 128}},
+		{"opaque", 1, color.NRGBA{R: 10, G: 20, B: 30, A: 255}},
+		{"fully-transparent", 2, color.NRGBA{R: 90, G: 80, B: 70, A: 0}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assertPremultiplied(t, rgba.RGBAAt(tc.x, 0), tc.want)
+		})
+	}
+}
+
+// scaledWebPBase64 is an 80x40 (2:1 aspect ratio) opaque lossless WebP,
+// generated the same way as alphaWebPBase64 above, used to exercise scaled
+// decode through libwebp's use_scaling option.
+const scaledWebPBase64 = "UklGRkYAAABXRUJQVlA4TDkAAAAvT8AJAAmASNoffYGI/qewUJC2AVP/vncVxMD3fwII/WNQ27YN4/r/494TKAQQAAVNBWICHq/t5wIA"
+
+// TestNativeDecodeWebPScaledReducesResolution proves the WebP native
+// decoder honours a Hint smaller than the source: libwebp's scaler accepts
+// arbitrary target dimensions (unlike libjpeg-turbo's fixed M/8 DCT
+// factors), so webpTargetSize's covering-size computation, not a factor
+// table, determines the output size. The 20x20 hint against an 80x40
+// (2:1) source requires covering both axes while preserving aspect ratio:
+// scale = max(20/80, 20/40) = 0.5, giving the one deterministically correct
+// answer of 40x20, not merely "some smaller size".
+func TestNativeDecodeWebPScaledReducesResolution(t *testing.T) {
+	data, err := base64.StdEncoding.DecodeString(scaledWebPBase64)
+	if err != nil {
+		t.Fatalf("decoding fixture base64: %v", err)
+	}
+
+	const srcW, srcH = 80, 40
+	hint := Hint{MaxWidth: 20, MaxHeight: 20}
+	const wantW, wantH = 40, 20
+
+	img, info, err := decodeNative(data, "scaled.webp", hint)
+	if err != nil {
+		t.Fatalf("decodeNative failed: %v", err)
+	}
+
+	if !info.Reduced {
+		t.Fatalf("Info.Reduced = false, want true")
+	}
+	if info.SourceWidth != srcW || info.SourceHeight != srcH {
+		t.Fatalf("Info.SourceWidth/Height = %dx%d, want %dx%d", info.SourceWidth, info.SourceHeight, srcW, srcH)
+	}
+	if got := img.Bounds(); got.Dx() != info.Width || got.Dy() != info.Height {
+		t.Fatalf("bounds = %v, want %dx%d (Info.Width/Height)", got, info.Width, info.Height)
+	}
+	if info.Width != wantW || info.Height != wantH {
+		t.Fatalf("Width/Height = %dx%d, want %dx%d (smallest size covering the %dx%d hint on both axes)",
+			info.Width, info.Height, wantW, wantH, hint.MaxWidth, hint.MaxHeight)
+	}
+
+	wantRatio := float64(srcW) / float64(srcH)
+	gotRatio := float64(info.Width) / float64(info.Height)
+	if diff := wantRatio - gotRatio; diff > 0.01 || diff < -0.01 {
+		t.Fatalf("aspect ratio = %v, want ~%v", gotRatio, wantRatio)
+	}
+}
+
 func absDiffU8(a, b uint8) int {
 	if a > b {
 		return int(a - b)

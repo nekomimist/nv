@@ -130,7 +130,7 @@ func externalFixturePaths(tb testing.TB, dir string) []string {
 			return nil
 		}
 		switch strings.ToLower(filepath.Ext(path)) {
-		case ".png", ".jpg", ".jpeg":
+		case ".png", ".jpg", ".jpeg", ".webp":
 			paths = append(paths, path)
 		}
 		return nil

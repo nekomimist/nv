@@ -74,10 +74,10 @@ func DecodeBytes(data []byte, origin string) (image.Image, error) {
 
 // DecodeBytesScaled decodes an image from memory, using hint to request a
 // reduced-resolution decode where the underlying decoder supports it (JPEG
-// via the native decoder only). Every other path -- PNG, non-JPEG formats,
-// and the stdlib decoder in general -- ignores hint and decodes at full
-// resolution, reporting Info.Reduced == false. Callers that do not need
-// Info can use DecodeBytes instead.
+// and WebP via the native decoder only). Every other path -- PNG, non-
+// JPEG/WebP formats, and the stdlib decoder in general -- ignores hint and
+// decodes at full resolution, reporting Info.Reduced == false. Callers that
+// do not need Info can use DecodeBytes instead.
 func DecodeBytesScaled(data []byte, origin string, hint Hint) (image.Image, Info, error) {
 	if !shouldTryNative(data, origin) {
 		img, err := decodeStdlib(data)
@@ -116,6 +116,14 @@ func shouldTryNative(data []byte, origin string) bool {
 		return false
 	}
 	if isJPEGData(data) || hasJPEGExt(origin) {
+		return true
+	}
+	if isWebPData(data) || hasWebPExt(origin) {
+		// Unlike PNG, WebP has no small-image threshold: the pure-Go
+		// golang.org/x/image/webp fallback is dramatically slower than the
+		// native decoder at every size (measured ~582ms / ~51.6 MPix/s for
+		// a 30MP image, versus low milliseconds natively), so there is no
+		// image small enough for the stdlib path to be worth preferring.
 		return true
 	}
 	if !isPNGData(data) && !hasPNGExt(origin) {
@@ -163,6 +171,15 @@ func isJPEGData(data []byte) bool {
 	return len(data) >= 2 && data[0] == 0xff && data[1] == 0xd8
 }
 
+// isWebPData reports whether data starts with a RIFF/WEBP container header:
+// bytes 0-3 "RIFF", bytes 8-11 "WEBP" (bytes 4-7 are the RIFF chunk size,
+// which this check does not need to validate).
+func isWebPData(data []byte) bool {
+	return len(data) >= 12 &&
+		data[0] == 'R' && data[1] == 'I' && data[2] == 'F' && data[3] == 'F' &&
+		data[8] == 'W' && data[9] == 'E' && data[10] == 'B' && data[11] == 'P'
+}
+
 func hasPNGExt(path string) bool {
 	ext := strings.ToLower(filepath.Ext(path))
 	return ext == ".png"
@@ -171,4 +188,9 @@ func hasPNGExt(path string) bool {
 func hasJPEGExt(path string) bool {
 	ext := strings.ToLower(filepath.Ext(path))
 	return ext == ".jpg" || ext == ".jpeg"
+}
+
+func hasWebPExt(path string) bool {
+	ext := strings.ToLower(filepath.Ext(path))
+	return ext == ".webp"
 }
