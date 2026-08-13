@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/hajimehoshi/ebiten/v2"
+
+	"nv/internal/imgdecode"
 )
 
 func TestPureApplyConfigResultUpdatesStatus(t *testing.T) {
@@ -1287,5 +1289,87 @@ func TestPureWheelOnlyFrameDoesNotDeferActionThatAlsoUsesLeftClick(t *testing.T)
 
 	if !handler.shouldDeferLeftClickAction("next", true) {
 		t.Fatalf("left-click next action was not deferred")
+	}
+}
+
+// TestPureDecodeBudgetHint exercises decodeBudgetForSlot's pure core
+// directly, with an arbitrary device scale factor, so it doesn't need a live
+// Ebiten monitor (decodeBudgetForSlot itself calls
+// ebiten.Monitor().DeviceScaleFactor(); see its doc comment).
+func TestPureDecodeBudgetHint(t *testing.T) {
+	tests := []struct {
+		name        string
+		mode        ZoomMode
+		logicalW    int
+		logicalH    int
+		deviceScale float64
+		bookSlot    bool
+		want        imgdecode.Hint
+	}{
+		{
+			name: "fit_window_single_1x_scale",
+			mode: ZoomModeFitWindow, logicalW: 1920, logicalH: 1080, deviceScale: 1.0,
+			want: imgdecode.Hint{MaxWidth: 1920, MaxHeight: 1080},
+		},
+		{
+			name: "fit_window_single_2x_device_scale",
+			mode: ZoomModeFitWindow, logicalW: 1920, logicalH: 1080, deviceScale: 2.0,
+			want: imgdecode.Hint{MaxWidth: 3840, MaxHeight: 2160},
+		},
+		{
+			name: "fit_width_single_only_constrains_width",
+			mode: ZoomModeFitWidth, logicalW: 1920, logicalH: 1080, deviceScale: 1.0,
+			want: imgdecode.Hint{MaxWidth: 1920},
+		},
+		{
+			name: "fit_height_single_only_constrains_height",
+			mode: ZoomModeFitHeight, logicalW: 1920, logicalH: 1080, deviceScale: 1.0,
+			want: imgdecode.Hint{MaxHeight: 1080},
+		},
+		{
+			name: "manual_always_unconstrained_regardless_of_scale",
+			mode: ZoomModeManual, logicalW: 1920, logicalH: 1080, deviceScale: 2.0,
+			want: imgdecode.Hint{},
+		},
+		{
+			name: "manual_book_slot_still_unconstrained",
+			mode: ZoomModeManual, logicalW: 1920, logicalH: 1080, deviceScale: 1.0, bookSlot: true,
+			want: imgdecode.Hint{},
+		},
+		{
+			name: "fit_window_book_slot_halves_width_minus_gap",
+			mode: ZoomModeFitWindow, logicalW: 1600, logicalH: 900, deviceScale: 1.0, bookSlot: true,
+			want: imgdecode.Hint{MaxWidth: 795, MaxHeight: 900}, // (1600-imageGap)/2 = (1600-10)/2 = 795
+		},
+		{
+			name: "fit_window_book_slot_rounds_up_fractional_pixel",
+			mode: ZoomModeFitWindow, logicalW: 1601, logicalH: 900, deviceScale: 1.0, bookSlot: true,
+			want: imgdecode.Hint{MaxWidth: 796, MaxHeight: 900}, // (1601-10)/2 = 795.5 -> ceil 796
+		},
+		{
+			name: "fit_width_book_slot_with_device_scale",
+			mode: ZoomModeFitWidth, logicalW: 1000, logicalH: 800, deviceScale: 1.5, bookSlot: true,
+			want: imgdecode.Hint{MaxWidth: 745}, // (1000*1.5-10)/2 = (1500-10)/2 = 745
+		},
+		{
+			name: "fit_height_book_slot_does_not_halve_height",
+			mode: ZoomModeFitHeight, logicalW: 1600, logicalH: 900, deviceScale: 1.0, bookSlot: true,
+			want: imgdecode.Hint{MaxHeight: 900},
+		},
+		{
+			name: "zero_logical_size_before_first_layout_is_unconstrained",
+			mode: ZoomModeFitWindow, logicalW: 0, logicalH: 0, deviceScale: 1.0,
+			want: imgdecode.Hint{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := decodeBudgetHint(tt.mode, tt.logicalW, tt.logicalH, tt.deviceScale, tt.bookSlot)
+			if got != tt.want {
+				t.Fatalf("decodeBudgetHint(%v, %d, %d, %v, bookSlot=%v) = %+v, want %+v",
+					tt.mode, tt.logicalW, tt.logicalH, tt.deviceScale, tt.bookSlot, got, tt.want)
+			}
+		})
 	}
 }

@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"fmt"
-	"image"
 	"image/color"
 	"math"
 	"sort"
@@ -39,7 +38,7 @@ type Renderer struct {
 	helpFontSource *text.GoTextFaceSource
 	lastSnapshot   RenderStateSnapshot // Previous frame's state for comparison
 	hasSnapshot    bool                // Whether lastSnapshot holds a valid snapshot
-	tilePointCache map[image.Point]tileScreenPoint
+	tilePointCache map[canvasPoint]tileScreenPoint
 }
 
 // NewRenderer creates a new Renderer
@@ -53,7 +52,7 @@ func NewRenderer(renderState RenderState) *Renderer {
 	return &Renderer{
 		renderState:    renderState,
 		helpFontSource: s,
-		tilePointCache: make(map[image.Point]tileScreenPoint),
+		tilePointCache: make(map[canvasPoint]tileScreenPoint),
 	}
 }
 
@@ -712,6 +711,16 @@ type tileScreenPoint struct {
 	y float32
 }
 
+// canvasPoint is a point in the source-pixel canvas (see
+// calculateDisplayLayout), used as the transformedTilePoint cache key. It is
+// float64 (rather than image.Point's int) because a reduced-texture tile's
+// canvas-space corner is imageX/imageY (integer) plus a texture-pixel
+// coordinate scaled by that image's textureToSourceScale, which is not
+// generally an integer.
+type canvasPoint struct {
+	x, y float64
+}
+
 var tileTriangleIndices = []uint16{0, 1, 2, 1, 2, 3}
 
 // drawImagesDirect draws images (single or book mode) without any mode checking.
@@ -730,8 +739,14 @@ func (r *Renderer) drawImagesDirect(screen *ebiten.Image, leftImg, rightImg Disp
 	}
 }
 
+// calculateDisplayLayout arranges leftImg/rightImg into a canvas measured in
+// source pixels (DisplayImage.SourceBounds), not decoded-texture pixels
+// (DisplayImage.Bounds) -- see getTransformedImageSize in game_viewport.go
+// for why zoom/fit-scale math needs the source-space size. The actual
+// (possibly smaller) texture is placed into this canvas at draw time via
+// textureToSourceScale.
 func (r *Renderer) calculateDisplayLayout(leftImg, rightImg DisplayImage) displayLayout {
-	leftBounds := leftImg.Bounds()
+	leftBounds := leftImg.SourceBounds()
 	leftW, leftH := leftBounds.Dx(), leftBounds.Dy()
 
 	layout := displayLayout{
@@ -742,7 +757,7 @@ func (r *Renderer) calculateDisplayLayout(leftImg, rightImg DisplayImage) displa
 	}
 
 	if rightImg != nil {
-		rightBounds := rightImg.Bounds()
+		rightBounds := rightImg.SourceBounds()
 		rightW, rightH := rightBounds.Dx(), rightBounds.Dy()
 		layout.canvasW = leftW + rightW + imageGap
 		layout.canvasH = int(math.Max(float64(leftH), float64(rightH)))
@@ -803,14 +818,30 @@ func (r *Renderer) calculateDisplayTransform(screen *ebiten.Image, imageW, image
 	return scale, offsetX, offsetY
 }
 
+// calculateCanvasTransform builds the shared canvas(source-pixel)->screen
+// transform used by the tiled draw path (displayTileVertices), where each
+// tile's own texture->source scaling is applied separately in Go arithmetic
+// before this transform runs (see drawDisplayImageTiles) rather than baked
+// into the matrix, because a single shared transform cannot carry two
+// different per-image scales (left and right images can be reduced by
+// different amounts). Passing imgScale=1 here is exactly that: "no
+// texture->source scaling baked in."
 func (r *Renderer) calculateCanvasTransform(layout displayLayout, scale, offsetX, offsetY float64) ebiten.GeoM {
-	return r.calculateImageTransform(layout, scale, offsetX, offsetY, 0, 0)
+	return r.calculateImageTransform(layout, scale, offsetX, offsetY, 0, 0, 1)
 }
 
-func (r *Renderer) calculateImageTransform(layout displayLayout, scale, offsetX, offsetY, imageX, imageY float64) ebiten.GeoM {
+// calculateImageTransform builds a texture(pixel)->screen transform for one
+// image. imgScale (see textureToSourceScale) converts the image's own
+// texture-pixel coordinates into source-pixel-equivalent units *before*
+// imageX/imageY -- the image's source-space position within the canvas --
+// is added, so a reduced (budget-tier) texture still lands in the same
+// on-screen place and size a full-resolution decode of the same source
+// image would.
+func (r *Renderer) calculateImageTransform(layout displayLayout, scale, offsetX, offsetY, imageX, imageY, imgScale float64) ebiten.GeoM {
 	centerX := float64(layout.canvasW) / 2
 	centerY := float64(layout.canvasH) / 2
 	var transform ebiten.GeoM
+	transform.Scale(imgScale, imgScale)
 	transform.Translate(imageX, imageY)
 	transform.Translate(-centerX, -centerY)
 
@@ -830,14 +861,36 @@ func (r *Renderer) calculateImageTransform(layout displayLayout, scale, offsetX,
 	return transform
 }
 
+// textureToSourceScale reports the scale that converts one of img's own
+// texture-pixel coordinates into source-pixel-equivalent units (see
+// DisplayImage.SourceBounds). It is 1 unless img was decoded from a reduced
+// (budget-tier) hint, in which case SourceBounds() is strictly larger than
+// Bounds() and this scales texture pixels up to match. A single scalar
+// (rather than separate X/Y factors) is deliberate: ZoomLevel and every fit
+// scale in this codebase are isotropic, and imgdecode's contain scaling
+// preserves the source aspect ratio, so X and Y ratios are the same value
+// (up to the codec's own rounding, which is negligible here).
+func textureToSourceScale(img DisplayImage) float64 {
+	bounds := img.Bounds()
+	if bounds.Dx() <= 0 {
+		return 1
+	}
+	return float64(img.SourceBounds().Dx()) / float64(bounds.Dx())
+}
+
 func (r *Renderer) drawDisplayImageTiles(screen *ebiten.Image, img DisplayImage, imageX, imageY int, layout displayLayout, scale, offsetX, offsetY float64, transform ebiten.GeoM) {
 	tiles := img.Tiles()
+	imgScale := textureToSourceScale(img)
 	if len(tiles) == 1 && tiles[0].SrcX == 0 && tiles[0].SrcY == 0 {
 		tile := tiles[0]
 		if tile.Image == nil {
 			return
 		}
 
+		// tile.X/tile.Y are always 0 in this single-tile branch, so
+		// imageX+tile.X is purely the image's source-space canvas offset;
+		// calculateImageTransform applies imgScale to the texture's own raw
+		// pixel coordinates before that offset is added.
 		op := &ebiten.DrawImageOptions{Filter: ebiten.FilterLinear}
 		op.GeoM = r.calculateImageTransform(
 			layout,
@@ -846,6 +899,7 @@ func (r *Renderer) drawDisplayImageTiles(screen *ebiten.Image, img DisplayImage,
 			offsetY,
 			float64(imageX+tile.X),
 			float64(imageY+tile.Y),
+			imgScale,
 		)
 		screen.DrawImage(tile.Image, op)
 		return
@@ -857,21 +911,27 @@ func (r *Renderer) drawDisplayImageTiles(screen *ebiten.Image, img DisplayImage,
 			continue
 		}
 
-		vertices := r.displayTileVertices(tile, imageX, imageY, transform)
+		vertices := r.displayTileVertices(tile, imageX, imageY, imgScale, transform)
 		screen.DrawTriangles(vertices[:], tileTriangleIndices, tile.Image, op)
 	}
 }
 
-func (r *Renderer) displayTileVertices(tile DisplayTile, imageX, imageY int, transform ebiten.GeoM) [4]ebiten.Vertex {
-	x0 := imageX + tile.X
-	y0 := imageY + tile.Y
-	x1 := x0 + tile.W
-	y1 := y0 + tile.H
+// displayTileVertices places tile (in its own texture-pixel space) into the
+// shared source-pixel canvas by scaling its corners by imgScale *before*
+// adding imageX/imageY (the image's already source-space canvas offset),
+// then runs the result through the shared canvas->screen transform. See
+// calculateCanvasTransform for why this scaling can't be baked into that
+// shared transform instead.
+func (r *Renderer) displayTileVertices(tile DisplayTile, imageX, imageY int, imgScale float64, transform ebiten.GeoM) [4]ebiten.Vertex {
+	x0 := float64(imageX) + float64(tile.X)*imgScale
+	y0 := float64(imageY) + float64(tile.Y)*imgScale
+	x1 := float64(imageX) + float64(tile.X+tile.W)*imgScale
+	y1 := float64(imageY) + float64(tile.Y+tile.H)*imgScale
 
-	p00 := r.transformedTilePoint(image.Pt(x0, y0), transform)
-	p10 := r.transformedTilePoint(image.Pt(x1, y0), transform)
-	p01 := r.transformedTilePoint(image.Pt(x0, y1), transform)
-	p11 := r.transformedTilePoint(image.Pt(x1, y1), transform)
+	p00 := r.transformedTilePoint(canvasPoint{x0, y0}, transform)
+	p10 := r.transformedTilePoint(canvasPoint{x1, y0}, transform)
+	p01 := r.transformedTilePoint(canvasPoint{x0, y1}, transform)
+	p11 := r.transformedTilePoint(canvasPoint{x1, y1}, transform)
 
 	sx0 := float32(tile.SrcX)
 	sy0 := float32(tile.SrcY)
@@ -886,18 +946,22 @@ func (r *Renderer) displayTileVertices(tile DisplayTile, imageX, imageY int, tra
 	}
 }
 
-func (r *Renderer) transformedTilePoint(point image.Point, transform ebiten.GeoM) tileScreenPoint {
+func (r *Renderer) transformedTilePoint(point canvasPoint, transform ebiten.GeoM) tileScreenPoint {
 	// Sharing the already-rounded float32 result is essential: independently
 	// transforming the bottom of one tile and the top of the next can put the
 	// two DrawImage quads on opposite sides of Ebitengine's vertex snapping.
+	// Adjacent tiles within the same image compute this point from the exact
+	// same imageX/tile-boundary/imgScale values (see displayTileVertices),
+	// so it is bit-identical across tiles without needing to round to an
+	// integer canvas position first.
 	if transformed, ok := r.tilePointCache[point]; ok {
 		return transformed
 	}
 
-	x, y := transform.Apply(float64(point.X), float64(point.Y))
+	x, y := transform.Apply(point.x, point.y)
 	transformed := tileScreenPoint{x: float32(x), y: float32(y)}
 	if r.tilePointCache == nil {
-		r.tilePointCache = make(map[image.Point]tileScreenPoint)
+		r.tilePointCache = make(map[canvasPoint]tileScreenPoint)
 	}
 	r.tilePointCache[point] = transformed
 	return transformed

@@ -358,17 +358,25 @@ func (pm *PreloadManager) preloadImage(idx int) {
 	if !ok {
 		return
 	}
-	// Preloading always targets full resolution, matching every other
-	// caller in this change (see requestTier's doc comment).
-	cacheKey := imgCacheKey{path: imagePath.Path, tier: tierFull}
+	// Preload at the same budget the display path uses, so a page that is
+	// preloaded and then navigated to is decoded once, not once per tier.
+	hint := pm.imageManager.decodeBudget()
+	tier := requestTier(hint)
+	cacheKey := imgCacheKey{path: imagePath.Path, tier: tier}
 
-	// Check if already in cache
+	// A full-resolution entry satisfies any budget, so treat it as cached
+	// too rather than decoding a smaller duplicate of something we already
+	// hold at better quality.
+	if _, ok := pm.imageManager.cache.Get(imgCacheKey{path: imagePath.Path, tier: tierFull}); ok {
+		debugKV("cache", "preload_skip", "reason", "already_cached", "idx", idx, "path", cacheKey.path)
+		return
+	}
 	if _, ok := pm.imageManager.cache.Get(cacheKey); ok {
 		debugKV("cache", "preload_skip", "reason", "already_cached", "idx", idx, "path", cacheKey.path)
 		return // Already cached
 	}
 
-	pm.imageManager.requestPreload(imagePath, tierFull)
+	pm.imageManager.requestPreload(imagePath, tier, hint)
 	pm.updateQueueSize(len(pm.imageManager.preloadRequests))
 }
 
@@ -383,6 +391,9 @@ type ImageManager interface {
 	// queues a refinement itself beyond its normal cache-miss load) and is
 	// safe to call every frame.
 	EnsureResolution(idx int, hint imgdecode.Hint)
+	// SetDecodeBudget publishes the box images are currently displayed in
+	// so preloading decodes at the same size the display path asks for.
+	SetDecodeBudget(hint imgdecode.Hint)
 	GetPath(idx int) (ImagePath, bool)
 	SetPaths(paths []ImagePath)
 	GetPathsCount() int
@@ -440,9 +451,13 @@ func (k loadSourceKind) String() string {
 
 // DefaultImageManager implements ImageManager
 type DefaultImageManager struct {
-	paths             []ImagePath
-	cache             *lru.Cache[imgCacheKey, DisplayImage]
-	mu                sync.RWMutex
+	paths []ImagePath
+	cache *lru.Cache[imgCacheKey, DisplayImage]
+	mu    sync.RWMutex
+	// displayBudget is the box the viewer currently shows images in,
+	// published by SetDecodeBudget and read by the preload goroutine.
+	// Guarded by mu.
+	displayBudget     imgdecode.Hint
 	preloadManager    *PreloadManager
 	maxImageDimension atomic.Int64
 	loadRequests      chan loadRequest
@@ -474,7 +489,15 @@ type DefaultImageManager struct {
 type loadRequest struct {
 	path     ImagePath
 	cacheKey imgCacheKey
-	source   loadSourceKind
+	// hint is the exact imgdecode.Hint the decoder should target. It is
+	// always imgdecode.Hint{} (unconstrained) for a tierFull request --
+	// tierFull is the single maximal target regardless of whatever hint (if
+	// any) triggered the escalation to it -- and the caller-requested box
+	// for a tierBudget request. Every enqueue site below is responsible for
+	// getting this right at enqueue time; processLoadRequest trusts it
+	// as-is.
+	hint   imgdecode.Hint
+	source loadSourceKind
 }
 
 // loadTimings records per-phase durations for a single image load, used to
@@ -650,7 +673,7 @@ func (m *DefaultImageManager) processLoadRequest(req loadRequest) {
 		m.inflightMu.Unlock()
 	}()
 
-	img, timings, err := m.loadImage(req.path)
+	img, timings, err := m.loadImage(req.path, req.hint)
 	if err != nil {
 		errorKV("cache", "cache_load_failed",
 			"path", req.path.Path,
@@ -712,12 +735,30 @@ func formatMillis(d time.Duration) string {
 	return strconv.FormatFloat(float64(d.Nanoseconds())/1e6, 'f', 2, 64)
 }
 
-func (m *DefaultImageManager) requestAsyncLoad(imagePath ImagePath, tier resTier) {
-	m.enqueueLoadRequest(imagePath, tier, loadSourceAsync)
+func (m *DefaultImageManager) requestAsyncLoad(imagePath ImagePath, tier resTier, hint imgdecode.Hint) {
+	m.enqueueLoadRequest(imagePath, tier, hint, loadSourceAsync)
 }
 
-func (m *DefaultImageManager) requestPreload(imagePath ImagePath, tier resTier) {
-	m.enqueueLoadRequest(imagePath, tier, loadSourcePreload)
+func (m *DefaultImageManager) requestPreload(imagePath ImagePath, tier resTier, hint imgdecode.Hint) {
+	m.enqueueLoadRequest(imagePath, tier, hint, loadSourcePreload)
+}
+
+// SetDecodeBudget records the box the viewer is currently displaying images
+// in. Preloading happens on its own goroutine with no access to the viewer's
+// zoom state, so without this it would warm the cache at full resolution
+// while the display path asked for a budget-sized decode -- decoding the
+// same page twice. The viewer updates this whenever the budget can change
+// (see Game.checkDecodeBudget).
+func (m *DefaultImageManager) SetDecodeBudget(hint imgdecode.Hint) {
+	m.mu.Lock()
+	m.displayBudget = hint
+	m.mu.Unlock()
+}
+
+func (m *DefaultImageManager) decodeBudget() imgdecode.Hint {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.displayBudget
 }
 
 // queueFor picks the channel (and its debug name) a request of kind should
@@ -734,7 +775,7 @@ func (m *DefaultImageManager) queueFor(kind loadSourceKind) (chan loadRequest, s
 	}
 }
 
-func (m *DefaultImageManager) enqueueLoadRequest(imagePath ImagePath, tier resTier, kind loadSourceKind) {
+func (m *DefaultImageManager) enqueueLoadRequest(imagePath ImagePath, tier resTier, hint imgdecode.Hint, kind loadSourceKind) {
 	cacheKey := imgCacheKey{path: imagePath.Path, tier: tier}
 	if _, ok := m.cache.Get(cacheKey); ok {
 		debugKV("cache", "cache_enqueue_skip",
@@ -760,7 +801,7 @@ func (m *DefaultImageManager) enqueueLoadRequest(imagePath ImagePath, tier resTi
 	m.inflight[cacheKey] = struct{}{}
 	m.inflightMu.Unlock()
 
-	req := loadRequest{path: imagePath, cacheKey: cacheKey, source: kind}
+	req := loadRequest{path: imagePath, cacheKey: cacheKey, hint: hint, source: kind}
 	queue, queueName := m.queueFor(kind)
 
 	select {
@@ -916,10 +957,11 @@ func (m *DefaultImageManager) GetBookModeImages(idx int, rightToLeft bool, leftH
 
 // requestTier picks the cache tier a fresh (nothing cached yet) load
 // should target for hint. An unconstrained hint -- imgdecode.Hint{}, which
-// every call site in this change passes -- asks for the image outright, so
-// it goes straight to tierFull; a real constraint starts at tierBudget and
-// may later be escalated by EnsureResolution. This is the seam a future
-// change will use to request genuinely reduced decodes.
+// decodeBudgetForSlot returns for manual zoom (a deliberate full-resolution
+// inspection) and, as a startup edge case, before the window's logical size
+// is known -- asks for the image outright, so it goes straight to tierFull;
+// a real constraint (a fit-mode display budget) starts at tierBudget and
+// may later be escalated by EnsureResolution.
 func requestTier(hint imgdecode.Hint) resTier {
 	if hint.MaxWidth > 0 || hint.MaxHeight > 0 {
 		return tierBudget
@@ -953,7 +995,7 @@ func (m *DefaultImageManager) GetImage(idx int, hint imgdecode.Hint) DisplayImag
 
 	debugKV("cache", "cache_lookup_miss", "idx", idx, "path", imagePath.Path)
 	m.startLoadWorker()
-	m.requestAsyncLoad(imagePath, requestTier(hint))
+	m.requestAsyncLoad(imagePath, requestTier(hint), hint)
 	return m.loadingPlaceholder
 }
 
@@ -1024,7 +1066,9 @@ func (m *DefaultImageManager) requestFullResolution(imagePath ImagePath) {
 	m.fullRequested[imagePath.Path] = struct{}{}
 	m.fullRequestedMu.Unlock()
 
-	m.enqueueLoadRequest(imagePath, tierFull, loadSourceRefine)
+	// tierFull always decodes unconstrained -- it's the maximal target, not
+	// whatever hint (if any) EnsureResolution's caller happened to pass.
+	m.enqueueLoadRequest(imagePath, tierFull, imgdecode.Hint{}, loadSourceRefine)
 }
 
 // getPath safely returns the ImagePath at index if available
@@ -1041,15 +1085,11 @@ func (m *DefaultImageManager) getPath(idx int) (ImagePath, bool) {
 
 // Image loading functions
 
-func (m *DefaultImageManager) loadImageFromBytes(data []byte, path string) (DisplayImage, loadTimings, error) {
+func (m *DefaultImageManager) loadImageFromBytes(data []byte, path string, hint imgdecode.Hint) (DisplayImage, loadTimings, error) {
 	var timings loadTimings
 
-	// hint is Hint{} (unconstrained) for now: this only switches the
-	// decode boundary onto the *Scaled entry points so Info -- and thus
-	// DisplayImage.SourceBounds -- is populated. Actually requesting a
-	// reduced decode is a later change.
 	decodeStart := time.Now()
-	decoded, info, err := imgdecode.DecodeBytesScaled(data, path, imgdecode.Hint{})
+	decoded, info, err := imgdecode.DecodeBytesScaled(data, path, hint)
 	timings.decode = time.Since(decodeStart)
 	if err != nil {
 		return nil, timings, fmt.Errorf("decoding %s: %v", path, err)
@@ -1061,14 +1101,16 @@ func (m *DefaultImageManager) loadImageFromBytes(data []byte, path string) (Disp
 	return img, timings, err
 }
 
-func (m *DefaultImageManager) loadImage(imagePath ImagePath) (DisplayImage, loadTimings, error) {
+// loadImage decodes imagePath to hint -- the exact box loadRequest.hint
+// carried from enqueue time (see its doc comment for the tierFull/tierBudget
+// split).
+func (m *DefaultImageManager) loadImage(imagePath ImagePath, hint imgdecode.Hint) (DisplayImage, loadTimings, error) {
 	if imagePath.ArchivePath == "" {
 		// imgdecode.DecodeFileScaled does its own os.ReadFile internally,
 		// so read time isn't separable from decode time on this path;
-		// read_ms stays zero here (see loadTimings doc comment). hint is
-		// Hint{} for the same reason as loadImageFromBytes above.
+		// read_ms stays zero here (see loadTimings doc comment).
 		decodeStart := time.Now()
-		decoded, info, err := imgdecode.DecodeFileScaled(imagePath.Path, imgdecode.Hint{})
+		decoded, info, err := imgdecode.DecodeFileScaled(imagePath.Path, hint)
 		timings := loadTimings{decode: time.Since(decodeStart)}
 		if err != nil {
 			return nil, timings, fmt.Errorf("decoding %s: %v", imagePath.Path, err)
@@ -1087,7 +1129,7 @@ func (m *DefaultImageManager) loadImage(imagePath ImagePath) (DisplayImage, load
 		return nil, loadTimings{read: readDur}, err
 	}
 
-	img, timings, err := m.loadImageFromBytes(data, imagePath.EntryPath)
+	img, timings, err := m.loadImageFromBytes(data, imagePath.EntryPath, hint)
 	timings.read = readDur
 	return img, timings, err
 }

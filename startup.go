@@ -96,6 +96,9 @@ func newGameFromStartup(configResult ConfigLoadResult, configPath string, args [
 	}
 
 	g.resetZoomToInitial()
+	// Publish the decode budget before the first preload is queued, so the
+	// very first pages are decoded at display size rather than in full.
+	imageManager.SetDecodeBudget(g.decodeBudgetForSlot(false))
 	imageManager.StartPreload(0, NavigationForward)
 
 	keybindingManager := NewKeybindingManager(config.Keybindings)

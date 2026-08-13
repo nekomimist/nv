@@ -83,6 +83,7 @@ func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {
 		g.currentLogicalW = outsideWidth
 		g.currentLogicalH = outsideHeight
 		g.forceRedrawFrames = 1
+		g.checkDecodeBudget()
 		debugKV("viewport", "layout_changed",
 			"logical_width", outsideWidth,
 			"logical_height", outsideHeight,

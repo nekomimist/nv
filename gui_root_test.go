@@ -678,16 +678,16 @@ func TestGUI_DisplayTileVerticesShareExactTransformedEdges(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			game := &Game{rotationAngle: tt.angle, flipH: tt.flipH, flipV: tt.flipV}
-			renderer := &Renderer{renderState: game, tilePointCache: make(map[image.Point]tileScreenPoint)}
+			renderer := &Renderer{renderState: game, tilePointCache: make(map[canvasPoint]tileScreenPoint)}
 			layout := displayLayout{canvasW: 5000, canvasH: 7000, transformedW: 5000, transformedH: 7000}
 			if tt.angle == 90 || tt.angle == 270 {
 				layout.transformedW, layout.transformedH = layout.canvasH, layout.canvasW
 			}
 			transform := renderer.calculateCanvasTransform(layout, tt.scale, 73.25, tt.offset)
 
-			leftVertices := renderer.displayTileVertices(topLeft, 19, 23, transform)
-			rightVertices := renderer.displayTileVertices(topRight, 19, 23, transform)
-			bottomVertices := renderer.displayTileVertices(bottomLeft, 19, 23, transform)
+			leftVertices := renderer.displayTileVertices(topLeft, 19, 23, 1, transform)
+			rightVertices := renderer.displayTileVertices(topRight, 19, 23, 1, transform)
+			bottomVertices := renderer.displayTileVertices(bottomLeft, 19, 23, 1, transform)
 
 			assertSameVertexPosition(t, "horizontal top", leftVertices[1], rightVertices[0])
 			assertSameVertexPosition(t, "horizontal bottom", leftVertices[3], rightVertices[2])
@@ -708,5 +708,319 @@ func assertSameVertexPosition(t *testing.T, name string, a, b ebiten.Vertex) {
 	t.Helper()
 	if math.Float32bits(a.DstX) != math.Float32bits(b.DstX) || math.Float32bits(a.DstY) != math.Float32bits(b.DstY) {
 		t.Fatalf("%s edge differs: (%v,%v) vs (%v,%v)", name, a.DstX, a.DstY, b.DstX, b.DstY)
+	}
+}
+
+// TestGUI_BudgetToFullSwapDrawsSameOnScreenRect is the "no jump" property:
+// the whole reason ZoomLevel is measured in source pixels (ZoomState's doc
+// comment in game_viewport.go) is that replacing a budget-tier decode with
+// its full-resolution counterpart, at a fixed ZoomLevel, must never move or
+// resize the image on screen. Exercise that directly at the transform
+// level: same source image, same ZoomLevel/offset, only the decoded
+// texture size (and hence textureToSourceScale) differs.
+func TestGUI_BudgetToFullSwapDrawsSameOnScreenRect(t *testing.T) {
+	sourceBounds := image.Rect(0, 0, 4000, 3000)
+	budgetImg := &reducedDisplayImage{
+		DisplayImage: testDisplayImage(1000, 750),
+		sourceBounds: sourceBounds,
+	}
+	fullImg := &reducedDisplayImage{
+		DisplayImage: testDisplayImage(4000, 3000),
+		sourceBounds: sourceBounds,
+	}
+	if budgetImg.Bounds() == fullImg.Bounds() {
+		t.Fatal("test setup error: budget and full textures have the same Bounds()")
+	}
+
+	renderer := &Renderer{renderState: &Game{}, tilePointCache: make(map[canvasPoint]tileScreenPoint)}
+
+	budgetLayout := renderer.calculateDisplayLayout(budgetImg, nil)
+	fullLayout := renderer.calculateDisplayLayout(fullImg, nil)
+	if budgetLayout != fullLayout {
+		t.Fatalf("layout depends on decode tier: budget=%+v full=%+v", budgetLayout, fullLayout)
+	}
+
+	const zoomLevel = 1.7
+	const offsetX, offsetY = 12.5, -7.25
+
+	budgetTransform := renderer.calculateImageTransform(budgetLayout, zoomLevel, offsetX, offsetY,
+		float64(budgetLayout.leftX), float64(budgetLayout.leftY), textureToSourceScale(budgetImg))
+	fullTransform := renderer.calculateImageTransform(fullLayout, zoomLevel, offsetX, offsetY,
+		float64(fullLayout.leftX), float64(fullLayout.leftY), textureToSourceScale(fullImg))
+
+	bx0, by0 := budgetTransform.Apply(0, 0)
+	bx1, by1 := budgetTransform.Apply(float64(budgetImg.Bounds().Dx()), float64(budgetImg.Bounds().Dy()))
+	fx0, fy0 := fullTransform.Apply(0, 0)
+	fx1, fy1 := fullTransform.Apply(float64(fullImg.Bounds().Dx()), float64(fullImg.Bounds().Dy()))
+
+	const epsilon = 1e-9
+	if math.Abs(bx0-fx0) > epsilon || math.Abs(by0-fy0) > epsilon {
+		t.Fatalf("top-left corner differs after tier swap: budget=(%v,%v) full=(%v,%v)", bx0, by0, fx0, fy0)
+	}
+	if math.Abs(bx1-fx1) > epsilon || math.Abs(by1-fy1) > epsilon {
+		t.Fatalf("bottom-right corner differs after tier swap: budget=(%v,%v) full=(%v,%v)", bx1, by1, fx1, fy1)
+	}
+}
+
+// TestGUI_GetTransformedImageSizeUnaffectedByDecodeTier confirms the
+// upstream half of the no-jump property: the source-space canvas size that
+// drives updateZoomLevelForFitMode and clampPanToLimits must be identical
+// whether the currently cached image is a reduced budget-tier decode or the
+// full-resolution one.
+func TestGUI_GetTransformedImageSizeUnaffectedByDecodeTier(t *testing.T) {
+	sourceBounds := image.Rect(0, 0, 4000, 3000)
+	budgetImg := &reducedDisplayImage{DisplayImage: testDisplayImage(1000, 750), sourceBounds: sourceBounds}
+	fullImg := &reducedDisplayImage{DisplayImage: testDisplayImage(4000, 3000), sourceBounds: sourceBounds}
+
+	gBudget := &Game{displayContent: &DisplayContent{LeftImage: budgetImg}}
+	gFull := &Game{displayContent: &DisplayContent{LeftImage: fullImg}}
+
+	wBudget, hBudget := gBudget.getTransformedImageSize()
+	wFull, hFull := gFull.getTransformedImageSize()
+	if wBudget != wFull || hBudget != hFull {
+		t.Fatalf("getTransformedImageSize depends on decode tier: budget=(%d,%d) full=(%d,%d)", wBudget, hBudget, wFull, hFull)
+	}
+	if wBudget != 4000 || hBudget != 3000 {
+		t.Fatalf("getTransformedImageSize() = (%d,%d), want the source size (4000,3000)", wBudget, hBudget)
+	}
+}
+
+// TestGUI_ClampPanToLimitsUsesSourceBoundsForReducedImage confirms pan
+// clamping uses the source-space canvas (via getTransformedImageSize),
+// not the smaller decoded texture, once an image has been budget-decoded.
+func TestGUI_ClampPanToLimitsUsesSourceBoundsForReducedImage(t *testing.T) {
+	img := &reducedDisplayImage{
+		DisplayImage: testDisplayImage(500, 375),   // decoded (texture) size
+		sourceBounds: image.Rect(0, 0, 4000, 3000), // true source size
+	}
+	g := &Game{
+		zoomState:       NewZoomState(),
+		displayContent:  &DisplayContent{LeftImage: img},
+		currentLogicalW: 800,
+		currentLogicalH: 600,
+	}
+	g.zoomState.Mode = ZoomModeManual
+	g.zoomState.Level = 1.0
+	g.zoomState.PanOffsetX = 1e9
+	g.zoomState.PanOffsetY = 1e9
+
+	g.clampPanToLimits()
+
+	deviceScale := ebiten.Monitor().DeviceScaleFactor()
+	w := float64(g.currentLogicalW) * deviceScale
+	h := float64(g.currentLogicalH) * deviceScale
+	sw := float64(img.SourceBounds().Dx()) * g.zoomState.Level
+	sh := float64(img.SourceBounds().Dy()) * g.zoomState.Level
+	wantMaxPanX := sw/2 - w/2
+	wantMaxPanY := sh/2 - h/2
+
+	if g.zoomState.PanOffsetX != wantMaxPanX {
+		t.Fatalf("PanOffsetX = %v, want %v (clamp must use SourceBounds, not the smaller decoded Bounds)", g.zoomState.PanOffsetX, wantMaxPanX)
+	}
+	if g.zoomState.PanOffsetY != wantMaxPanY {
+		t.Fatalf("PanOffsetY = %v, want %v", g.zoomState.PanOffsetY, wantMaxPanY)
+	}
+
+	// Sanity: clamping against the smaller decoded Bounds instead would
+	// have produced a different limit, so this test actually distinguishes
+	// the two rather than passing vacuously.
+	boundsMaxPanX := float64(img.Bounds().Dx())*g.zoomState.Level/2 - w/2
+	if wantMaxPanX == boundsMaxPanX {
+		t.Fatal("test setup error: source-space and texture-space pan limits coincide")
+	}
+}
+
+// TestGUI_CheckDecodeBudgetRequestsRefinementWhenZoomedPastDecodedSize covers
+// checkDecodeBudget's trigger condition: drawn size (ZoomLevel *
+// SourceBounds) exceeds the decoded size, and a higher-resolution decode
+// exists to escalate to.
+func TestGUI_CheckDecodeBudgetRequestsRefinementWhenZoomedPastDecodedSize(t *testing.T) {
+	manager := NewImageManager(4).(*DefaultImageManager)
+	t.Cleanup(func() { manager.StopPreload() })
+
+	path := ImagePath{Path: "zoomed-in-refine-trigger.png"}
+	manager.SetPaths([]ImagePath{path})
+
+	budgetImg := &reducedDisplayImage{
+		DisplayImage: testDisplayImage(100, 75),
+		sourceBounds: image.Rect(0, 0, 1000, 750),
+	}
+	manager.cache.Add(imgCacheKey{path: path.Path, tier: tierBudget}, budgetImg)
+
+	g := &Game{
+		imageManager: manager,
+		zoomState:    NewZoomState(),
+		displayContent: &DisplayContent{
+			LeftImage: budgetImg,
+			Metadata:  DisplayMetadata{LeftPage: 1, ActualImages: 1},
+		},
+	}
+	g.zoomState.Level = 2.0 // drawn at 2.0*1000=2000px, decoded at only 100px
+
+	g.checkDecodeBudget()
+
+	manager.fullRequestedMu.Lock()
+	_, requested := manager.fullRequested[path.Path]
+	manager.fullRequestedMu.Unlock()
+	if !requested {
+		t.Fatal("expected checkDecodeBudget to request a full-resolution refinement when zoomed past the decoded size")
+	}
+}
+
+// TestGUI_CheckDecodeBudgetSkipsRefinementWhenNotYetZoomedPastDecodedSize
+// covers the other half of the trigger condition: a higher-resolution
+// decode exists, but the image isn't currently drawn beyond its decoded
+// size, so no refinement should be requested yet.
+func TestGUI_CheckDecodeBudgetSkipsRefinementWhenNotYetZoomedPastDecodedSize(t *testing.T) {
+	manager := NewImageManager(4).(*DefaultImageManager)
+	t.Cleanup(func() { manager.StopPreload() })
+
+	path := ImagePath{Path: "still-within-budget.png"}
+	manager.SetPaths([]ImagePath{path})
+
+	budgetImg := &reducedDisplayImage{
+		DisplayImage: testDisplayImage(1000, 750),
+		sourceBounds: image.Rect(0, 0, 2000, 1500),
+	}
+	manager.cache.Add(imgCacheKey{path: path.Path, tier: tierBudget}, budgetImg)
+
+	g := &Game{
+		imageManager: manager,
+		zoomState:    NewZoomState(),
+		displayContent: &DisplayContent{
+			LeftImage: budgetImg,
+			Metadata:  DisplayMetadata{LeftPage: 1, ActualImages: 1},
+		},
+	}
+	g.zoomState.Level = 0.4 // drawn at 0.4*2000=800px, comfortably within the 1000px decode
+
+	g.checkDecodeBudget()
+
+	manager.fullRequestedMu.Lock()
+	_, requested := manager.fullRequested[path.Path]
+	manager.fullRequestedMu.Unlock()
+	if requested {
+		t.Fatal("expected checkDecodeBudget not to request a refinement while still drawn within the decoded size")
+	}
+}
+
+// TestGUI_CheckDecodeBudgetSkipsRefinementAtSourceResolution is the PNG
+// case: SourceBounds() mirrors Bounds() (imgdecode.Info.Reduced is always
+// false), so there is no higher-resolution decode to escalate to no matter
+// how far zoomed in.
+func TestGUI_CheckDecodeBudgetSkipsRefinementAtSourceResolution(t *testing.T) {
+	manager := NewImageManager(4).(*DefaultImageManager)
+	t.Cleanup(func() { manager.StopPreload() })
+
+	path := ImagePath{Path: "already-full-refine-skip.png"}
+	manager.SetPaths([]ImagePath{path})
+
+	img := testDisplayImage(1000, 750)
+	manager.cache.Add(imgCacheKey{path: path.Path, tier: tierBudget}, img)
+
+	g := &Game{
+		imageManager: manager,
+		zoomState:    NewZoomState(),
+		displayContent: &DisplayContent{
+			LeftImage: img,
+			Metadata:  DisplayMetadata{LeftPage: 1, ActualImages: 1},
+		},
+	}
+	g.zoomState.Level = 4.0
+
+	g.checkDecodeBudget()
+
+	manager.fullRequestedMu.Lock()
+	_, requested := manager.fullRequested[path.Path]
+	manager.fullRequestedMu.Unlock()
+	if requested {
+		t.Fatal("expected checkDecodeBudget not to request a refinement when no higher-resolution decode exists")
+	}
+}
+
+// TestGUI_PageMetricsAtUsesSingleSlotBudget confirms pageMetricsAt threads
+// decodeBudgetForSlot(false) through to GetImage instead of an unconstrained
+// (always-full-resolution) hint.
+func TestGUI_PageMetricsAtUsesSingleSlotBudget(t *testing.T) {
+	images := []DisplayImage{testDisplayImage(200, 100)}
+	manager := &stubImageManager{
+		paths:  []ImagePath{{Path: "solo.png"}},
+		images: images,
+	}
+	g := &Game{
+		imageManager:    manager,
+		zoomState:       NewZoomState(),
+		currentLogicalW: 1200,
+		currentLogicalH: 800,
+	}
+	g.zoomState.Mode = ZoomModeFitWindow
+
+	metrics := g.pageMetricsAt(0)
+	if metrics.Width != 200 || metrics.Height != 100 {
+		t.Fatalf("pageMetricsAt() = %+v, want the stub image's own bounds", metrics)
+	}
+	if len(manager.getImageHints) != 1 {
+		t.Fatalf("GetImage called %d times, want 1", len(manager.getImageHints))
+	}
+
+	deviceScale := ebiten.Monitor().DeviceScaleFactor()
+	want := decodeBudgetHint(ZoomModeFitWindow, 1200, 800, deviceScale, false)
+	if manager.getImageHints[0] != want {
+		t.Fatalf("pageMetricsAt hint = %+v, want single-slot budget %+v", manager.getImageHints[0], want)
+	}
+}
+
+// TestGUI_CalculateDisplayContentUsesBookSlotBudgetInBookMode confirms a
+// two-up spread threads the halved (book-slot) decode budget through to
+// GetImage for both sides, not the full-window single-slot budget.
+func TestGUI_CalculateDisplayContentUsesBookSlotBudgetInBookMode(t *testing.T) {
+	images := []DisplayImage{
+		testDisplayImage(100, 150),
+		testDisplayImage(100, 150),
+	}
+	manager := &stubImageManager{
+		paths:  []ImagePath{{Path: "1.png"}, {Path: "2.png"}},
+		images: images,
+	}
+	g := &Game{
+		imageManager:    manager,
+		bookMode:        true,
+		config:          Config{AspectRatioThreshold: 1.5},
+		zoomState:       NewZoomState(),
+		currentLogicalW: 1600,
+		currentLogicalH: 900,
+	}
+	g.zoomState.Mode = ZoomModeFitWidth
+
+	g.calculateDisplayContent()
+
+	if g.displayContent == nil || g.displayContent.Metadata.ActualImages != 2 {
+		t.Fatalf("expected a book-mode spread, got %+v", g.displayContent)
+	}
+
+	// Both navlogic.PlanDisplay (spread-pairing probes) and
+	// logDisplayPlan's debug decision logging also call pageMetricsAt
+	// (single-slot budget) around the two displayImageAt calls this test
+	// cares about, so getImageHints holds more than just those two. Instead
+	// of relying on position, just confirm the book-slot budget was
+	// actually requested (for both LeftIndex and RightIndex) somewhere in
+	// the sequence.
+	deviceScale := ebiten.Monitor().DeviceScaleFactor()
+	wantHint := decodeBudgetHint(ZoomModeFitWidth, 1600, 900, deviceScale, true)
+	count := 0
+	for _, got := range manager.getImageHints {
+		if got == wantHint {
+			count++
+		}
+	}
+	if count < 2 {
+		t.Fatalf("book-slot budget %+v requested %d times in %v, want at least 2 (displayImageAt for LeftIndex and RightIndex)",
+			wantHint, count, manager.getImageHints)
+	}
+
+	singleSlotHint := decodeBudgetHint(ZoomModeFitWidth, 1600, 900, deviceScale, false)
+	if wantHint.MaxWidth >= singleSlotHint.MaxWidth {
+		t.Fatalf("book-slot budget MaxWidth = %d, want less than the single-slot budget %d (must split the window width)",
+			wantHint.MaxWidth, singleSlotHint.MaxWidth)
 	}
 }

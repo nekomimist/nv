@@ -35,11 +35,13 @@ func (g *Game) pageMetricsAt(idx int) navlogic.PageMetrics {
 
 	// pageMetricsAt only needs the aspect ratio, and a reduced decode
 	// preserves the source's aspect ratio (imgdecode.containTarget always
-	// scales both axes by the same factor), so an unconstrained hint is
-	// correct here even once a later change starts requesting genuinely
-	// reduced decodes elsewhere -- no display budget is needed just to
-	// learn width/height proportions.
-	img := g.imageManager.GetImage(idx, imgdecode.Hint{})
+	// scales both axes by the same factor), so the ordinary single-slot
+	// display budget is enough here -- no need to force a full decode just
+	// to learn width/height proportions. idx here is a generic "any page"
+	// probe (e.g. the book-mode neighbor being considered for pairing), not
+	// necessarily the currently displayed slot, so the non-book-slot budget
+	// is used regardless of the current book-mode state.
+	img := g.imageManager.GetImage(idx, g.decodeBudgetForSlot(false))
 	if img == nil {
 		return navlogic.PageMetrics{}
 	}
@@ -51,11 +53,11 @@ func (g *Game) pageMetricsAt(idx int) navlogic.PageMetrics {
 	}
 }
 
-func (g *Game) displayImageAt(idx int) DisplayImage {
+func (g *Game) displayImageAt(idx int, hint imgdecode.Hint) DisplayImage {
 	if idx < 0 {
 		return nil
 	}
-	return g.imageManager.GetImage(idx, imgdecode.Hint{})
+	return g.imageManager.GetImage(idx, hint)
 }
 
 func (g *Game) pageAspectAt(idx int) float64 {
@@ -146,9 +148,14 @@ func (g *Game) calculateDisplayContent() {
 		return
 	}
 
+	// A spread (ActualImages == 2) means both LeftImage and RightImage are
+	// book-mode slots sharing the window width; anything else is a single
+	// full-width slot, including the RightIndex == -1 case where
+	// displayImageAt short-circuits to nil without touching the hint.
+	hint := g.decodeBudgetForSlot(plan.ActualImages == 2)
 	g.displayContent = &DisplayContent{
-		LeftImage:  g.displayImageAt(plan.LeftIndex),
-		RightImage: g.displayImageAt(plan.RightIndex),
+		LeftImage:  g.displayImageAt(plan.LeftIndex, hint),
+		RightImage: g.displayImageAt(plan.RightIndex, hint),
 		Metadata: DisplayMetadata{
 			LeftPage:     plan.LeftIndex + 1,
 			RightPage:    plan.RightIndex + 1,

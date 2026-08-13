@@ -10,6 +10,12 @@ type stubImageManager struct {
 	paths             []ImagePath
 	images            []DisplayImage
 	preloadDirections []NavigationDirection
+	// getImageHints records every hint passed to GetImage, in call order,
+	// so tests can verify a caller (e.g. calculateDisplayContent) computed
+	// and threaded through the right decode budget.
+	getImageHints []imgdecode.Hint
+	// decodeBudget records the last hint published via SetDecodeBudget.
+	decodeBudget imgdecode.Hint
 }
 
 func testDisplayImage(w, h int) DisplayImage {
@@ -25,6 +31,7 @@ func testDisplayImages(images ...*ebiten.Image) []DisplayImage {
 }
 
 func (m *stubImageManager) GetImage(idx int, hint imgdecode.Hint) DisplayImage {
+	m.getImageHints = append(m.getImageHints, hint)
 	if idx < 0 || idx >= len(m.images) {
 		return nil
 	}
@@ -39,6 +46,8 @@ func (m *stubImageManager) GetBookModeImages(idx int, rightToLeft bool, leftHint
 }
 
 func (m *stubImageManager) EnsureResolution(idx int, hint imgdecode.Hint) {}
+
+func (m *stubImageManager) SetDecodeBudget(hint imgdecode.Hint) { m.decodeBudget = hint }
 
 func (m *stubImageManager) GetPath(idx int) (ImagePath, bool) {
 	if idx < 0 || idx >= len(m.paths) {
