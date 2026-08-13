@@ -137,17 +137,29 @@ decode path can be tested and benchmarked without importing Ebiten. The
 default build uses Go's standard image decoders. Builds with the
 `native_decode` tag opt into CGO-backed decode:
 
-- Linux uses libpng, libdeflate, TurboJPEG and libwebp.
-- Windows uses Windows Imaging Component.
+- Linux uses libpng, libdeflate, TurboJPEG and libwebp (all linked as shared
+  libraries via `pkg-config`).
+- Windows uses libdeflate and libwebp (statically linked from
+  `third_party/mingw`, fetched by `make windows-deps`; see
+  `THIRD_PARTY_NOTICES.md` for their licence terms) for PNG and WebP, and
+  the Windows Imaging Component (WIC) for JPEG and as the PNG fallback.
 - JPEG and WebP always try native decode first in native builds.
 - PNG only tries native decode for images of at least 1 megapixel; smaller
   PNG files stay on the standard decoder to avoid native setup overhead.
-- On Linux, PNGs that are 8-bit, non-interlaced and free of `tRNS` take a
-  libdeflate path that inflates the whole IDAT stream at once and unfilters
-  straight into premultiplied RGBA. Anything else, and any failure, falls
-  back to libpng.
-- WebP on Windows depends on a WIC WebP codec being installed; without one
-  the decoder fails and the pure-Go decoder takes over.
+- On both platforms, PNGs that are 8-bit, non-interlaced and free of `tRNS`
+  take a shared libdeflate path (`internal/imgdecode/native_png_fastpath.go`)
+  that inflates the whole IDAT stream at once and unfilters straight into
+  premultiplied RGBA. Anything else, and any failure, falls back to the
+  platform's full decoder -- libpng on Linux, WIC on Windows.
+- WebP decodes through a shared libwebp path
+  (`internal/imgdecode/native_webp.go`) on both platforms; Windows does not
+  use WIC for WebP, so there is no dependency on an installed WIC WebP
+  codec. Any native decode failure falls back to the pure-Go decoder, same
+  as any other unsupported format.
+- `internal/imgdecode/native_linux.go` and `native_windows.go` keep only
+  what is genuinely platform-specific (libpng/TurboJPEG dispatch on Linux,
+  WIC dispatch on Windows); `native_common.go` holds the small Go-only
+  helpers (buffer allocation, `*image.RGBA` wrapping) both platforms share.
 
 Native decoders write into a caller-supplied Go buffer and return
 premultiplied `*image.RGBA`, which is the only shape Ebitengine can upload
@@ -159,7 +171,7 @@ This is the most explicit interface boundary in the repo.
 
 `imgdecode.Hint` names the box an image will be displayed in, and
 `imgdecode.Info` reports what was actually produced. JPEG (both platforms)
-and WebP (Linux) can decode smaller; PNG cannot, and reports
+and WebP (both platforms) can decode smaller; PNG cannot, and reports
 `Reduced: false`, which means "no higher-resolution version exists".
 
 The cache is keyed by `imgCacheKey{path, tier}` with a budget tier and a

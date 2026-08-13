@@ -17,6 +17,12 @@ BINARY_LINUX_NATIVE := nv-native
 BINARY_WINDOWS_NATIVE := nv-native.exe
 RESOURCE_FILE := nv.syso
 
+# Windows native-decode dependencies (static mingw-w64 libs, see
+# scripts/windows-deps.sh and the windows-deps target below).
+MINGW_DEPS_DIR := third_party/mingw
+LIBDEFLATE_VERSION := 1.24
+LIBWEBP_VERSION := 1.5.0
+
 # Default target
 .PHONY: all
 all: linux windows
@@ -42,10 +48,17 @@ windows: $(RESOURCE_FILE)
 	@echo "Windows GUI build complete: $(BINARY_WINDOWS)"
 
 .PHONY: windows-native
-windows-native: $(RESOURCE_FILE)
+windows-native: $(RESOURCE_FILE) windows-deps
 	@echo "Building Windows native-decode GUI version v$(VERSION)..."
 	GOOS=windows GOARCH=amd64 CGO_ENABLED=1 CC=x86_64-w64-mingw32-gcc CXX=x86_64-w64-mingw32-g++ go build -tags native_decode -ldflags "$(LDFLAGS_GUI)" -o $(BINARY_WINDOWS_NATIVE)
 	@echo "Windows native-decode GUI build complete: $(BINARY_WINDOWS_NATIVE)"
+
+# Fetch and cross-build libdeflate + libwebp as static mingw-w64 libraries
+# for the Windows native-decode build (PNG fast path and WebP decode). Idempotent:
+# skips work when $(MINGW_DEPS_DIR) already has both libraries installed.
+.PHONY: windows-deps
+windows-deps:
+	@LIBDEFLATE_VERSION=$(LIBDEFLATE_VERSION) LIBWEBP_VERSION=$(LIBWEBP_VERSION) scripts/windows-deps.sh
 
 # Windows debug build (with console)
 .PHONY: debug
@@ -185,6 +198,7 @@ help:
 	@echo "  make distclean - Clean everything including generated files"
 	@echo ""
 	@echo "  make deps      - Install build dependencies"
+	@echo "  make windows-deps - Fetch/build libdeflate+libwebp for windows-native"
 	@echo "  make test      - Run tests"
 	@echo "  make test-pure - Run strict pure/headless-safe tests"
 	@echo "  make bench-decode - Benchmark stdlib PNG/JPEG decode"

@@ -2,10 +2,11 @@ package imgdecode
 
 import "encoding/binary"
 
-// pngFastPathInfo is what the libdeflate-backed PNG fast path (native_linux.go,
-// build-tagged linux && cgo && native_decode) needs to decode an eligible PNG:
-// dimensions, the channel count implied by its color type, and the IDAT
-// payload ready to hand to libdeflate's whole-buffer zlib decompressor.
+// pngFastPathInfo is what the libdeflate-backed PNG fast path
+// (native_png_fastpath.go, build-tagged cgo && native_decode && (linux ||
+// windows)) needs to decode an eligible PNG: dimensions, the channel count
+// implied by its color type, and the IDAT payload ready to hand to
+// libdeflate's whole-buffer zlib decompressor.
 type pngFastPathInfo struct {
 	width, height int
 	colorType     int    // 0 (gray), 2 (RGB), 4 (gray+alpha), or 6 (RGBA)

@@ -3,17 +3,15 @@
 package imgdecode
 
 /*
-#cgo pkg-config: libpng libwebp libdeflate
+#cgo pkg-config: libpng
 #cgo LDFLAGS: -lturbojpeg
 
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include <libdeflate.h>
 #include <png.h>
 #include <turbojpeg.h>
-#include <webp/decode.h>
 
 typedef struct {
 	const unsigned char *data;
@@ -218,174 +216,6 @@ static int nv_png_decode(const unsigned char *data, size_t len, unsigned char *d
 	return 0;
 }
 
-// nv_png_fastpath_decode is the libdeflate-backed fast path for the common
-// PNG shapes eligibility already narrowed to in Go (see parsePNGFastPath in
-// png_fastpath.go): 8-bit depth, color type 0/2/4/6, no interlacing, no
-// tRNS. Where nv_png_decode above hands the whole image to libpng --
-// spending most of its time in libpng's zlib inflate, not libpng's own
-// unfilter/expand work -- this instead decompresses the already-concatenated
-// idat payload in one shot with libdeflate (measured 1.8x-3.4x faster than
-// zlib inflate on this codebase's benchmark fixtures) and then unfilters and
-// expands each row in a single pass while it is still hot in cache.
-//
-// raw is caller-allocated scratch of exactly raw_len bytes, sized by the Go
-// side as (width*channels + 1) * height -- one filter-type byte plus
-// width*channels pixel bytes per row. libdeflate has no streaming API (it
-// decompresses a whole buffer in one call), so materializing the entire
-// unfiltered image before any of it can be written out is an unavoidable
-// cost of using it; raw is that transient buffer, freed by the Go side
-// alongside dst once this call returns, matching this file's existing
-// convention (see newRGBABuffer/nv_png_decode above) of allocating scratch
-// on the Go side rather than malloc'ing it here.
-//
-// Returns 0 on success. Any nonzero return means the caller must fall back
-// to the libpng path -- this function never partially writes a "good enough"
-// image, and an unrecognized filter byte (row-level data corruption
-// libdeflate's checksum can't catch, since it validates the compressed
-// stream, not the PNG semantics decoded from it) is treated as a hard
-// failure for the same reason.
-static int nv_png_fastpath_decode(
-	const unsigned char *idat, size_t idat_len,
-	unsigned char *raw, size_t raw_len,
-	unsigned char *dst, size_t dst_stride,
-	int width, int height, int channels) {
-	if (width <= 0 || height <= 0 || channels <= 0) {
-		return 1;
-	}
-	if (dst_stride != (size_t)width * 4) {
-		return 2;
-	}
-	size_t row_bytes = (size_t)width * (size_t)channels;
-	size_t raw_stride = row_bytes + 1; // +1 for the per-row filter-type byte
-	if (raw_stride * (size_t)height != raw_len) {
-		// Defensive only: the Go side computed raw_len this exact way
-		// before allocating raw, so a mismatch here means a caller bug,
-		// not bad PNG data -- still handled as a clean failure rather
-		// than trusting a size nothing has actually verified.
-		return 3;
-	}
-
-	struct libdeflate_decompressor *d = libdeflate_alloc_decompressor();
-	if (d == NULL) {
-		return 4;
-	}
-
-	size_t actual = 0;
-	enum libdeflate_result result = libdeflate_zlib_decompress(d, idat, idat_len, raw, raw_len, &actual);
-	libdeflate_free_decompressor(d);
-	if (result != LIBDEFLATE_SUCCESS || actual != raw_len) {
-		return 5;
-	}
-
-	unsigned char *prev_row = NULL; // unfiltered previous row; NULL before row 0
-	for (int y = 0; y < height; y++) {
-		unsigned char *filter_byte = raw + (size_t)y * raw_stride;
-		unsigned char filter = filter_byte[0];
-		unsigned char *cur = filter_byte + 1;
-
-		switch (filter) {
-		case 0: // None
-			break;
-		case 1: // Sub
-			for (size_t x = 0; x < row_bytes; x++) {
-				unsigned char a = (x >= (size_t)channels) ? cur[x - channels] : 0;
-				cur[x] = (unsigned char)(cur[x] + a);
-			}
-			break;
-		case 2: // Up
-			for (size_t x = 0; x < row_bytes; x++) {
-				unsigned char b = prev_row ? prev_row[x] : 0;
-				cur[x] = (unsigned char)(cur[x] + b);
-			}
-			break;
-		case 3: // Average, computed on the already-unfiltered a/b
-			for (size_t x = 0; x < row_bytes; x++) {
-				unsigned int a = (x >= (size_t)channels) ? cur[x - channels] : 0;
-				unsigned int b = prev_row ? prev_row[x] : 0;
-				cur[x] = (unsigned char)(cur[x] + (unsigned char)((a + b) / 2));
-			}
-			break;
-		case 4: // Paeth
-			for (size_t x = 0; x < row_bytes; x++) {
-				int a = (x >= (size_t)channels) ? cur[x - channels] : 0;
-				int b = prev_row ? prev_row[x] : 0;
-				int c = (prev_row && x >= (size_t)channels) ? prev_row[x - channels] : 0;
-				int p = a + b - c;
-				int pa = p > a ? p - a : a - p;
-				int pb = p > b ? p - b : b - p;
-				int pc = p > c ? p - c : c - p;
-				int pred = (pa <= pb && pa <= pc) ? a : (pb <= pc ? b : c);
-				cur[x] = (unsigned char)(cur[x] + pred);
-			}
-			break;
-		default:
-			return 6;
-		}
-
-		// Expand cur (unfiltered, channels bytes/pixel) to premultiplied
-		// RGBA at dst immediately, while cur is still hot in cache -- the
-		// same fusion nv_png_premultiply_row uses on the libpng path, here
-		// folded into the unfilter pass itself instead of a separate
-		// libpng row-transform callback.
-		unsigned char *out = dst + (size_t)y * dst_stride;
-		switch (channels) {
-		case 1: // gray, always opaque
-			for (int x = 0; x < width; x++) {
-				unsigned char g = cur[x];
-				unsigned char *px = out + x * 4;
-				px[0] = g;
-				px[1] = g;
-				px[2] = g;
-				px[3] = 255;
-			}
-			break;
-		case 3: // RGB, always opaque
-			for (int x = 0; x < width; x++) {
-				unsigned char *sp = cur + x * 3;
-				unsigned char *px = out + x * 4;
-				px[0] = sp[0];
-				px[1] = sp[1];
-				px[2] = sp[2];
-				px[3] = 255;
-			}
-			break;
-		case 2: // gray+alpha
-			for (int x = 0; x < width; x++) {
-				unsigned char g = cur[x * 2];
-				unsigned char a = cur[x * 2 + 1];
-				unsigned char *px = out + x * 4;
-				unsigned char pg = (a == 255) ? g : (unsigned char)((g * a + 127) / 255);
-				px[0] = pg;
-				px[1] = pg;
-				px[2] = pg;
-				px[3] = a;
-			}
-			break;
-		case 4: // RGBA
-			for (int x = 0; x < width; x++) {
-				unsigned char *sp = cur + x * 4;
-				unsigned char a = sp[3];
-				unsigned char *px = out + x * 4;
-				if (a == 255) {
-					px[0] = sp[0];
-					px[1] = sp[1];
-					px[2] = sp[2];
-				} else {
-					px[0] = (unsigned char)((sp[0] * a + 127) / 255);
-					px[1] = (unsigned char)((sp[1] * a + 127) / 255);
-					px[2] = (unsigned char)((sp[2] * a + 127) / 255);
-				}
-				px[3] = a;
-			}
-			break;
-		}
-
-		prev_row = cur;
-	}
-
-	return 0;
-}
-
 // nv_jpeg_header reads just the JPEG header and reports the source pixel
 // dimensions, so the Go side can compute a contain-fit target size (see
 // containTarget in decode.go) before calling nv_jpeg_pick_scale below.
@@ -482,76 +312,12 @@ static int nv_jpeg_decode(const unsigned char *data, size_t len, unsigned char *
 	tjDestroy(handle);
 	return 0;
 }
-
-// nv_webp_query reads just the WebP bitstream header via libwebp's feature-
-// probe API and reports the source dimensions, so the Go side can compute a
-// scaled target size and allocate a destination buffer before decoding.
-// Unlike nv_png_decode above, no separate has-alpha branch is needed here:
-// WebPGetFeatures also reports features.has_alpha, but nv_webp_decode always
-// targets MODE_rgbA (premultiplied RGBA), and for an opaque source
-// premultiplying by alpha=255 is the identity, so the same decode path is
-// already correct whether or not the source carries real alpha.
-static int nv_webp_query(const unsigned char *data, size_t len, int *width, int *height) {
-	WebPBitstreamFeatures features;
-	VP8StatusCode status = WebPGetFeatures(data, len, &features);
-	if (status != VP8_STATUS_OK) {
-		return (int)status;
-	}
-	*width = features.width;
-	*height = features.height;
-	return 0;
-}
-
-// nv_webp_decode decodes directly into the caller-supplied dst buffer as
-// premultiplied RGBA (MODE_rgbA -- the lowercase 'rgbA' spelling denotes
-// premultiplied alpha per webp/decode.h), which is exactly the byte layout
-// Ebiten's *image.RGBA contract expects, so -- unlike the PNG path above --
-// no separate premultiply pass is ever needed here. When width/height differ
-// from the bitstream's own size, libwebp's built-in scaler (use_scaling)
-// produces the reduced output directly as part of the same decode, without
-// ever materializing a full-size intermediate buffer.
-static int nv_webp_decode(const unsigned char *data, size_t len, unsigned char *dst, size_t dst_stride, int width, int height) {
-	WebPDecoderConfig config;
-	if (!WebPInitDecoderConfig(&config)) {
-		return -1;
-	}
-
-	VP8StatusCode status = WebPGetFeatures(data, len, &config.input);
-	if (status != VP8_STATUS_OK) {
-		return (int)status;
-	}
-
-	config.output.colorspace = MODE_rgbA;
-	config.output.is_external_memory = 1;
-	config.output.u.RGBA.rgba = dst;
-	config.output.u.RGBA.stride = (int)dst_stride;
-	config.output.u.RGBA.size = dst_stride * (size_t)height;
-
-	// libwebp overlaps its alpha and luma passes when threading is allowed,
-	// which measured 217ms -> 178ms on a 30 megapixel image. The decoder
-	// owns the extra thread for the duration of the call.
-	config.options.use_threads = 1;
-
-	if (width != config.input.width || height != config.input.height) {
-		config.options.use_scaling = 1;
-		config.options.scaled_width = width;
-		config.options.scaled_height = height;
-	}
-
-	status = WebPDecode(data, len, &config);
-	WebPFreeDecBuffer(&config.output);
-	if (status != VP8_STATUS_OK) {
-		return (int)status;
-	}
-	return 0;
-}
 */
 import "C"
 
 import (
 	"fmt"
 	"image"
-	"math"
 	"runtime"
 	"strings"
 	"unsafe"
@@ -564,8 +330,9 @@ func decodeNative(data []byte, origin string, hint Hint) (image.Image, Info, err
 
 	switch lowerOrigin := strings.ToLower(origin); {
 	case isPNGData(data) || strings.HasSuffix(lowerOrigin, ".png"):
-		// PNG has no DCT-style scaled decode in libpng, so the hint is
-		// ignored here and Info always reports Reduced == false.
+		// PNG has no DCT-style scaled decode in libpng or the libdeflate
+		// fast path, so the hint is ignored here and Info always reports
+		// Reduced == false.
 		return decodeNativePNG(data)
 	case isJPEGData(data) || strings.HasSuffix(lowerOrigin, ".jpg") || strings.HasSuffix(lowerOrigin, ".jpeg"):
 		return decodeNativeJPEG(data, hint)
@@ -581,15 +348,15 @@ func nativeEnabled() bool {
 }
 
 func decodeNativePNG(data []byte) (image.Image, Info, error) {
-	// Try the libdeflate fast path first: it covers the common PNG shapes
-	// (see parsePNGFastPath) and is substantially faster than libpng, whose
-	// decode time is dominated by zlib inflate rather than libpng's own
-	// unfilter/expand work. Any ineligibility or failure along this path
-	// falls through silently to the untouched libpng implementation below,
-	// which remains the correctness safety net for everything else (16-bit,
-	// palette, interlaced, tRNS-bearing, or simply malformed PNGs) -- a bug
-	// in the fast path must never surface as a broken image, only as lost
-	// speed.
+	// Try the libdeflate fast path first (native_png_fastpath.go): it
+	// covers the common PNG shapes (see parsePNGFastPath) and is
+	// substantially faster than libpng, whose decode time is dominated by
+	// zlib inflate rather than libpng's own unfilter/expand work. Any
+	// ineligibility or failure along this path falls through silently to
+	// the untouched libpng implementation below, which remains the
+	// correctness safety net for everything else (16-bit, palette,
+	// interlaced, tRNS-bearing, or simply malformed PNGs) -- a bug in the
+	// fast path must never surface as a broken image, only as lost speed.
 	if img, info, ok := decodeNativePNGFastPath(data); ok {
 		return img, info, nil
 	}
@@ -630,84 +397,6 @@ func decodeNativePNGLibpng(data []byte) (image.Image, Info, error) {
 		Reduced: false,
 	}
 	return img, info, nil
-}
-
-// decodeNativePNGFastPath attempts the libdeflate-backed fast path (see
-// nv_png_fastpath_decode in the cgo preamble above and parsePNGFastPath in
-// png_fastpath.go) and reports ok == false for absolutely anything that
-// keeps it from producing a correct image: ineligibility, a buffer that
-// would be too large or overflow, or any nonzero status from the C decode
-// itself. Every one of those causes is meant to be indistinguishable to the
-// caller -- decodeNativePNG falls back to the libpng path the same way in
-// every case -- so this deliberately returns no error, only ok.
-func decodeNativePNGFastPath(data []byte) (image.Image, Info, bool) {
-	fp, ok := parsePNGFastPath(data)
-	if !ok {
-		return nil, Info{}, false
-	}
-
-	raw, rawLen, err := newPNGFastPathRawBuffer(fp.width, fp.height, fp.channels)
-	if err != nil {
-		return nil, Info{}, false
-	}
-
-	buf, stride, err := newRGBABuffer(fp.width, fp.height)
-	if err != nil {
-		return nil, Info{}, false
-	}
-
-	// fp.idat aliases data directly when the source had exactly one IDAT
-	// chunk (see concatIDAT), so this call may read from data's backing
-	// array as well as raw/buf; none of the three pointers is retained by C
-	// past the call, so passing them here is safe under cgo's pointer-
-	// passing rules, and the explicit KeepAlive calls below guard against
-	// the (already call-scoped, but here made explicit to match this file's
-	// existing convention) risk of the Go garbage collector considering any
-	// of them unreachable before nv_png_fastpath_decode returns.
-	status := C.nv_png_fastpath_decode(
-		(*C.uchar)(unsafe.Pointer(&fp.idat[0])), C.size_t(len(fp.idat)),
-		(*C.uchar)(unsafe.Pointer(&raw[0])), C.size_t(rawLen),
-		(*C.uchar)(unsafe.Pointer(&buf[0])), C.size_t(stride),
-		C.int(fp.width), C.int(fp.height), C.int(fp.channels))
-	runtime.KeepAlive(data)
-	runtime.KeepAlive(raw)
-	runtime.KeepAlive(buf)
-	if status != 0 {
-		return nil, Info{}, false
-	}
-
-	img := imageFromRGBABuffer(buf, fp.width, fp.height)
-	info := Info{
-		Width: fp.width, Height: fp.height,
-		SourceWidth: fp.width, SourceHeight: fp.height,
-		Reduced: false,
-	}
-	return img, info, true
-}
-
-// newPNGFastPathRawBuffer allocates the transient scratch buffer
-// nv_png_fastpath_decode unfilters in place: one filter-type byte plus
-// width*channels pixel bytes per row (see the rowBytes/rawLen formulas on
-// nv_png_fastpath_decode's doc comment), guarding against invalid
-// dimensions and overflow in either product before allocating -- the same
-// discipline newRGBABuffer applies to the destination buffer below.
-func newPNGFastPathRawBuffer(width, height, channels int) (raw []byte, rawLen int, err error) {
-	if width <= 0 || height <= 0 || channels <= 0 {
-		return nil, 0, fmt.Errorf("invalid PNG fast path dimensions %dx%d channels=%d", width, height, channels)
-	}
-	rowBytes := width * channels
-	if rowBytes <= 0 || rowBytes/channels != width {
-		return nil, 0, fmt.Errorf("invalid PNG fast path row size: width=%d channels=%d", width, channels)
-	}
-	rawStride := rowBytes + 1
-	if rawStride <= rowBytes {
-		return nil, 0, fmt.Errorf("invalid PNG fast path row stride: %d", rowBytes)
-	}
-	if height > math.MaxInt/rawStride {
-		return nil, 0, fmt.Errorf("PNG fast path dimensions too large: %dx%d", width, height)
-	}
-	rawLen = rawStride * height
-	return make([]byte, rawLen), rawLen, nil
 }
 
 func decodeNativeJPEG(data []byte, hint Hint) (image.Image, Info, error) {
@@ -752,71 +441,4 @@ func decodeNativeJPEG(data []byte, hint Hint) (image.Image, Info, error) {
 		Reduced: outWidth < srcWidth || outHeight < srcHeight,
 	}
 	return img, info, nil
-}
-
-func decodeNativeWebP(data []byte, hint Hint) (image.Image, Info, error) {
-	var srcWidth, srcHeight C.int
-	status := C.nv_webp_query(
-		(*C.uchar)(unsafe.Pointer(&data[0])), C.size_t(len(data)),
-		&srcWidth, &srcHeight)
-	if status != 0 {
-		return nil, Info{}, fmt.Errorf("libwebp status %d", int(status))
-	}
-
-	outWidth, outHeight := containTarget(int(srcWidth), int(srcHeight), hint)
-
-	buf, stride, err := newRGBABuffer(outWidth, outHeight)
-	if err != nil {
-		return nil, Info{}, err
-	}
-
-	// buf is a []byte, which contains no Go pointers, and libwebp does not
-	// retain the dst pointer past this call, so passing &buf[0] to cgo
-	// here is safe under cgo's pointer-passing rules.
-	status = C.nv_webp_decode(
-		(*C.uchar)(unsafe.Pointer(&data[0])), C.size_t(len(data)),
-		(*C.uchar)(unsafe.Pointer(&buf[0])), C.size_t(stride),
-		C.int(outWidth), C.int(outHeight))
-	runtime.KeepAlive(buf)
-	if status != 0 {
-		return nil, Info{}, fmt.Errorf("libwebp status %d", int(status))
-	}
-	img := imageFromRGBABuffer(buf, outWidth, outHeight)
-	info := Info{
-		Width: outWidth, Height: outHeight,
-		SourceWidth: int(srcWidth), SourceHeight: int(srcHeight),
-		Reduced: outWidth < int(srcWidth) || outHeight < int(srcHeight),
-	}
-	return img, info, nil
-}
-
-// newRGBABuffer allocates a tightly packed 4-bytes-per-pixel buffer for the
-// given dimensions, guarding against invalid sizes and overflow in
-// stride*height before allocating.
-func newRGBABuffer(width, height int) (buf []byte, stride int, err error) {
-	if width <= 0 || height <= 0 {
-		return nil, 0, fmt.Errorf("invalid image dimensions %dx%d", width, height)
-	}
-	stride = width * 4
-	if stride <= 0 || stride/4 != width {
-		return nil, 0, fmt.Errorf("invalid image width: %d", width)
-	}
-	if height > math.MaxInt/stride {
-		return nil, 0, fmt.Errorf("image dimensions too large: %dx%d", width, height)
-	}
-	return make([]byte, stride*height), stride, nil
-}
-
-// imageFromRGBABuffer wraps buf as *image.RGBA (premultiplied alpha), which
-// is Ebiten's one zero-copy upload fast path (imagetobytes.go only fast-
-// paths *image.RGBA with Pix sized exactly 4*w*h). image.RGBA and
-// image.NRGBA are struct-layout identical; only the alpha semantics of Pix
-// differ, and callers of this function are responsible for having already
-// premultiplied buf's contents where the source had genuine alpha.
-func imageFromRGBABuffer(buf []byte, width, height int) *image.RGBA {
-	return &image.RGBA{
-		Pix:    buf,
-		Stride: width * 4,
-		Rect:   image.Rect(0, 0, width, height),
-	}
 }

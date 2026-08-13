@@ -18,10 +18,11 @@ import (
 )
 
 // This file is the strongest correctness check for the libdeflate PNG fast
-// path (native_linux.go's nv_png_fastpath_decode): differential testing
-// against the untouched libpng path (decodeNativePNGLibpng), asserting the
-// two decoders produce byte-identical *image.RGBA output for the same PNG
-// bytes. Coverage includes every eligible color type, edge-case
+// path (native_png_fastpath.go's nv_png_fastpath_decode, shared with
+// Windows): differential testing against the untouched libpng path
+// (decodeNativePNGLibpng, Linux-only), asserting the two decoders produce
+// byte-identical *image.RGBA output for the same PNG bytes. Coverage
+// includes every eligible color type, edge-case
 // dimensions, and -- since Go's image/png encoder chooses filters
 // adaptively and cannot produce color type 4 (gray+alpha) at all -- a
 // hand-built PNG stream (buildRawPNG/pngEncodeFilterRow below) that

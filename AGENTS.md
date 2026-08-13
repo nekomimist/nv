@@ -67,10 +67,15 @@ A quick orientation for humans and AI agents working on this repo. Short, factua
 ## Platform Notes
 - For Windows builds, install `rsrc`: `go install github.com/akavel/rsrc@latest`.
 - Linux native decode builds need `libpng-dev`, `libturbojpeg0-dev`, `libwebp-dev`, `libdeflate-dev`, and CGO.
-- Windows native decode cross-builds from WSL need `gcc-mingw-w64` and `g++-mingw-w64`.
-  WebP decoding on Windows depends on a WIC WebP codec being present (Windows
-  11, or Windows 10 with the Store "WebP Image Extension") and silently
-  falls back to the pure-Go decoder otherwise.
+- Windows native decode cross-builds from WSL need `gcc-mingw-w64`,
+  `g++-mingw-w64`, and `cmake`. Run `make windows-deps` once first to fetch
+  and cross-build static libdeflate/libwebp libraries into
+  `third_party/mingw` (gitignored); `make windows-native` depends on this
+  target and skips the work when the libraries are already installed. PNG
+  and WebP decode natively (libdeflate fast path + WIC fallback for PNG,
+  libwebp for WebP) with no dependency on an installed WIC WebP codec; see
+  `THIRD_PARTY_NOTICES.md` for the statically-linked libraries' licence
+  terms.
 
 ## Config Paths
 - Linux: `~/.config/nekomimist/nv/config.json`

@@ -16,7 +16,6 @@ import "C"
 import (
 	"fmt"
 	"image"
-	"math"
 	"runtime"
 	"strings"
 	"unsafe"
@@ -26,23 +25,71 @@ func decodeNative(data []byte, origin string, hint Hint) (image.Image, Info, err
 	if len(data) == 0 {
 		return nil, Info{}, errNativeUnavailable
 	}
-	// WebP is routed into the same WIC pipeline as PNG/JPEG below. There is
-	// no libwebp dependency on Windows: Windows 11 (and Windows 10 with the
-	// Store "WebP Image Extension") ships a WIC WebP codec, but when none is
-	// registered, CreateDecoderFromStream simply fails and nv_wic_query_size
-	// returns a non-zero status, so decodeNative returns an error here and
-	// DecodeBytesScaled's existing fallback serves the pure-Go decoder --
-	// the same graceful degradation PNG/JPEG would get from a broken WIC
-	// install, with no special-casing needed for WebP specifically.
-	lowerOrigin := strings.ToLower(origin)
-	if !isPNGData(data) && !isJPEGData(data) && !isWebPData(data) &&
-		!strings.HasSuffix(lowerOrigin, ".png") &&
-		!strings.HasSuffix(lowerOrigin, ".jpg") &&
-		!strings.HasSuffix(lowerOrigin, ".jpeg") &&
-		!strings.HasSuffix(lowerOrigin, ".webp") {
+
+	switch lowerOrigin := strings.ToLower(origin); {
+	case isPNGData(data) || strings.HasSuffix(lowerOrigin, ".png"):
+		return decodeNativePNG(data)
+	case isJPEGData(data) || strings.HasSuffix(lowerOrigin, ".jpg") || strings.HasSuffix(lowerOrigin, ".jpeg"):
+		return decodeNativeJPEG(data, hint)
+	case isWebPData(data) || strings.HasSuffix(lowerOrigin, ".webp"):
+		// libwebp (native_webp.go), not WIC: measured substantially faster
+		// (191ms vs 532ms on a 4784x6278 fixture) and, unlike the WIC WebP
+		// codec, always present -- no dependency on an optional Windows
+		// component. There is no WIC WebP fallback here; on any libwebp
+		// failure DecodeBytesScaled's existing outer fallback to
+		// golang.org/x/image/webp already provides the same graceful
+		// degradation WIC would have, without the complexity of trying two
+		// native paths.
+		return decodeNativeWebP(data, hint)
+	default:
 		return nil, Info{}, errNativeUnavailable
 	}
+}
 
+func nativeEnabled() bool {
+	return true
+}
+
+// decodeNativePNG tries the libdeflate fast path first (native_png_fastpath.go,
+// shared with Linux): it covers the common PNG shapes (see parsePNGFastPath)
+// and needs no WIC round-trip at all. Any ineligibility or failure along
+// that path falls through silently to decodeNativePNGWIC below, which
+// remains the correctness safety net for everything else (16-bit, palette,
+// interlaced, tRNS-bearing, or simply malformed PNGs) -- a bug in the fast
+// path must never surface as a broken image, only as lost speed.
+func decodeNativePNG(data []byte) (image.Image, Info, error) {
+	if img, info, ok := decodeNativePNGFastPath(data); ok {
+		return img, info, nil
+	}
+	return decodeNativePNGWIC(data)
+}
+
+// decodeNativePNGWIC is the original, untouched-in-behavior WIC decode path
+// for PNG: the correctness safety net for every PNG decodeNativePNGFastPath
+// declines. PNG has no scaled decode in WIC (nv_wic_compute_target_size in
+// wicdecode_windows.cc only enables its scaler for JPEG/WebP containers), so
+// this always decodes at full resolution and reports Info.Reduced == false;
+// Hint{} is passed to decodeNativeWIC to make that explicit rather than
+// threading a hint through that WIC would silently ignore anyway.
+func decodeNativePNGWIC(data []byte) (image.Image, Info, error) {
+	return decodeNativeWIC(data, Hint{})
+}
+
+// decodeNativeJPEG decodes through WIC, unchanged: JPEG has no libjpeg-turbo
+// counterpart on this platform, so WIC (with its native DCT-style scaling
+// for a Hint smaller than the source) remains the only native JPEG path.
+func decodeNativeJPEG(data []byte, hint Hint) (image.Image, Info, error) {
+	return decodeNativeWIC(data, hint)
+}
+
+// decodeNativeWIC runs the shared WIC decode pipeline (nv_wic_query_size,
+// then nv_wic_decode_rgba) for PNG and JPEG. hint is resolved to a
+// contain-fit target via containTarget before ever reaching C; WIC only
+// actually honours that target for JPEG/WebP containers (see
+// supports_native_scaling in wicdecode_windows.cc) -- for PNG the target is
+// silently ignored and the full source size comes back, which is why
+// decodeNativePNGWIC above always passes Hint{}.
+func decodeNativeWIC(data []byte, hint Hint) (image.Image, Info, error) {
 	// Probe first: this reports src_w/src_h and, for target_w=target_h=0,
 	// requests no scaling (out_w/out_h == src_w/src_h), matching this
 	// project's only prior WIC call shape (a Hint{} decode still costs
@@ -56,12 +103,12 @@ func decodeNative(data []byte, origin string, hint Hint) (image.Image, Info, err
 		return nil, Info{}, fmt.Errorf("wic status 0x%x", uint32(status))
 	}
 
-	// containTarget resolves hint -- the box the image will be displayed
-	// in -- to the smallest size that fits inside it ("contain" scaling,
-	// see decode.go), preserving aspect ratio. Only re-query WIC when that
-	// target is actually smaller than the source on some axis; Hint{} (or
-	// a hint that doesn't shrink the source) leaves outWidth/outHeight at
-	// the probe result above.
+	// containTarget resolves hint -- the box the decoded image will be
+	// displayed in -- to the smallest size that fits inside it ("contain"
+	// scaling, see decode.go), preserving aspect ratio. Only re-query WIC
+	// when that target is actually smaller than the source on some axis;
+	// Hint{} (or a hint that doesn't shrink the source) leaves
+	// outWidth/outHeight at the probe result above.
 	if targetW, targetH := containTarget(int(srcWidth), int(srcHeight), hint); targetW != int(srcWidth) || targetH != int(srcHeight) {
 		status = C.nv_wic_query_size(
 			(*C.uchar)(unsafe.Pointer(&data[0])), C.size_t(len(data)),
@@ -95,40 +142,4 @@ func decodeNative(data []byte, origin string, hint Hint) (image.Image, Info, err
 		Reduced: outWidth < srcWidth || outHeight < srcHeight,
 	}
 	return img, info, nil
-}
-
-func nativeEnabled() bool {
-	return true
-}
-
-// newRGBABuffer allocates a tightly packed 4-bytes-per-pixel buffer for the
-// given dimensions, guarding against invalid sizes and overflow in
-// stride*height before allocating.
-func newRGBABuffer(width, height int) (buf []byte, stride int, err error) {
-	if width <= 0 || height <= 0 {
-		return nil, 0, fmt.Errorf("invalid image dimensions %dx%d", width, height)
-	}
-	stride = width * 4
-	if stride <= 0 || stride/4 != width {
-		return nil, 0, fmt.Errorf("invalid image width: %d", width)
-	}
-	if height > math.MaxInt/stride {
-		return nil, 0, fmt.Errorf("image dimensions too large: %dx%d", width, height)
-	}
-	return make([]byte, stride*height), stride, nil
-}
-
-// imageFromRGBABuffer wraps buf as *image.RGBA (premultiplied alpha), which
-// is Ebiten's one zero-copy upload fast path (imagetobytes.go only fast-
-// paths *image.RGBA with Pix sized exactly 4*w*h). image.RGBA and
-// image.NRGBA are struct-layout identical; only the alpha semantics of Pix
-// differ. nv_wic_decode_rgba always produces premultiplied bytes (either
-// natively via WIC's PRGBA converter, or via the C++ software-premultiply
-// fallback), so no conversion is needed here.
-func imageFromRGBABuffer(buf []byte, width, height int) *image.RGBA {
-	return &image.RGBA{
-		Pix:    buf,
-		Stride: width * 4,
-		Rect:   image.Rect(0, 0, width, height),
-	}
 }

@@ -109,9 +109,9 @@ go run . [image_files_or_directories...]
 Optional native PNG/JPEG/WebP decode builds require CGO:
 
 - Linux: `libpng-dev`, `libturbojpeg0-dev`, `libwebp-dev`, `libdeflate-dev`, and a C compiler
-- Windows cross-build from Linux/WSL: `gcc-mingw-w64`, `g++-mingw-w64`, and `rsrc`
+- Windows cross-build from Linux/WSL: `gcc-mingw-w64`, `g++-mingw-w64`, `rsrc`, and `cmake` (run `make windows-deps` once to fetch and cross-build static libdeflate/libwebp libraries into `third_party/mingw`; `make windows-native` depends on it and skips the work when already installed)
 
-Native decode is opt-in through the `native_decode` build tag or the `make linux-native` / `make windows-native` targets. JPEG and WebP use the native decoder by default in these builds; PNG uses the native decoder only for images at least 1 megapixel, because small PNG files are often faster with Go's standard decoder. On Windows, WebP decoding depends on a WIC WebP codec being installed (Windows 11, or Windows 10 with the Store "WebP Image Extension"); when none is present, it silently falls back to the pure-Go decoder like any other unsupported format.
+Native decode is opt-in through the `native_decode` build tag or the `make linux-native` / `make windows-native` targets. JPEG and WebP use the native decoder by default in these builds; PNG uses the native decoder only for images at least 1 megapixel, because small PNG files are often faster with Go's standard decoder. PNG additionally tries a libdeflate-backed fast path before falling back to libpng (Linux) or WIC (Windows) for the PNG shapes it doesn't cover (16-bit, palette, interlaced, or `tRNS`-bearing). WebP decodes through libwebp on both platforms (WIC is not used for WebP on Windows); on any native decode failure, the pure-Go stdlib decoder serves as the fallback, like any other unsupported format. The Windows build statically links libdeflate and libwebp -- see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for their licence terms.
 
 Decode benchmarks:
 
@@ -188,3 +188,6 @@ Notes:
 ## License
 
 MIT License - see LICENSE file for details
+
+Third-party licence notices for statically-linked dependencies in the
+Windows native-decode build are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
