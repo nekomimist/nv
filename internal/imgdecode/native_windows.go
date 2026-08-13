@@ -43,13 +43,33 @@ func decodeNative(data []byte, origin string, hint Hint) (image.Image, Info, err
 		return nil, Info{}, errNativeUnavailable
 	}
 
+	// Probe first: this reports src_w/src_h and, for target_w=target_h=0,
+	// requests no scaling (out_w/out_h == src_w/src_h), matching this
+	// project's only prior WIC call shape (a Hint{} decode still costs
+	// exactly one WIC query, same as before this function grew a hint).
 	var srcWidth, srcHeight, outWidth, outHeight C.int
 	status := C.nv_wic_query_size(
 		(*C.uchar)(unsafe.Pointer(&data[0])), C.size_t(len(data)),
-		clampToCInt(hint.MaxWidth), clampToCInt(hint.MaxHeight),
+		0, 0,
 		&srcWidth, &srcHeight, &outWidth, &outHeight)
 	if status != 0 {
 		return nil, Info{}, fmt.Errorf("wic status 0x%x", uint32(status))
+	}
+
+	// containTarget resolves hint -- the box the image will be displayed
+	// in -- to the smallest size that fits inside it ("contain" scaling,
+	// see decode.go), preserving aspect ratio. Only re-query WIC when that
+	// target is actually smaller than the source on some axis; Hint{} (or
+	// a hint that doesn't shrink the source) leaves outWidth/outHeight at
+	// the probe result above.
+	if targetW, targetH := containTarget(int(srcWidth), int(srcHeight), hint); targetW != int(srcWidth) || targetH != int(srcHeight) {
+		status = C.nv_wic_query_size(
+			(*C.uchar)(unsafe.Pointer(&data[0])), C.size_t(len(data)),
+			C.int(targetW), C.int(targetH),
+			&srcWidth, &srcHeight, &outWidth, &outHeight)
+		if status != 0 {
+			return nil, Info{}, fmt.Errorf("wic status 0x%x", uint32(status))
+		}
 	}
 
 	buf, stride, err := newRGBABuffer(int(outWidth), int(outHeight))
@@ -75,24 +95,6 @@ func decodeNative(data []byte, origin string, hint Hint) (image.Image, Info, err
 		Reduced: outWidth < srcWidth || outHeight < srcHeight,
 	}
 	return img, info, nil
-}
-
-// clampToCInt converts a Go int hint value to C.int (a fixed 32-bit type on
-// every platform this project builds for), saturating rather than wrapping
-// if the Go int is out of C.int's range. Hint values come from UI/viewport
-// sizes and are never expected to approach this range in practice; the
-// clamp exists so a stray huge or negative value can't turn into an
-// unrelated small or negative budget via silent truncation.
-func clampToCInt(v int) C.int {
-	const maxCInt = math.MaxInt32
-	const minCInt = math.MinInt32
-	if v > maxCInt {
-		return maxCInt
-	}
-	if v < minCInt {
-		return minCInt
-	}
-	return C.int(v)
 }
 
 func nativeEnabled() bool {

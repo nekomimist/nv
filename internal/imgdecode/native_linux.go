@@ -217,15 +217,10 @@ static int nv_png_decode(const unsigned char *data, size_t len, unsigned char *d
 	return 0;
 }
 
-// nv_jpeg_query reads the JPEG header, reports the source dimensions, and
-// -- when budget_w/budget_h request a reduced size -- picks the
-// libjpeg-turbo DCT scaling factor (from tjGetScalingFactors) that produces
-// the smallest output still meeting the budget, so the Go side allocates a
-// destination buffer sized for exactly what nv_jpeg_decode will produce. A
-// non-positive budget dimension means "unconstrained" on that axis; passing
-// budget_w <= 0 && budget_h <= 0 means "no scaling" and out_* == src_*.
-static int nv_jpeg_query(const unsigned char *data, size_t len, int budget_w, int budget_h,
-                          int *src_w, int *src_h, int *out_w, int *out_h) {
+// nv_jpeg_header reads just the JPEG header and reports the source pixel
+// dimensions, so the Go side can compute a contain-fit target size (see
+// containTarget in decode.go) before calling nv_jpeg_pick_scale below.
+static int nv_jpeg_header(const unsigned char *data, size_t len, int *src_w, int *src_h) {
 	tjhandle handle = tjInitDecompress();
 	if (handle == NULL) {
 		return 2;
@@ -238,45 +233,51 @@ static int nv_jpeg_query(const unsigned char *data, size_t len, int budget_w, in
 	if (status != 0) {
 		return 1;
 	}
+	return 0;
+}
 
-	if (budget_w <= 0 && budget_h <= 0) {
-		*out_w = *src_w;
-		*out_h = *src_h;
-		return 0;
-	}
-
+// nv_jpeg_pick_scale picks the smallest libjpeg-turbo DCT scaling factor
+// (from tjGetScalingFactors) whose output still meets target_w/target_h --
+// the contain-fit size the Go side already computed from the caller's Hint
+// via containTarget, not the caller's raw hint -- on both axes, so the Go
+// side can allocate a destination buffer sized for exactly what
+// nv_jpeg_decode will produce. Falls back to the unscaled 1/1 factor if no
+// smaller factor qualifies (this only happens if target_w/target_h exceed
+// src_w/src_h, which containTarget never produces, so it is a defensive
+// fallback rather than an expected path). Unlike nv_jpeg_header, this is a
+// pure lookup over tjGetScalingFactors's static table -- it never touches
+// the compressed JPEG bytes, so it takes no data/len and cannot fail.
+static void nv_jpeg_pick_scale(int src_w, int src_h, int target_w, int target_h, int *out_w, int *out_h) {
 	int num_factors = 0;
 	tjscalingfactor *factors = tjGetScalingFactors(&num_factors);
 	if (factors == NULL || num_factors <= 0) {
-		*out_w = *src_w;
-		*out_h = *src_h;
-		return 0;
+		*out_w = src_w;
+		*out_h = src_h;
+		return;
 	}
 
 	// Scan every supported factor (order is not assumed) and keep the
 	// smallest one -- by ratio, compared without floating point -- whose
-	// scaled output still meets the budget on every constrained axis. If
-	// none qualifies, fall back to the unscaled 1/1 size.
+	// scaled output still meets the target on every axis. If none
+	// qualifies, fall back to the unscaled 1/1 size.
 	int found = 0;
 	int best_num = 1, best_denom = 1;
-	int best_w = *src_w;
-	int best_h = *src_h;
+	int best_w = src_w;
+	int best_h = src_h;
 	for (int i = 0; i < num_factors; i++) {
 		tjscalingfactor f = factors[i];
 		if (f.num <= 0 || f.denom <= 0 || f.num > f.denom) {
 			// Skip degenerate or upscaling factors: the DCT scaler cannot
 			// enlarge past the source, and doing so would defeat the point
-			// of a budget-driven decode.
+			// of a target-driven decode.
 			continue;
 		}
-		int w = TJSCALED(*src_w, f);
-		int h = TJSCALED(*src_h, f);
+		int w = TJSCALED(src_w, f);
+		int h = TJSCALED(src_h, f);
 		if (w < 1 || h < 1) {
 			continue;
 		}
-		int meets_w = (budget_w <= 0) || (w >= budget_w);
-		int meets_h = (budget_h <= 0) || (h >= budget_h);
-		if (!meets_w || !meets_h) {
+		if (w < target_w || h < target_h) {
 			continue;
 		}
 		if (!found || (long long)f.num * best_denom < (long long)best_num * f.denom) {
@@ -288,13 +289,12 @@ static int nv_jpeg_query(const unsigned char *data, size_t len, int budget_w, in
 		}
 	}
 	if (!found) {
-		best_w = *src_w;
-		best_h = *src_h;
+		best_w = src_w;
+		best_h = src_h;
 	}
 
 	*out_w = best_w;
 	*out_h = best_h;
-	return 0;
 }
 
 // nv_jpeg_decode decodes directly into the caller-supplied dst buffer,
@@ -438,14 +438,18 @@ func decodeNativePNG(data []byte) (image.Image, Info, error) {
 }
 
 func decodeNativeJPEG(data []byte, hint Hint) (image.Image, Info, error) {
-	var srcWidth, srcHeight, outWidth, outHeight C.int
-	status := C.nv_jpeg_query(
+	var srcWidth, srcHeight C.int
+	status := C.nv_jpeg_header(
 		(*C.uchar)(unsafe.Pointer(&data[0])), C.size_t(len(data)),
-		clampToCInt(hint.MaxWidth), clampToCInt(hint.MaxHeight),
-		&srcWidth, &srcHeight, &outWidth, &outHeight)
+		&srcWidth, &srcHeight)
 	if status != 0 {
 		return nil, Info{}, fmt.Errorf("turbojpeg status %d", int(status))
 	}
+
+	targetW, targetH := containTarget(int(srcWidth), int(srcHeight), hint)
+
+	var outWidth, outHeight C.int
+	C.nv_jpeg_pick_scale(srcWidth, srcHeight, C.int(targetW), C.int(targetH), &outWidth, &outHeight)
 
 	buf, stride, err := newRGBABuffer(int(outWidth), int(outHeight))
 	if err != nil {
@@ -486,7 +490,7 @@ func decodeNativeWebP(data []byte, hint Hint) (image.Image, Info, error) {
 		return nil, Info{}, fmt.Errorf("libwebp status %d", int(status))
 	}
 
-	outWidth, outHeight := webpTargetSize(int(srcWidth), int(srcHeight), hint)
+	outWidth, outHeight := containTarget(int(srcWidth), int(srcHeight), hint)
 
 	buf, stride, err := newRGBABuffer(outWidth, outHeight)
 	if err != nil {
@@ -511,71 +515,6 @@ func decodeNativeWebP(data []byte, hint Hint) (image.Image, Info, error) {
 		Reduced: outWidth < int(srcWidth) || outHeight < int(srcHeight),
 	}
 	return img, info, nil
-}
-
-// webpTargetSize picks the smallest size that still covers hint on both
-// axes while preserving the source's aspect ratio. Unlike the JPEG DCT
-// scaler above (which only offers a handful of fixed M/8 factors), libwebp's
-// scaler accepts arbitrary target dimensions, so there is no factor family
-// to snap to here -- the ideal covering size is computed directly. A hint
-// axis <= 0 means "unconstrained" on that axis (Hint's documented zero-value
-// semantics, matching nv_jpeg_query's budget_w/budget_h <= 0 handling). If
-// neither axis is constrained, or the required scale is not actually
-// smaller than 1 (e.g. the hint exceeds the source on every constrained
-// axis), the source's own size is returned unscaled.
-func webpTargetSize(srcW, srcH int, hint Hint) (int, int) {
-	if srcW <= 0 || srcH <= 0 {
-		return srcW, srcH
-	}
-
-	scale := 0.0
-	if hint.MaxWidth > 0 {
-		if s := float64(hint.MaxWidth) / float64(srcW); s > scale {
-			scale = s
-		}
-	}
-	if hint.MaxHeight > 0 {
-		if s := float64(hint.MaxHeight) / float64(srcH); s > scale {
-			scale = s
-		}
-	}
-	if scale <= 0 || scale >= 1 {
-		return srcW, srcH
-	}
-
-	w := int(math.Ceil(float64(srcW) * scale))
-	h := int(math.Ceil(float64(srcH) * scale))
-	if w < 1 {
-		w = 1
-	}
-	if h < 1 {
-		h = 1
-	}
-	if w > srcW {
-		w = srcW
-	}
-	if h > srcH {
-		h = srcH
-	}
-	return w, h
-}
-
-// clampToCInt converts a Go int hint value to C.int (a fixed 32-bit type on
-// every platform this project builds for), saturating rather than wrapping
-// if the Go int is out of C.int's range. Hint values come from UI/viewport
-// sizes and are never expected to approach this range in practice; the
-// clamp exists so a stray huge or negative value can't turn into an
-// unrelated small or negative budget via silent truncation.
-func clampToCInt(v int) C.int {
-	const maxCInt = math.MaxInt32
-	const minCInt = math.MinInt32
-	if v > maxCInt {
-		return maxCInt
-	}
-	if v < minCInt {
-		return minCInt
-	}
-	return C.int(v)
 }
 
 // newRGBABuffer allocates a tightly packed 4-bytes-per-pixel buffer for the

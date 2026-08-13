@@ -35,6 +35,88 @@ type Info struct {
 	Reduced                   bool // true when Width/Height < Source*
 }
 
+// containTarget resolves hint -- the box the decoded image will be
+// displayed in -- to the smallest size a decoder must produce so that the
+// image fits entirely inside that box on both axes ("contain"/fit-inside
+// scaling), preserving the source's aspect ratio. This is deliberately not
+// "cover" scaling: covering both axes of a box whose aspect ratio doesn't
+// match the source's would over-decode the axis that isn't the visual
+// bottleneck (e.g. a tall portrait image bound for a wide landscape box
+// only needs to be decoded as wide as it will actually be drawn, not as
+// wide as the box).
+//
+// A zero (or negative) Hint field means "unconstrained" on that axis --
+// matching Hint's documented zero-value semantics -- so Hint{} always
+// yields (srcW, srcH) unchanged, and a single populated field expresses
+// fit-width ({MaxWidth: W}) or fit-height ({MaxHeight: H}) alone. The
+// result never exceeds (srcW, srcH) on either axis (this function only
+// ever asks a decoder to shrink, never to enlarge) and is never below 1 on
+// either axis, even for extreme aspect ratios.
+//
+// Each backend is responsible for rounding this ideal target *up* to
+// whatever concrete size its codec can actually produce (e.g. the nearest
+// libjpeg-turbo DCT scaling factor, or the nearest WIC power-of-two
+// division) -- containTarget only computes the shared "contain" math, not
+// that codec-specific step.
+//
+// All arithmetic is integer cross-multiplication (no floating point), so
+// results are exact regardless of image size; products are computed in
+// int64 so a very large source (tens of thousands of pixels per side)
+// cannot silently overflow.
+func containTarget(srcW, srcH int, hint Hint) (int, int) {
+	if srcW <= 0 || srcH <= 0 {
+		return srcW, srcH
+	}
+
+	hasW := hint.MaxWidth > 0
+	hasH := hint.MaxHeight > 0
+	if !hasW && !hasH {
+		return srcW, srcH
+	}
+
+	sw, sh := int64(srcW), int64(srcH)
+	hw, hh := int64(hint.MaxWidth), int64(hint.MaxHeight)
+
+	switch {
+	case hasW && !hasH:
+		if hw >= sw {
+			return srcW, srcH
+		}
+		return int(hw), clampDim(ceilDiv(sh*hw, sw))
+	case !hasW && hasH:
+		if hh >= sh {
+			return srcW, srcH
+		}
+		return clampDim(ceilDiv(sw*hh, sh)), int(hh)
+	default: // hasW && hasH
+		if hw >= sw && hh >= sh {
+			return srcW, srcH
+		}
+		// Pick the binding (smaller-scale) axis without floating point:
+		// scale_w = hw/sw, scale_h = hh/sh, and scale_w <= scale_h iff
+		// hw*sh <= hh*sw (cross-multiplication; valid since sw, sh > 0).
+		if hw*sh <= hh*sw {
+			return int(hw), clampDim(ceilDiv(sh*hw, sw))
+		}
+		return clampDim(ceilDiv(sw*hh, sh)), int(hh)
+	}
+}
+
+// ceilDiv returns ceil(a/b) for positive a and b, computed without
+// floating point.
+func ceilDiv(a, b int64) int64 {
+	return (a + b - 1) / b
+}
+
+// clampDim converts v to int, clamping up to 1 so containTarget can never
+// report a zero or negative dimension.
+func clampDim(v int64) int {
+	if v < 1 {
+		return 1
+	}
+	return int(v)
+}
+
 // DecodeFile decodes an image from a filesystem path at full resolution.
 func DecodeFile(path string) (image.Image, error) {
 	img, _, err := DecodeFileScaled(path, Hint{})

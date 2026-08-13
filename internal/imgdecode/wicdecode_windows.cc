@@ -190,11 +190,14 @@ struct wic_pipeline {
 // in wic_pipeline (native DCT scaling for JPEG; IWICBitmapScaler resampling
 // for WebP, see supports_native_scaling above): the largest power-of-two
 // division (1/1, 1/2, 1/4, 1/8) of the source whose dimensions still meet
-// the requested budget on every constrained axis (budget_w/budget_h <= 0
-// means unconstrained on that axis). Falls back to the full source size if
-// no division qualifies (including when the budget exceeds the source size,
-// which no division can satisfy since none can upscale).
-void nv_wic_compute_target_size(int src_w, int src_h, int budget_w, int budget_h, int *out_w, int *out_h) {
+// target_w/target_h -- the contain-fit box the Go side already computed via
+// containTarget in decode.go, not the caller's raw display box -- on every
+// constrained axis (target_w/target_h <= 0 means unconstrained on that
+// axis; in practice this function is only called once both are known to be
+// positive, see nv_wic_query_size below). Falls back to the full source
+// size if no division qualifies (including when the target exceeds the
+// source size, which no division can satisfy since none can upscale).
+void nv_wic_compute_target_size(int src_w, int src_h, int target_w, int target_h, int *out_w, int *out_h) {
 	static const int divisors[] = {1, 2, 4, 8};
 	int best_w = src_w;
 	int best_h = src_h;
@@ -210,11 +213,11 @@ void nv_wic_compute_target_size(int src_w, int src_h, int budget_w, int budget_h
 			h = 1;
 		}
 
-		bool meets_w = (budget_w <= 0) || (w >= budget_w);
-		bool meets_h = (budget_h <= 0) || (h >= budget_h);
+		bool meets_w = (target_w <= 0) || (w >= target_w);
+		bool meets_h = (target_h <= 0) || (h >= target_h);
 		if (!meets_w || !meets_h) {
 			// Larger divisors only shrink the output further, and this one
-			// already fails the budget, so no larger divisor can qualify.
+			// already fails the target, so no larger divisor can qualify.
 			break;
 		}
 		best_w = w;
@@ -227,15 +230,16 @@ void nv_wic_compute_target_size(int src_w, int src_h, int budget_w, int budget_h
 
 }  // namespace
 
-int nv_wic_query_size(const unsigned char *data, size_t len, int budget_w, int budget_h,
+int nv_wic_query_size(const unsigned char *data, size_t len, int target_w, int target_h,
                        int *src_w, int *src_h, int *out_w, int *out_h) {
 	if (data == nullptr || len == 0 || src_w == nullptr || src_h == nullptr || out_w == nullptr || out_h == nullptr) {
 		return E_INVALIDARG;
 	}
 
 	// scale_w/scale_h = 0 -- this probe pass exists only to learn the
-	// frame's natural size and container format, which the budget-based
-	// target computation below needs first.
+	// frame's natural size and container format, which the Go side needs
+	// before it can compute target_w/target_h (see containTarget in
+	// decode.go) for a second, scaled call to this same function.
 	wic_pipeline probe(data, len, 0, 0);
 	HRESULT hr = probe.hr;
 	if (FAILED(hr)) {
@@ -245,16 +249,16 @@ int nv_wic_query_size(const unsigned char *data, size_t len, int budget_w, int b
 	*src_w = static_cast<int>(probe.src_width);
 	*src_h = static_cast<int>(probe.src_height);
 
-	int target_w = *src_w;
-	int target_h = *src_h;
-	if (probe.supports_native_scaling && (budget_w > 0 || budget_h > 0)) {
-		nv_wic_compute_target_size(*src_w, *src_h, budget_w, budget_h, &target_w, &target_h);
+	int chosen_w = *src_w;
+	int chosen_h = *src_h;
+	if (probe.supports_native_scaling && (target_w > 0 || target_h > 0)) {
+		nv_wic_compute_target_size(*src_w, *src_h, target_w, target_h, &chosen_w, &chosen_h);
 	}
 	// Sources outside supports_native_scaling's gate above (PNG especially)
-	// are never scaled: target stays at the full source size.
+	// are never scaled: chosen stays at the full source size.
 
-	*out_w = target_w;
-	*out_h = target_h;
+	*out_w = chosen_w;
+	*out_h = chosen_h;
 	return 0;
 }
 

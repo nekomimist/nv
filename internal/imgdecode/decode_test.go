@@ -108,6 +108,127 @@ func TestDecodeBytesScaledIgnoresHintOutsideNativeJPEG(t *testing.T) {
 	}
 }
 
+// TestContainTarget covers containTarget's "contain" (fit-inside) math in
+// isolation, without cgo: the smallest size that fits entirely inside
+// hint's box while preserving the source's aspect ratio, never upscaled
+// past the source, and never below 1 on either axis.
+func TestContainTarget(t *testing.T) {
+	cases := []struct {
+		name         string
+		srcW, srcH   int
+		hint         Hint
+		wantW, wantH int
+	}{
+		{
+			name: "landscape source in landscape box",
+			srcW: 1920, srcH: 1080,
+			hint:  Hint{MaxWidth: 800, MaxHeight: 600},
+			wantW: 800, wantH: 450,
+		},
+		{
+			// The bug this task fixes: a portrait source must not be
+			// decoded at the full landscape box height ("cover"); it only
+			// needs to be as tall as it will actually be drawn once its
+			// width is fit to the box.
+			name: "portrait source in landscape box",
+			srcW: 1080, srcH: 1920,
+			hint:  Hint{MaxWidth: 800, MaxHeight: 600},
+			wantW: 338, wantH: 600,
+		},
+		{
+			name: "landscape source in portrait box (reverse of above)",
+			srcW: 1920, srcH: 1080,
+			hint:  Hint{MaxWidth: 600, MaxHeight: 800},
+			wantW: 600, wantH: 338,
+		},
+		{
+			name: "hint larger than source on every axis: no reduction",
+			srcW: 800, srcH: 600,
+			hint:  Hint{MaxWidth: 2000, MaxHeight: 1500},
+			wantW: 800, wantH: 600,
+		},
+		{
+			name: "one axis zero: fit-width",
+			srcW: 1920, srcH: 1080,
+			hint:  Hint{MaxWidth: 800},
+			wantW: 800, wantH: 450,
+		},
+		{
+			name: "one axis zero: fit-height",
+			srcW: 1920, srcH: 1080,
+			hint:  Hint{MaxHeight: 600},
+			wantW: 1067, wantH: 600,
+		},
+		{
+			name: "both axes zero: no constraint",
+			srcW: 4000, srcH: 3000,
+			hint:  Hint{},
+			wantW: 4000, wantH: 3000,
+		},
+		{
+			name: "square source",
+			srcW: 1000, srcH: 1000,
+			hint:  Hint{MaxWidth: 300, MaxHeight: 500},
+			wantW: 300, wantH: 300,
+		},
+		{
+			name: "1x1 source, hint larger: no reduction",
+			srcW: 1, srcH: 1,
+			hint:  Hint{MaxWidth: 800, MaxHeight: 600},
+			wantW: 1, wantH: 1,
+		},
+		{
+			// Without ceiling division (and a floor-to-1 clamp), the
+			// non-binding axis here would compute as 1*1/10000 == 0.
+			name: "extreme aspect ratio would round to 0 without ceil+clamp",
+			srcW: 1, srcH: 10000,
+			hint:  Hint{MaxWidth: 1, MaxHeight: 1},
+			wantW: 1, wantH: 1,
+		},
+		{
+			// Same pitfall via the single-axis (fit-height) path: floor(5*3/1000) == 0.
+			name: "fit-height extreme ratio would round to 0 without ceil+clamp",
+			srcW: 5, srcH: 1000,
+			hint:  Hint{MaxHeight: 3},
+			wantW: 1, wantH: 3,
+		},
+		{
+			// Large enough that a naive int32 product (srcW*hint or
+			// srcH*hint) could overflow; containTarget must compute this
+			// with int64 products and still land on the exact answer.
+			name: "very large source: no overflow",
+			srcW: 30000, srcH: 30000,
+			hint:  Hint{MaxWidth: 15000, MaxHeight: 10000},
+			wantW: 10000, wantH: 10000,
+		},
+		{
+			// The real-world case from the bug report (4784x6278 portrait
+			// WebP fit into a 2560x1440 landscape box): height is the
+			// binding axis, width should land far below the 2560 hint.
+			name: "real fixture aspect ratio: portrait WebP in landscape box",
+			srcW: 4784, srcH: 6278,
+			hint:  Hint{MaxWidth: 2560, MaxHeight: 1440},
+			wantW: 1098, wantH: 1440,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			gotW, gotH := containTarget(tc.srcW, tc.srcH, tc.hint)
+			if gotW != tc.wantW || gotH != tc.wantH {
+				t.Fatalf("containTarget(%d, %d, %+v) = (%d, %d), want (%d, %d)",
+					tc.srcW, tc.srcH, tc.hint, gotW, gotH, tc.wantW, tc.wantH)
+			}
+			if gotW > tc.srcW || gotH > tc.srcH {
+				t.Fatalf("containTarget produced %dx%d, larger than source %dx%d", gotW, gotH, tc.srcW, tc.srcH)
+			}
+			if gotW < 1 || gotH < 1 {
+				t.Fatalf("containTarget produced %dx%d, want both dimensions >= 1", gotW, gotH)
+			}
+		})
+	}
+}
+
 func encodeTestPNG(t *testing.T, w, h int) []byte {
 	t.Helper()
 	src := image.NewNRGBA(image.Rect(0, 0, w, h))

@@ -314,11 +314,13 @@ const scaledWebPBase64 = "UklGRkYAAABXRUJQVlA4TDkAAAAvT8AJAAmASNoffYGI/qewUJC2AV
 // TestNativeDecodeWebPScaledReducesResolution proves the WebP native
 // decoder honours a Hint smaller than the source: libwebp's scaler accepts
 // arbitrary target dimensions (unlike libjpeg-turbo's fixed M/8 DCT
-// factors), so webpTargetSize's covering-size computation, not a factor
-// table, determines the output size. The 20x20 hint against an 80x40
-// (2:1) source requires covering both axes while preserving aspect ratio:
-// scale = max(20/80, 20/40) = 0.5, giving the one deterministically correct
-// answer of 40x20, not merely "some smaller size".
+// factors), so containTarget's contain-fit computation, not a factor
+// table, determines the output size directly. The 20x20 hint against an
+// 80x40 (2:1) source must fit entirely inside that box while preserving
+// aspect ratio -- "contain", not "cover": scale = min(20/80, 20/40) = 0.25,
+// giving the one deterministically correct answer of 20x10 (not 40x20,
+// which is what covering both axes of the hint would produce, and was
+// this decoder's behavior before containTarget replaced webpTargetSize).
 func TestNativeDecodeWebPScaledReducesResolution(t *testing.T) {
 	data, err := base64.StdEncoding.DecodeString(scaledWebPBase64)
 	if err != nil {
@@ -327,7 +329,7 @@ func TestNativeDecodeWebPScaledReducesResolution(t *testing.T) {
 
 	const srcW, srcH = 80, 40
 	hint := Hint{MaxWidth: 20, MaxHeight: 20}
-	const wantW, wantH = 40, 20
+	const wantW, wantH = 20, 10
 
 	img, info, err := decodeNative(data, "scaled.webp", hint)
 	if err != nil {
@@ -344,14 +346,75 @@ func TestNativeDecodeWebPScaledReducesResolution(t *testing.T) {
 		t.Fatalf("bounds = %v, want %dx%d (Info.Width/Height)", got, info.Width, info.Height)
 	}
 	if info.Width != wantW || info.Height != wantH {
-		t.Fatalf("Width/Height = %dx%d, want %dx%d (smallest size covering the %dx%d hint on both axes)",
+		t.Fatalf("Width/Height = %dx%d, want %dx%d (smallest size fitting inside the %dx%d hint on both axes -- contain, not cover)",
 			info.Width, info.Height, wantW, wantH, hint.MaxWidth, hint.MaxHeight)
+	}
+	if info.Width > hint.MaxWidth || info.Height > hint.MaxHeight {
+		t.Fatalf("decoded %dx%d exceeds the %dx%d hint box on some axis: looks like cover semantics, not contain", info.Width, info.Height, hint.MaxWidth, hint.MaxHeight)
 	}
 
 	wantRatio := float64(srcW) / float64(srcH)
 	gotRatio := float64(info.Width) / float64(info.Height)
 	if diff := wantRatio - gotRatio; diff > 0.01 || diff < -0.01 {
 		t.Fatalf("aspect ratio = %v, want ~%v", gotRatio, wantRatio)
+	}
+}
+
+// TestDecodeBytesScaledJPEGContainNotCover proves the fix for the "cover"
+// bug this task addresses, end to end through the public API: a portrait
+// source decoded with a landscape-shaped hint must land on the smallest
+// libjpeg-turbo M/8 factor that lets the whole image fit inside the hint's
+// box ("contain"), not the smallest factor that makes every axis at least
+// as large as the hint ("cover") -- the exact 4784x6278-into-2560x1440
+// scenario from the bug report, reproduced here with a synthetic fixture
+// so the test needs no external image file.
+//
+// For this 1024x2048 (1:2) source with an 800x800 hint, height is the
+// binding axis: contain only needs width >= 400 (ceil(1024*800/2048)),
+// which the 4/8 (1/2) factor already satisfies at 512x1024. Cover
+// semantics (the pre-fix behavior) would instead have required width >=
+// 800 too, forcing the much larger 7/8 factor (896x1792) -- over 3x the
+// pixels contain actually needs.
+func TestDecodeBytesScaledJPEGContainNotCover(t *testing.T) {
+	const srcW, srcH = 1024, 2048
+	hint := Hint{MaxWidth: 800, MaxHeight: 800}
+	const wantW, wantH = 512, 1024
+
+	src := image.NewRGBA(image.Rect(0, 0, srcW, srcH))
+	for y := 0; y < srcH; y += 5 {
+		for x := 0; x < srcW; x += 5 {
+			src.SetRGBA(x, y, color.RGBA{R: uint8(x), G: uint8(y), B: 128, A: 255})
+		}
+	}
+
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, src, &jpeg.Options{Quality: 90}); err != nil {
+		t.Fatalf("jpeg encode: %v", err)
+	}
+
+	img, info, err := DecodeBytesScaled(buf.Bytes(), "portrait.jpg", hint)
+	if err != nil {
+		t.Fatalf("DecodeBytesScaled failed: %v", err)
+	}
+
+	if !info.Reduced {
+		t.Fatalf("Info.Reduced = false, want true")
+	}
+	if info.SourceWidth != srcW || info.SourceHeight != srcH {
+		t.Fatalf("Info.SourceWidth/Height = %dx%d, want %dx%d", info.SourceWidth, info.SourceHeight, srcW, srcH)
+	}
+	if got := img.Bounds(); got.Dx() != info.Width || got.Dy() != info.Height {
+		t.Fatalf("bounds = %v, want %dx%d (Info.Width/Height)", got, info.Width, info.Height)
+	}
+	if info.Width != wantW || info.Height != wantH {
+		t.Fatalf("Width/Height = %dx%d, want %dx%d (smallest factor letting the image fit inside the %dx%d hint, not cover it)",
+			info.Width, info.Height, wantW, wantH, hint.MaxWidth, hint.MaxHeight)
+	}
+	// The whole point of this test: contain must not force the width axis
+	// up to the hint's 800 just because height needed to reach 800 -- that
+	// would be cover, the bug this task fixes.
+	if info.Width >= hint.MaxWidth {
+		t.Fatalf("Width = %d landed at/above the hint's MaxWidth (%d): looks like cover semantics survived, not contain", info.Width, hint.MaxWidth)
 	}
 }
 
