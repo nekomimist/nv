@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"time"
 
+	"nv/internal/imgdecode"
 	"nv/navlogic"
 )
 
@@ -32,7 +33,13 @@ func (g *Game) pageMetricsAt(idx int) navlogic.PageMetrics {
 		return navlogic.PageMetrics{}
 	}
 
-	img := g.imageManager.GetImage(idx)
+	// pageMetricsAt only needs the aspect ratio, and a reduced decode
+	// preserves the source's aspect ratio (imgdecode.containTarget always
+	// scales both axes by the same factor), so an unconstrained hint is
+	// correct here even once a later change starts requesting genuinely
+	// reduced decodes elsewhere -- no display budget is needed just to
+	// learn width/height proportions.
+	img := g.imageManager.GetImage(idx, imgdecode.Hint{})
 	if img == nil {
 		return navlogic.PageMetrics{}
 	}
@@ -48,7 +55,7 @@ func (g *Game) displayImageAt(idx int) DisplayImage {
 	if idx < 0 {
 		return nil
 	}
-	return g.imageManager.GetImage(idx)
+	return g.imageManager.GetImage(idx, imgdecode.Hint{})
 }
 
 func (g *Game) pageAspectAt(idx int) float64 {

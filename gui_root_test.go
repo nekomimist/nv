@@ -4,9 +4,12 @@ import (
 	"image"
 	"image/color"
 	"math"
+	"path/filepath"
 	"testing"
 
 	"github.com/hajimehoshi/ebiten/v2"
+
+	"nv/internal/imgdecode"
 )
 
 func TestGUI_NavigateSingleUsesActionSemantics(t *testing.T) {
@@ -303,7 +306,7 @@ func TestGUI_ImageManager(t *testing.T) {
 		t.Errorf("Expected paths count 5, got %d", count)
 	}
 
-	leftImg, rightImg := imageManager.GetBookModeImages(0, false)
+	leftImg, rightImg := imageManager.GetBookModeImages(0, false, imgdecode.Hint{}, imgdecode.Hint{})
 	if leftImg != nil || rightImg != nil {
 		t.Logf("Images are nil as expected (no actual image files)")
 	}
@@ -345,6 +348,178 @@ func TestGUI_ImageManagerPlainConstructorKeepsPreloadQueueFloor(t *testing.T) {
 	}
 }
 
+// deallocateTrackingDisplayImage wraps a DisplayImage to record whether
+// Deallocate was called, so a test can observe the tiered cache's evict
+// callback actually running (rather than just the entry disappearing from
+// the cache).
+type deallocateTrackingDisplayImage struct {
+	DisplayImage
+	deallocated *bool
+}
+
+func (d *deallocateTrackingDisplayImage) Deallocate() {
+	*d.deallocated = true
+	d.DisplayImage.Deallocate()
+}
+
+// reducedDisplayImage wraps a DisplayImage to report a SourceBounds larger
+// than Bounds, simulating a genuinely reduced budget-tier decode (as a real
+// JPEG/WebP native decode would produce) without needing a native-decode
+// build in these tests.
+type reducedDisplayImage struct {
+	DisplayImage
+	sourceBounds image.Rectangle
+}
+
+func (r *reducedDisplayImage) SourceBounds() image.Rectangle {
+	return r.sourceBounds
+}
+
+func TestGUI_GetImageReturnsBudgetTierInsteadOfPlaceholder(t *testing.T) {
+	manager := NewImageManager(4).(*DefaultImageManager)
+	t.Cleanup(func() {
+		manager.StopPreload()
+	})
+
+	path := ImagePath{Path: "budget-only.png"}
+	manager.SetPaths([]ImagePath{path})
+
+	budgetImg := testDisplayImage(40, 30)
+	manager.cache.Add(imgCacheKey{path: path.Path, tier: tierBudget}, budgetImg)
+
+	got := manager.GetImage(0, imgdecode.Hint{})
+	if got != budgetImg {
+		t.Fatalf("GetImage() = %v, want the cached budget-tier image", got)
+	}
+	if got == manager.loadingPlaceholder {
+		t.Fatal("GetImage() returned the loading placeholder despite a cached budget-tier image with real pixels")
+	}
+}
+
+func TestGUI_GetImageTierFullWinsOverTierBudget(t *testing.T) {
+	manager := NewImageManager(4).(*DefaultImageManager)
+	t.Cleanup(func() {
+		manager.StopPreload()
+	})
+
+	path := ImagePath{Path: "both-tiers.png"}
+	manager.SetPaths([]ImagePath{path})
+
+	budgetImg := testDisplayImage(40, 30)
+	fullImg := testDisplayImage(400, 300)
+	manager.cache.Add(imgCacheKey{path: path.Path, tier: tierBudget}, budgetImg)
+	manager.cache.Add(imgCacheKey{path: path.Path, tier: tierFull}, fullImg)
+
+	got := manager.GetImage(0, imgdecode.Hint{})
+	if got != fullImg {
+		t.Fatalf("GetImage() = %v, want the full-tier image to win over the budget-tier one", got)
+	}
+}
+
+func TestGUI_TierFullLandingRemovesTierBudgetEntry(t *testing.T) {
+	fixture := requireFixture(t, filepath.Join("test_images", "debian-logo.png"))
+
+	manager := NewImageManager(4).(*DefaultImageManager)
+	t.Cleanup(func() {
+		manager.StopPreload()
+	})
+
+	imagePath := ImagePath{Path: fixture}
+
+	deallocated := false
+	budgetKey := imgCacheKey{path: imagePath.Path, tier: tierBudget}
+	manager.cache.Add(budgetKey, &deallocateTrackingDisplayImage{
+		DisplayImage: testDisplayImage(10, 10),
+		deallocated:  &deallocated,
+	})
+
+	// Simulate a tierFull decode landing, as processLoadRequest does on
+	// the async load worker after a real decode succeeds.
+	fullKey := imgCacheKey{path: imagePath.Path, tier: tierFull}
+	manager.processLoadRequest(loadRequest{path: imagePath, cacheKey: fullKey, source: loadSourceAsync})
+
+	if _, ok := manager.cache.Peek(budgetKey); ok {
+		t.Fatal("expected the budget-tier entry to be removed once the full-tier decode landed")
+	}
+	if !deallocated {
+		t.Fatal("expected the removed budget-tier entry to be deallocated")
+	}
+	if _, ok := manager.cache.Peek(fullKey); !ok {
+		t.Fatal("expected the full-tier entry to be present after processLoadRequest")
+	}
+}
+
+func TestGUI_EnsureResolutionNoopWhenAlreadyMaximal(t *testing.T) {
+	manager := NewImageManager(4).(*DefaultImageManager)
+	t.Cleanup(func() {
+		manager.StopPreload()
+	})
+
+	path := ImagePath{Path: "already-maximal.png"}
+	manager.SetPaths([]ImagePath{path})
+
+	// SourceBounds() == Bounds() here (testDisplayImage mirrors Bounds),
+	// i.e. imgdecode.Info.Reduced == false: no higher-resolution version
+	// exists, so EnsureResolution must not escalate even though this
+	// image is smaller than the hint below.
+	budgetImg := testDisplayImage(40, 30)
+	manager.cache.Add(imgCacheKey{path: path.Path, tier: tierBudget}, budgetImg)
+
+	manager.EnsureResolution(0, imgdecode.Hint{MaxWidth: 400, MaxHeight: 300})
+
+	if got := len(manager.refineRequests); got != 0 {
+		t.Fatalf("refineRequests queued = %d, want 0 (SourceBounds() == Bounds() must suppress escalation)", got)
+	}
+	manager.fullRequestedMu.Lock()
+	_, requested := manager.fullRequested[path.Path]
+	manager.fullRequestedMu.Unlock()
+	if requested {
+		t.Fatal("expected fullRequested to remain unset when nothing was escalated")
+	}
+}
+
+func TestGUI_EnsureResolutionAlreadyRequestedGuardSuppressesRepeats(t *testing.T) {
+	manager := NewImageManager(4).(*DefaultImageManager)
+	t.Cleanup(func() {
+		manager.StopPreload()
+	})
+
+	// A path that does not exist on disk: any refinement the worker
+	// happens to dequeue while this test runs will fail to decode, and a
+	// failed refinement must not clear the fullRequested guard (only
+	// eviction does) -- see processLoadRequest and clearFullRequested.
+	path := ImagePath{Path: "reduced-repeat.png"}
+	manager.SetPaths([]ImagePath{path})
+
+	budgetImg := &reducedDisplayImage{
+		DisplayImage: testDisplayImage(40, 30),
+		sourceBounds: image.Rect(0, 0, 400, 300),
+	}
+	manager.cache.Add(imgCacheKey{path: path.Path, tier: tierBudget}, budgetImg)
+
+	hint := imgdecode.Hint{MaxWidth: 400, MaxHeight: 300}
+
+	manager.EnsureResolution(0, hint)
+	manager.fullRequestedMu.Lock()
+	_, requestedAfterFirst := manager.fullRequested[path.Path]
+	manager.fullRequestedMu.Unlock()
+	if !requestedAfterFirst {
+		t.Fatal("expected fullRequested to be set after the first EnsureResolution call")
+	}
+
+	// requestFullResolution checks fullRequested before ever touching the
+	// refine queue, so repeated calls must not re-arm it.
+	manager.EnsureResolution(0, hint)
+	manager.EnsureResolution(0, hint)
+
+	manager.fullRequestedMu.Lock()
+	_, stillRequested := manager.fullRequested[path.Path]
+	manager.fullRequestedMu.Unlock()
+	if !stillRequested {
+		t.Fatal("expected fullRequested guard to remain set across repeated EnsureResolution calls")
+	}
+}
+
 func TestGUI_CreateDisplayImageTilesWhenOverLimit(t *testing.T) {
 	manager := NewImageManager(1).(*DefaultImageManager)
 	manager.SetMaxImageDimension(3)
@@ -353,7 +528,11 @@ func TestGUI_CreateDisplayImageTilesWhenOverLimit(t *testing.T) {
 	})
 
 	src := image.NewNRGBA(image.Rect(0, 0, defaultTileSize+1, 4))
-	img, err := manager.createEbitenImageFromDecoded(src, "large.png")
+	info := imgdecode.Info{
+		Width: defaultTileSize + 1, Height: 4,
+		SourceWidth: defaultTileSize + 1, SourceHeight: 4,
+	}
+	img, err := manager.createEbitenImageFromDecoded(src, "large.png", info)
 	if err != nil {
 		t.Fatalf("createEbitenImageFromDecoded() error = %v", err)
 	}

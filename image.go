@@ -81,6 +81,10 @@ type DisplayTile struct {
 
 type DisplayImage interface {
 	Bounds() image.Rectangle
+	// SourceBounds reports the full-resolution size of the original
+	// image. It equals Bounds() unless this DisplayImage was decoded from
+	// a reduced (budget-tier) hint, in which case it is strictly larger.
+	SourceBounds() image.Rectangle
 	Tiles() []DisplayTile
 	TileCount() int
 	Deallocate()
@@ -88,7 +92,12 @@ type DisplayImage interface {
 
 type tiledDisplayImage struct {
 	bounds image.Rectangle
-	tiles  []DisplayTile
+	// sourceW, sourceH hold the original image's full-resolution size.
+	// They equal bounds' dimensions unless this image was decoded from a
+	// reduced hint (see imgdecode.Info.Reduced).
+	sourceW int
+	sourceH int
+	tiles   []DisplayTile
 }
 
 func (i *tiledDisplayImage) Bounds() image.Rectangle {
@@ -96,6 +105,13 @@ func (i *tiledDisplayImage) Bounds() image.Rectangle {
 		return image.Rectangle{}
 	}
 	return i.bounds
+}
+
+func (i *tiledDisplayImage) SourceBounds() image.Rectangle {
+	if i == nil {
+		return image.Rectangle{}
+	}
+	return image.Rect(0, 0, i.sourceW, i.sourceH)
 }
 
 func (i *tiledDisplayImage) Tiles() []DisplayTile {
@@ -342,22 +358,31 @@ func (pm *PreloadManager) preloadImage(idx int) {
 	if !ok {
 		return
 	}
-	cacheKey := imagePath.Path
+	// Preloading always targets full resolution, matching every other
+	// caller in this change (see requestTier's doc comment).
+	cacheKey := imgCacheKey{path: imagePath.Path, tier: tierFull}
 
 	// Check if already in cache
 	if _, ok := pm.imageManager.cache.Get(cacheKey); ok {
-		debugKV("cache", "preload_skip", "reason", "already_cached", "idx", idx, "path", cacheKey)
+		debugKV("cache", "preload_skip", "reason", "already_cached", "idx", idx, "path", cacheKey.path)
 		return // Already cached
 	}
 
-	pm.imageManager.requestPreload(imagePath)
+	pm.imageManager.requestPreload(imagePath, tierFull)
 	pm.updateQueueSize(len(pm.imageManager.preloadRequests))
 }
 
 // ImageManager interface for managing image loading and caching
 type ImageManager interface {
-	GetImage(idx int) DisplayImage
-	GetBookModeImages(idx int, rightToLeft bool) (DisplayImage, DisplayImage)
+	GetImage(idx int, hint imgdecode.Hint) DisplayImage
+	GetBookModeImages(idx int, rightToLeft bool, leftHint, rightHint imgdecode.Hint) (DisplayImage, DisplayImage)
+	// EnsureResolution is the write-trigger counterpart to GetImage's read
+	// path: it queues a full-resolution refinement when the cached image
+	// for idx falls short of hint and a better decode actually exists. It
+	// is deliberately separate from GetImage (which never blocks on or
+	// queues a refinement itself beyond its normal cache-miss load) and is
+	// safe to call every frame.
+	EnsureResolution(idx int, hint imgdecode.Hint)
 	GetPath(idx int) (ImagePath, bool)
 	SetPaths(paths []ImagePath)
 	GetPathsCount() int
@@ -367,17 +392,75 @@ type ImageManager interface {
 	ConsumeAsyncRefresh() bool
 }
 
+// resTier identifies which resolution tier a cached DisplayImage was
+// decoded at.
+type resTier int
+
+const (
+	tierBudget resTier = iota // decoded to fit a display budget (Hint-constrained)
+	tierFull                  // full source resolution
+)
+
+func (t resTier) String() string {
+	if t == tierFull {
+		return "full"
+	}
+	return "budget"
+}
+
+// imgCacheKey identifies one resolution tier of one image path in the
+// cache. Keying by tier (rather than path alone) means a late-arriving
+// budget-tier result can never clobber an already-cached full-resolution
+// one -- they simply occupy different keys.
+type imgCacheKey struct {
+	path string
+	tier resTier
+}
+
+// loadSourceKind records why a loadRequest was enqueued, purely for queue
+// selection and logging.
+type loadSourceKind int
+
+const (
+	loadSourceAsync   loadSourceKind = iota // synchronous cache-miss from GetImage
+	loadSourcePreload                       // PreloadManager warming nearby pages
+	loadSourceRefine                        // EnsureResolution escalating budget -> full
+)
+
+func (k loadSourceKind) String() string {
+	switch k {
+	case loadSourcePreload:
+		return "preload"
+	case loadSourceRefine:
+		return "refine"
+	default:
+		return "async"
+	}
+}
+
 // DefaultImageManager implements ImageManager
 type DefaultImageManager struct {
-	paths              []ImagePath
-	cache              *lru.Cache[string, DisplayImage]
-	mu                 sync.RWMutex
-	preloadManager     *PreloadManager
-	maxImageDimension  atomic.Int64
-	loadRequests       chan loadRequest
-	preloadRequests    chan loadRequest
-	inflight           map[string]struct{}
-	inflightMu         sync.Mutex
+	paths             []ImagePath
+	cache             *lru.Cache[imgCacheKey, DisplayImage]
+	mu                sync.RWMutex
+	preloadManager    *PreloadManager
+	maxImageDimension atomic.Int64
+	loadRequests      chan loadRequest
+	preloadRequests   chan loadRequest
+	// refineRequests carries EnsureResolution's tierFull escalations. It
+	// is deliberately the lowest-priority queue (see asyncLoadWorker) and
+	// small, since a refinement must never crowd out real navigation or
+	// preload work.
+	refineRequests chan loadRequest
+	inflight       map[imgCacheKey]struct{}
+	inflightMu     sync.Mutex
+	// fullRequested guards against refinement request storms: once a
+	// path's tierFull load has been requested there is nothing more to
+	// escalate to (tierFull is a single maximal target), so further
+	// EnsureResolution calls for that path are no-ops until its cache
+	// entries are evicted (see the cache's onEvicted callback).
+	fullRequested      map[string]struct{}
+	fullRequestedMu    sync.Mutex
 	loadCtx            context.Context
 	loadCancel         context.CancelFunc
 	loadWorkerOnce     sync.Once
@@ -390,8 +473,8 @@ type DefaultImageManager struct {
 
 type loadRequest struct {
 	path     ImagePath
-	cacheKey string
-	preload  bool
+	cacheKey imgCacheKey
+	source   loadSourceKind
 }
 
 // loadTimings records per-phase durations for a single image load, used to
@@ -405,42 +488,44 @@ type loadTimings struct {
 	upload time.Duration
 }
 
-// NewImageManager creates a new DefaultImageManager
-func NewImageManager(cacheSize int) ImageManager {
-	cache, err := lru.NewWithEvict[string, DisplayImage](cacheSize, func(_ string, img DisplayImage) {
+// newManagedCache creates the tiered image LRU cache with an eviction
+// callback that deallocates the evicted DisplayImage and clears the owning
+// manager's "full resolution already requested" guard for that path (see
+// DefaultImageManager.fullRequested). The cache must exist before the
+// DefaultImageManager does (it's one of the struct's fields), so the
+// callback closes over managerRef and reads through it lazily; callers
+// fill *managerRef in immediately after construction, before any Add/Get
+// can trigger an eviction.
+func newManagedCache(cacheSize int, managerRef **DefaultImageManager) *lru.Cache[imgCacheKey, DisplayImage] {
+	onEvict := func(key imgCacheKey, img DisplayImage) {
 		if img != nil {
 			img.Deallocate()
 		}
-	})
+		if m := *managerRef; m != nil {
+			m.clearFullRequested(key.path)
+		}
+	}
+	cache, err := lru.NewWithEvict[imgCacheKey, DisplayImage](cacheSize, onEvict)
 	if err != nil {
 		errorKV("cache", "cache_create_failed", "requested_size", cacheSize, "error", err)
-		cache, _ = lru.NewWithEvict[string, DisplayImage](16, func(_ string, img DisplayImage) {
-			if img != nil {
-				img.Deallocate()
-			}
-		})
+		cache, _ = lru.NewWithEvict[imgCacheKey, DisplayImage](16, onEvict)
 	}
+	return cache
+}
 
-	return newDefaultImageManager(cache, 0)
+// NewImageManager creates a new DefaultImageManager
+func NewImageManager(cacheSize int) ImageManager {
+	var manager *DefaultImageManager
+	cache := newManagedCache(cacheSize, &manager)
+	manager = newDefaultImageManager(cache, 0)
+	return manager
 }
 
 // NewImageManagerWithPreload creates a new DefaultImageManager with preload configuration
 func NewImageManagerWithPreload(cacheSize int, preloadCount int, preloadEnabled bool) ImageManager {
-	cache, err := lru.NewWithEvict[string, DisplayImage](cacheSize, func(_ string, img DisplayImage) {
-		if img != nil {
-			img.Deallocate()
-		}
-	})
-	if err != nil {
-		errorKV("cache", "cache_create_failed", "requested_size", cacheSize, "error", err)
-		cache, _ = lru.NewWithEvict[string, DisplayImage](16, func(_ string, img DisplayImage) {
-			if img != nil {
-				img.Deallocate()
-			}
-		})
-	}
-
-	manager := newDefaultImageManager(cache, preloadCount)
+	var manager *DefaultImageManager
+	cache := newManagedCache(cacheSize, &manager)
+	manager = newDefaultImageManager(cache, preloadCount)
 
 	// Initialize preload manager with configuration
 	manager.preloadManager = NewPreloadManager(manager, preloadCount)
@@ -472,14 +557,22 @@ func preloadQueueCapacity(preloadCount int) int {
 	return capacity
 }
 
-func newDefaultImageManager(cache *lru.Cache[string, DisplayImage], preloadCount int) *DefaultImageManager {
+// refineQueueCapacity is deliberately small: refinements are a background
+// nicety, never a substitute for real navigation or preload work, so a
+// backlog here should apply backpressure (via enqueueLoadRequest's
+// queue-full skip) rather than accumulate.
+const refineQueueCapacity = 4
+
+func newDefaultImageManager(cache *lru.Cache[imgCacheKey, DisplayImage], preloadCount int) *DefaultImageManager {
 	loadCtx, loadCancel := context.WithCancel(context.Background())
 	manager := &DefaultImageManager{
 		paths:              []ImagePath{},
 		cache:              cache,
 		loadRequests:       make(chan loadRequest, 8),
 		preloadRequests:    make(chan loadRequest, preloadQueueCapacity(preloadCount)),
-		inflight:           make(map[string]struct{}),
+		refineRequests:     make(chan loadRequest, refineQueueCapacity),
+		inflight:           make(map[imgCacheKey]struct{}),
+		fullRequested:      make(map[string]struct{}),
 		loadCtx:            loadCtx,
 		loadCancel:         loadCancel,
 		loadingPlaceholder: createLoadingPlaceholder(),
@@ -504,6 +597,13 @@ func (m *DefaultImageManager) startLoadWorker() {
 	})
 }
 
+// asyncLoadWorker drains loadRequests, preloadRequests, and refineRequests
+// in strict priority order -- a real navigation load always wins over a
+// preload, and a preload always wins over a background refinement -- by
+// checking each queue non-blockingly before falling back to a blocking
+// select across all of them (plus preloadRequests and loadRequests again,
+// so a request that arrives while this goroutine was blocked isn't stuck
+// behind a still-empty refineRequests wakeup).
 func (m *DefaultImageManager) asyncLoadWorker() {
 	defer m.archiveCache.closeAll()
 	for {
@@ -516,6 +616,17 @@ func (m *DefaultImageManager) asyncLoadWorker() {
 		select {
 		case req := <-m.loadRequests:
 			m.processLoadRequest(req)
+			continue
+		default:
+		}
+
+		select {
+		case req := <-m.loadRequests:
+			m.processLoadRequest(req)
+			continue
+		case req := <-m.preloadRequests:
+			m.processLoadRequest(req)
+			continue
 		default:
 			select {
 			case <-m.loadCtx.Done():
@@ -523,6 +634,8 @@ func (m *DefaultImageManager) asyncLoadWorker() {
 			case req := <-m.loadRequests:
 				m.processLoadRequest(req)
 			case req := <-m.preloadRequests:
+				m.processLoadRequest(req)
+			case req := <-m.refineRequests:
 				m.processLoadRequest(req)
 			}
 		}
@@ -541,27 +654,37 @@ func (m *DefaultImageManager) processLoadRequest(req loadRequest) {
 	if err != nil {
 		errorKV("cache", "cache_load_failed",
 			"path", req.path.Path,
-			"source", loadSource(req.preload),
+			"tier", req.cacheKey.tier,
+			"source", req.source,
 			"error", err,
 			"total_ms", formatMillis(time.Since(start)),
 		)
 		errorImg := createDisplayImageFromEbitenImage(CreateErrorImage(400, 300, req.path.Path, err.Error()))
 		m.cache.Add(req.cacheKey, errorImg)
 		m.asyncRefresh.Store(true)
-		m.recordPreloadResult(req.preload, false)
+		m.recordPreloadResult(req.source == loadSourcePreload, false)
 		return
 	}
 
 	m.cache.Add(req.cacheKey, img)
+	if req.cacheKey.tier == tierFull {
+		// A full-resolution decode landed: drop the now-redundant budget
+		// entry (if any) for the same path so steady-state cache usage
+		// stays at one entry per path. The evict callback deallocates it.
+		// This only runs on success -- a failed refinement must never
+		// evict a working budget-tier image out from under the reader.
+		m.cache.Remove(imgCacheKey{path: req.cacheKey.path, tier: tierBudget})
+	}
 	m.asyncRefresh.Store(true)
-	m.recordPreloadResult(req.preload, true)
+	m.recordPreloadResult(req.source == loadSourcePreload, true)
 
 	if debugMode {
 		var mem runtime.MemStats
 		runtime.ReadMemStats(&mem)
 		debugKV("cache", "cache_load_complete",
-			"path", req.cacheKey,
-			"source", loadSource(req.preload),
+			"path", req.cacheKey.path,
+			"tier", req.cacheKey.tier,
+			"source", req.source,
 			"cache_len", m.cache.Len(),
 			"mem_mb", mem.Alloc/1024/1024,
 		)
@@ -569,8 +692,9 @@ func (m *DefaultImageManager) processLoadRequest(req loadRequest) {
 
 	bounds := img.Bounds()
 	debugKV("cache", "load_timing",
-		"path", req.cacheKey,
-		"source", loadSource(req.preload),
+		"path", req.cacheKey.path,
+		"tier", req.cacheKey.tier,
+		"source", req.source,
 		"read_ms", formatMillis(timings.read),
 		"decode_ms", formatMillis(timings.decode),
 		"upload_ms", formatMillis(timings.upload),
@@ -588,20 +712,35 @@ func formatMillis(d time.Duration) string {
 	return strconv.FormatFloat(float64(d.Nanoseconds())/1e6, 'f', 2, 64)
 }
 
-func (m *DefaultImageManager) requestAsyncLoad(imagePath ImagePath) {
-	m.enqueueLoadRequest(imagePath, false)
+func (m *DefaultImageManager) requestAsyncLoad(imagePath ImagePath, tier resTier) {
+	m.enqueueLoadRequest(imagePath, tier, loadSourceAsync)
 }
 
-func (m *DefaultImageManager) requestPreload(imagePath ImagePath) {
-	m.enqueueLoadRequest(imagePath, true)
+func (m *DefaultImageManager) requestPreload(imagePath ImagePath, tier resTier) {
+	m.enqueueLoadRequest(imagePath, tier, loadSourcePreload)
 }
 
-func (m *DefaultImageManager) enqueueLoadRequest(imagePath ImagePath, preload bool) {
-	cacheKey := imagePath.Path
+// queueFor picks the channel (and its debug name) a request of kind should
+// be sent on. loadRequests > preloadRequests > refineRequests in priority;
+// see asyncLoadWorker.
+func (m *DefaultImageManager) queueFor(kind loadSourceKind) (chan loadRequest, string) {
+	switch kind {
+	case loadSourcePreload:
+		return m.preloadRequests, "preload"
+	case loadSourceRefine:
+		return m.refineRequests, "refine"
+	default:
+		return m.loadRequests, "async"
+	}
+}
+
+func (m *DefaultImageManager) enqueueLoadRequest(imagePath ImagePath, tier resTier, kind loadSourceKind) {
+	cacheKey := imgCacheKey{path: imagePath.Path, tier: tier}
 	if _, ok := m.cache.Get(cacheKey); ok {
 		debugKV("cache", "cache_enqueue_skip",
-			"path", cacheKey,
-			"source", loadSource(preload),
+			"path", cacheKey.path,
+			"tier", cacheKey.tier,
+			"source", kind,
 			"reason", "already_cached",
 		)
 		return
@@ -611,8 +750,9 @@ func (m *DefaultImageManager) enqueueLoadRequest(imagePath ImagePath, preload bo
 	if _, exists := m.inflight[cacheKey]; exists {
 		m.inflightMu.Unlock()
 		debugKV("cache", "cache_enqueue_skip",
-			"path", cacheKey,
-			"source", loadSource(preload),
+			"path", cacheKey.path,
+			"tier", cacheKey.tier,
+			"source", kind,
 			"reason", "already_inflight",
 		)
 		return
@@ -620,42 +760,40 @@ func (m *DefaultImageManager) enqueueLoadRequest(imagePath ImagePath, preload bo
 	m.inflight[cacheKey] = struct{}{}
 	m.inflightMu.Unlock()
 
-	req := loadRequest{path: imagePath, cacheKey: cacheKey, preload: preload}
-	queue := m.loadRequests
-	queueName := "async"
-	if preload {
-		queue = m.preloadRequests
-		queueName = "preload"
-	}
+	req := loadRequest{path: imagePath, cacheKey: cacheKey, source: kind}
+	queue, queueName := m.queueFor(kind)
 
 	select {
 	case <-m.loadCtx.Done():
 		m.clearInflight(cacheKey)
 		debugKV("cache", "cache_enqueue_skip",
-			"path", cacheKey,
-			"source", loadSource(preload),
+			"path", cacheKey.path,
+			"tier", cacheKey.tier,
+			"source", kind,
 			"reason", "load_context_closed",
 		)
 	case queue <- req:
 		m.updatePreloadQueueSize()
 		debugKV("cache", "cache_enqueue",
-			"path", cacheKey,
-			"source", loadSource(preload),
+			"path", cacheKey.path,
+			"tier", cacheKey.tier,
+			"source", kind,
 			"queue", queueName,
 			"queue_len", len(queue),
 		)
 	default:
 		m.clearInflight(cacheKey)
 		debugKV("cache", "cache_enqueue_skip",
-			"path", cacheKey,
-			"source", loadSource(preload),
+			"path", cacheKey.path,
+			"tier", cacheKey.tier,
+			"source", kind,
 			"queue", queueName,
 			"reason", "queue_full",
 		)
 	}
 }
 
-func (m *DefaultImageManager) clearInflight(cacheKey string) {
+func (m *DefaultImageManager) clearInflight(cacheKey imgCacheKey) {
 	m.inflightMu.Lock()
 	delete(m.inflight, cacheKey)
 	m.inflightMu.Unlock()
@@ -675,25 +813,42 @@ func (m *DefaultImageManager) recordPreloadResult(preload bool, success bool) {
 	m.preloadManager.recordResult(success, len(m.preloadRequests))
 }
 
+// clearFullRequested drops path's "full resolution already requested"
+// guard. It runs from the cache's onEvicted callback, so once every entry
+// for a path has left the cache, a future EnsureResolution call is free to
+// request tierFull again from scratch.
+func (m *DefaultImageManager) clearFullRequested(path string) {
+	m.fullRequestedMu.Lock()
+	delete(m.fullRequested, path)
+	m.fullRequestedMu.Unlock()
+}
+
 func createLoadingPlaceholder() DisplayImage {
 	img := ebiten.NewImage(200, 150)
 	img.Fill(color.RGBA{45, 45, 45, 255})
 	return createDisplayImageFromEbitenImage(img)
 }
 
+// createDisplayImageFromEbitenImage wraps img as a single-tile DisplayImage
+// whose SourceBounds mirrors Bounds -- appropriate for callers (the loading
+// placeholder, the error image) that have no decode Info describing a
+// separate source resolution.
 func createDisplayImageFromEbitenImage(img *ebiten.Image) DisplayImage {
 	if img == nil {
 		return nil
 	}
 	bounds := img.Bounds()
+	w, h := bounds.Dx(), bounds.Dy()
 	return &tiledDisplayImage{
-		bounds: image.Rect(0, 0, bounds.Dx(), bounds.Dy()),
+		bounds:  image.Rect(0, 0, w, h),
+		sourceW: w,
+		sourceH: h,
 		tiles: []DisplayTile{{
 			Image: img,
 			X:     0,
 			Y:     0,
-			W:     bounds.Dx(),
-			H:     bounds.Dy(),
+			W:     w,
+			H:     h,
 		}},
 	}
 }
@@ -743,23 +898,36 @@ func (m *DefaultImageManager) GetPath(idx int) (ImagePath, bool) {
 	return m.getPath(idx)
 }
 
-func (m *DefaultImageManager) GetBookModeImages(idx int, rightToLeft bool) (DisplayImage, DisplayImage) {
+func (m *DefaultImageManager) GetBookModeImages(idx int, rightToLeft bool, leftHint, rightHint imgdecode.Hint) (DisplayImage, DisplayImage) {
 	var leftImg, rightImg DisplayImage
 
 	if rightToLeft {
 		// Right-to-left reading (Japanese manga style): [next][current]
-		leftImg = m.GetImage(idx + 1) // Next image on left
-		rightImg = m.GetImage(idx)    // Current image on right
+		leftImg = m.GetImage(idx+1, leftHint) // Next image on left
+		rightImg = m.GetImage(idx, rightHint) // Current image on right
 	} else {
 		// Left-to-right reading (Western style): [current][next]
-		leftImg = m.GetImage(idx)      // Current image on left
-		rightImg = m.GetImage(idx + 1) // Next image on right (nil if OOB)
+		leftImg = m.GetImage(idx, leftHint)     // Current image on left
+		rightImg = m.GetImage(idx+1, rightHint) // Next image on right (nil if OOB)
 	}
 
 	return leftImg, rightImg
 }
 
-func (m *DefaultImageManager) GetImage(idx int) DisplayImage {
+// requestTier picks the cache tier a fresh (nothing cached yet) load
+// should target for hint. An unconstrained hint -- imgdecode.Hint{}, which
+// every call site in this change passes -- asks for the image outright, so
+// it goes straight to tierFull; a real constraint starts at tierBudget and
+// may later be escalated by EnsureResolution. This is the seam a future
+// change will use to request genuinely reduced decodes.
+func requestTier(hint imgdecode.Hint) resTier {
+	if hint.MaxWidth > 0 || hint.MaxHeight > 0 {
+		return tierBudget
+	}
+	return tierFull
+}
+
+func (m *DefaultImageManager) GetImage(idx int, hint imgdecode.Hint) DisplayImage {
 	m.mu.RLock()
 	if idx < 0 || idx >= len(m.paths) {
 		m.mu.RUnlock()
@@ -767,18 +935,96 @@ func (m *DefaultImageManager) GetImage(idx int) DisplayImage {
 	}
 	imagePath := m.paths[idx]
 	m.mu.RUnlock()
-	cacheKey := imagePath.Path
 
-	// Check if image is already in cache
-	img, ok := m.cache.Get(cacheKey)
-	if ok {
+	// tierFull is always "good enough": nothing beats full resolution.
+	if img, ok := m.cache.Get(imgCacheKey{path: imagePath.Path, tier: tierFull}); ok {
 		return img
 	}
 
-	debugKV("cache", "cache_lookup_miss", "idx", idx, "path", cacheKey)
+	// A budget-tier hit still has real pixels, so return it immediately
+	// even if it may be too small for hint -- never fall back to the
+	// placeholder when real pixels exist. Whether it's actually too small
+	// is EnsureResolution's decision (the write-triggered path), queued
+	// here as a side effect but not blocking this read.
+	if img, ok := m.cache.Get(imgCacheKey{path: imagePath.Path, tier: tierBudget}); ok {
+		m.EnsureResolution(idx, hint)
+		return img
+	}
+
+	debugKV("cache", "cache_lookup_miss", "idx", idx, "path", imagePath.Path)
 	m.startLoadWorker()
-	m.requestAsyncLoad(imagePath)
+	m.requestAsyncLoad(imagePath, requestTier(hint))
 	return m.loadingPlaceholder
+}
+
+// sufficientForHint reports whether an already-decoded image's bounds meet
+// hint's requested display box. A zero field in hint (imgdecode.Hint's
+// documented "no limit" zero value) is always satisfied on that axis.
+func sufficientForHint(bounds image.Rectangle, hint imgdecode.Hint) bool {
+	if hint.MaxWidth > 0 && bounds.Dx() < hint.MaxWidth {
+		return false
+	}
+	if hint.MaxHeight > 0 && bounds.Dy() < hint.MaxHeight {
+		return false
+	}
+	return true
+}
+
+// EnsureResolution queues a tierFull refinement for idx when the cached
+// image falls short of hint and a higher-resolution decode actually
+// exists. It never blocks and is safe to call every frame -- every check
+// here is a cheap cache Peek or guarded map lookup, and the actual escalate
+// happens (if at all) on the background load worker.
+func (m *DefaultImageManager) EnsureResolution(idx int, hint imgdecode.Hint) {
+	imagePath, ok := m.getPath(idx)
+	if !ok {
+		return
+	}
+
+	if _, ok := m.cache.Peek(imgCacheKey{path: imagePath.Path, tier: tierFull}); ok {
+		// Already at the maximal tier; nothing left to escalate to.
+		return
+	}
+
+	img, ok := m.cache.Peek(imgCacheKey{path: imagePath.Path, tier: tierBudget})
+	if !ok {
+		// Nothing cached yet for this path; GetImage's own cache-miss
+		// path is responsible for the initial load.
+		return
+	}
+
+	// Reduced == false (imgdecode.Info) means no higher-resolution version
+	// of this image exists, which is exactly SourceBounds() == Bounds()
+	// here. Treating that as "already maximal" keeps this structurally
+	// true even for a stdlib-only build, where every decode always
+	// reports Reduced == false and so can never trigger a refinement.
+	if img.SourceBounds() == img.Bounds() {
+		return
+	}
+
+	if sufficientForHint(img.Bounds(), hint) {
+		return
+	}
+
+	m.requestFullResolution(imagePath)
+}
+
+// requestFullResolution escalates path to tierFull, guarded by
+// fullRequested so a path already requested (still loading, or resolved
+// and still cached) is never re-queued -- tierFull is a single maximal
+// target, so there is nothing further to escalate to once it has been
+// asked for. The guard is cleared when the path's cache entries are
+// evicted (see newManagedCache), allowing a fresh request afterward.
+func (m *DefaultImageManager) requestFullResolution(imagePath ImagePath) {
+	m.fullRequestedMu.Lock()
+	if _, already := m.fullRequested[imagePath.Path]; already {
+		m.fullRequestedMu.Unlock()
+		return
+	}
+	m.fullRequested[imagePath.Path] = struct{}{}
+	m.fullRequestedMu.Unlock()
+
+	m.enqueueLoadRequest(imagePath, tierFull, loadSourceRefine)
 }
 
 // getPath safely returns the ImagePath at index if available
@@ -798,33 +1044,38 @@ func (m *DefaultImageManager) getPath(idx int) (ImagePath, bool) {
 func (m *DefaultImageManager) loadImageFromBytes(data []byte, path string) (DisplayImage, loadTimings, error) {
 	var timings loadTimings
 
+	// hint is Hint{} (unconstrained) for now: this only switches the
+	// decode boundary onto the *Scaled entry points so Info -- and thus
+	// DisplayImage.SourceBounds -- is populated. Actually requesting a
+	// reduced decode is a later change.
 	decodeStart := time.Now()
-	decoded, err := imgdecode.DecodeBytes(data, path)
+	decoded, info, err := imgdecode.DecodeBytesScaled(data, path, imgdecode.Hint{})
 	timings.decode = time.Since(decodeStart)
 	if err != nil {
 		return nil, timings, fmt.Errorf("decoding %s: %v", path, err)
 	}
 
 	uploadStart := time.Now()
-	img, err := m.createEbitenImageFromDecoded(decoded, path)
+	img, err := m.createEbitenImageFromDecoded(decoded, path, info)
 	timings.upload = time.Since(uploadStart)
 	return img, timings, err
 }
 
 func (m *DefaultImageManager) loadImage(imagePath ImagePath) (DisplayImage, loadTimings, error) {
 	if imagePath.ArchivePath == "" {
-		// imgdecode.DecodeFile does its own os.ReadFile internally, so read
-		// time isn't separable from decode time on this path; read_ms stays
-		// zero here (see loadTimings doc comment).
+		// imgdecode.DecodeFileScaled does its own os.ReadFile internally,
+		// so read time isn't separable from decode time on this path;
+		// read_ms stays zero here (see loadTimings doc comment). hint is
+		// Hint{} for the same reason as loadImageFromBytes above.
 		decodeStart := time.Now()
-		decoded, err := imgdecode.DecodeFile(imagePath.Path)
+		decoded, info, err := imgdecode.DecodeFileScaled(imagePath.Path, imgdecode.Hint{})
 		timings := loadTimings{decode: time.Since(decodeStart)}
 		if err != nil {
 			return nil, timings, fmt.Errorf("decoding %s: %v", imagePath.Path, err)
 		}
 
 		uploadStart := time.Now()
-		img, err := m.createEbitenImageFromDecoded(decoded, imagePath.Path)
+		img, err := m.createEbitenImageFromDecoded(decoded, imagePath.Path, info)
 		timings.upload = time.Since(uploadStart)
 		return img, timings, err
 	}
@@ -841,7 +1092,21 @@ func (m *DefaultImageManager) loadImage(imagePath ImagePath) (DisplayImage, load
 	return img, timings, err
 }
 
-func (m *DefaultImageManager) createEbitenImageFromDecoded(src image.Image, origin string) (DisplayImage, error) {
+// applySourceDims records a decode's full source resolution (imgdecode.Info)
+// onto img, so DisplayImage.SourceBounds reflects it even though the
+// single-texture and tiled construction paths below don't otherwise see
+// Info. tiledDisplayImage is the only DisplayImage this package builds, so
+// the type assertion always succeeds for images built here.
+func applySourceDims(img DisplayImage, info imgdecode.Info) {
+	di, ok := img.(*tiledDisplayImage)
+	if !ok || di == nil {
+		return
+	}
+	di.sourceW = info.SourceWidth
+	di.sourceH = info.SourceHeight
+}
+
+func (m *DefaultImageManager) createEbitenImageFromDecoded(src image.Image, origin string, info imgdecode.Info) (DisplayImage, error) {
 	if src == nil {
 		return nil, fmt.Errorf("decoded image is nil for %s", origin)
 	}
@@ -858,11 +1123,17 @@ func (m *DefaultImageManager) createEbitenImageFromDecoded(src image.Image, orig
 			"limit", limit,
 			"tile_size", defaultTileSize,
 		)
-		return createTiledDisplayImage(src, defaultTileSize)
+		tiled, err := createTiledDisplayImage(src, defaultTileSize)
+		if err != nil {
+			return nil, err
+		}
+		applySourceDims(tiled, info)
+		return tiled, nil
 	}
 
 	img, err := newDisplayImageFromImage(src)
 	if err == nil {
+		applySourceDims(img, info)
 		return img, nil
 	}
 
@@ -873,7 +1144,12 @@ func (m *DefaultImageManager) createEbitenImageFromDecoded(src image.Image, orig
 		"error", err,
 		"fallback", "tiled",
 	)
-	return createTiledDisplayImage(src, fallbackTileSize)
+	tiled, err := createTiledDisplayImage(src, fallbackTileSize)
+	if err != nil {
+		return nil, err
+	}
+	applySourceDims(tiled, info)
+	return tiled, nil
 }
 
 func newDisplayImageFromImage(src image.Image) (DisplayImage, error) {
@@ -1207,11 +1483,4 @@ func collectImages(args []string, sortMethod int) ([]ImagePath, error) {
 		"paths_count", len(list),
 	)
 	return list, nil
-}
-
-func loadSource(preload bool) string {
-	if preload {
-		return "preload"
-	}
-	return "async"
 }

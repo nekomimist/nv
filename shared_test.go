@@ -1,6 +1,10 @@
 package main
 
-import "github.com/hajimehoshi/ebiten/v2"
+import (
+	"github.com/hajimehoshi/ebiten/v2"
+
+	"nv/internal/imgdecode"
+)
 
 type stubImageManager struct {
 	paths             []ImagePath
@@ -20,19 +24,21 @@ func testDisplayImages(images ...*ebiten.Image) []DisplayImage {
 	return result
 }
 
-func (m *stubImageManager) GetImage(idx int) DisplayImage {
+func (m *stubImageManager) GetImage(idx int, hint imgdecode.Hint) DisplayImage {
 	if idx < 0 || idx >= len(m.images) {
 		return nil
 	}
 	return m.images[idx]
 }
 
-func (m *stubImageManager) GetBookModeImages(idx int, rightToLeft bool) (DisplayImage, DisplayImage) {
+func (m *stubImageManager) GetBookModeImages(idx int, rightToLeft bool, leftHint, rightHint imgdecode.Hint) (DisplayImage, DisplayImage) {
 	if rightToLeft {
-		return m.GetImage(idx + 1), m.GetImage(idx)
+		return m.GetImage(idx+1, leftHint), m.GetImage(idx, rightHint)
 	}
-	return m.GetImage(idx), m.GetImage(idx + 1)
+	return m.GetImage(idx, leftHint), m.GetImage(idx+1, rightHint)
 }
+
+func (m *stubImageManager) EnsureResolution(idx int, hint imgdecode.Hint) {}
 
 func (m *stubImageManager) GetPath(idx int) (ImagePath, bool) {
 	if idx < 0 || idx >= len(m.paths) {

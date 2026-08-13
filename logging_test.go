@@ -11,6 +11,7 @@ import (
 
 	"github.com/hajimehoshi/ebiten/v2"
 	lru "github.com/hashicorp/golang-lru/v2"
+	"nv/internal/imgdecode"
 	"nv/navlogic"
 )
 
@@ -147,7 +148,7 @@ func TestLogDisplayPlanEmitsStructuredNavigationEvents(t *testing.T) {
 }
 
 func TestDefaultImageManagerGetImageLogsCacheMiss(t *testing.T) {
-	cache, err := lru.NewWithEvict[string, DisplayImage](2, func(_ string, img DisplayImage) {
+	cache, err := lru.NewWithEvict[imgCacheKey, DisplayImage](2, func(_ imgCacheKey, img DisplayImage) {
 		if img != nil {
 			img.Deallocate()
 		}
@@ -163,7 +164,7 @@ func TestDefaultImageManagerGetImageLogsCacheMiss(t *testing.T) {
 	manager.SetPaths([]ImagePath{{Path: "/tmp/missing.png"}})
 
 	got := captureLogOutput(t, true, func() {
-		_ = manager.GetImage(0)
+		_ = manager.GetImage(0, imgdecode.Hint{})
 	})
 
 	for _, want := range []string{
