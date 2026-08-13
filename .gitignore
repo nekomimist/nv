@@ -11,6 +11,8 @@
 # Output of the go build command, i.e. the binary name
 nv
 nv.exe
+nv-debug
+nv-native
 nv.syso
 
 # Go workspace file
@@ -37,3 +39,6 @@ test_images/
 
 # Go build cache
 .gocache/
+
+# Windows native-decode dependencies (fetched/built by scripts/windows-deps.sh)
+third_party/
