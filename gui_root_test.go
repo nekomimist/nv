@@ -407,13 +407,13 @@ func TestGUI_CreateTiledDisplayImageTilesHaveDistinctContentAndGutters(t *testin
 
 	originalConverter := newUnmanagedEbitenImageFn
 	newUnmanagedEbitenImageFn = func(tileSrc image.Image) (*ebiten.Image, error) {
-		nrgba := tileSrc.(*image.NRGBA)
-		b := nrgba.Bounds()
+		rgba := tileSrc.(*image.RGBA)
+		b := rgba.Bounds()
 		captured = append(captured, capturedTile{
 			w:      b.Dx(),
 			h:      b.Dy(),
-			stride: nrgba.Stride,
-			pix:    append([]byte(nil), nrgba.Pix...), // copy: scratch buffer may be reused next iteration
+			stride: rgba.Stride,
+			pix:    append([]byte(nil), rgba.Pix...), // copy: scratch buffer may be reused next iteration
 		})
 		return originalConverter(tileSrc)
 	}

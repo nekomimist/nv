@@ -923,7 +923,7 @@ func createTiledDisplayImage(src image.Image, tileSize int) (DisplayImage, error
 	// ebiten.NewImageFromImageWithOptions (via newUnmanagedEbitenImage)
 	// copies pixel data synchronously without retaining the source
 	// image, so reusing this buffer across tiles is safe.
-	tileScratch := image.NewNRGBA(image.Rect(0, 0, tileSize, tileSize))
+	tileScratch := image.NewRGBA(image.Rect(0, 0, tileSize, tileSize))
 
 	for y := 0; y < height; y += coreTileSize {
 		tileH := min(coreTileSize, height-y)
@@ -933,7 +933,7 @@ func createTiledDisplayImage(src image.Image, tileSize int) (DisplayImage, error
 			textureH := tileH + 2*tileGutterSize
 			tileSrc := tileScratch
 			if textureW != tileSize || textureH != tileSize {
-				tileSrc = image.NewNRGBA(image.Rect(0, 0, textureW, textureH))
+				tileSrc = image.NewRGBA(image.Rect(0, 0, textureW, textureH))
 			}
 
 			sampleRect := image.Rect(
@@ -970,7 +970,7 @@ func createTiledDisplayImage(src image.Image, tileSize int) (DisplayImage, error
 // drawTileWithClampedGutter copies srcRect into dst. The part of srcRect
 // outside src.Bounds is filled by extending the nearest edge pixel, matching
 // clamp-to-edge sampling at the outer boundary of the complete image.
-func drawTileWithClampedGutter(dst *image.NRGBA, src image.Image, srcRect image.Rectangle) {
+func drawTileWithClampedGutter(dst *image.RGBA, src image.Image, srcRect image.Rectangle) {
 	srcBounds := src.Bounds()
 	clipped := srcRect.Intersect(srcBounds)
 	dstMin := clipped.Min.Sub(srcRect.Min)
