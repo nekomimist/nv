@@ -129,9 +129,14 @@ test-pure:
 	@echo "Running pure tests..."
 	GOCACHE=/tmp/nv-go-build-cache go test ./navlogic
 
+.PHONY: test-jxl-large
+test-jxl-large:
+	@echo "Full-decoding the optional large JPEG XL fixture..."
+	NV_TEST_LARGE_JXL=1 GOCACHE=/tmp/nv-go-build-cache go test ./internal/imgdecode -run '^TestDecodeLargeJXLFixture$$' -v -count=1
+
 .PHONY: bench-decode
 bench-decode:
-	@echo "Benchmarking stdlib image decode..."
+	@echo "Benchmarking registered Go image decode..."
 	GOCACHE=/tmp/nv-go-build-cache go test ./internal/imgdecode -run '^$$' -bench '^BenchmarkDecode' -benchmem -count=5
 
 .PHONY: bench-decode-native
@@ -187,7 +192,7 @@ help:
 	@echo ""
 	@echo "  make           - Build Linux and Windows versions"
 	@echo "  make linux     - Build Linux version"
-	@echo "  make linux-native - Build Linux version with CGO native PNG/JPEG decode"
+	@echo "  make linux-native - Build Linux version with CGO native PNG/JPEG/WebP decode"
 	@echo "  make windows   - Build Windows GUI version"
 	@echo "  make windows-native - Build Windows GUI version with CGO WIC decode"
 	@echo "  make debug     - Build Windows debug version (with console)"
@@ -201,8 +206,9 @@ help:
 	@echo "  make windows-deps - Fetch/build libdeflate+libwebp for windows-native"
 	@echo "  make test      - Run tests"
 	@echo "  make test-pure - Run strict pure/headless-safe tests"
-	@echo "  make bench-decode - Benchmark stdlib PNG/JPEG decode"
-	@echo "  make bench-decode-native - Benchmark native PNG/JPEG decode"
+	@echo "  make test-jxl-large - Full-decode the optional large JPEG XL fixture"
+	@echo "  make bench-decode - Benchmark registered Go image decoders"
+	@echo "  make bench-decode-native - Benchmark native and registered Go image decoders"
 	@echo "  make bench-decode-windows - Benchmark Windows stdlib/WIC decode via WSL"
 	@echo "  make test-root-pure - Run logic-oriented root-package tests"
 	@echo "  make test-gui  - Run GUI-dependent tests"

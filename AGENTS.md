@@ -3,7 +3,7 @@
 A quick orientation for humans and AI agents working on this repo. Short, factual, and extensible.
 
 ## Overview
-- Go 1.24+. Entry point is `startup.go`.
+- Go 1.26+. Entry point is `startup.go`.
 - The app is a mostly root-package Ebiten viewer, with pure navigation logic in `navlogic/` and decode helpers in `internal/imgdecode/`.
 - Build outputs include `nv`, `nv.exe`, `nv-debug.exe`, `nv-native`, and `nv-native.exe`. Test fixtures live in `test_images/`.
 - Detailed design notes live in `docs/architecture.md`; technical follow-ups live in `docs/todo.md`.
@@ -12,7 +12,7 @@ A quick orientation for humans and AI agents working on this repo. Short, factua
 - Build: `make linux` / `make windows` / `make debug` (Windows icon requires `rsrc`).
 - Native decode build: `make linux-native` / `make windows-native`.
 - Run: `go run . [images|directories|archives...]`
-- Checks: `make test` / `make test-pure` / `make test-root-pure` / `make test-gui` / `make fmt` / `make vet` / `make lint` / `make check`
+- Checks: `make test` / `make test-pure` / `make test-root-pure` / `make test-gui` / `make test-jxl-large` / `make fmt` / `make vet` / `make lint` / `make check`
 - Decode benchmarks: `make bench-decode` / `make bench-decode-native` / `make bench-decode-windows`
 - Utilities: `make deps` / `make icon` / `make clean` / `make distclean` / `make info`
 
@@ -33,7 +33,7 @@ A quick orientation for humans and AI agents working on this repo. Short, factua
 - `bounds.go`: Shared numeric bounds (min/max/default) used by config validation and settings UI clamps.
 - `image.go`: Image collection from files/directories/archives, async loading, preload queue, LRU cache, and Ebiten image creation.
 - `archive.go`, `archive_cache.go`: Shared ZIP/RAR/7z read abstraction (`archiveHandle`) and the bounded archive-handle cache owned by the async load worker.
-- `internal/imgdecode/`: Stdlib/native PNG/JPEG decode boundary, tests, and benchmarks.
+- `internal/imgdecode/`: Registered-Go/native image decode boundary, including pure-Go JPEG XL, tests, and benchmarks.
 - `navlogic/`: Headless-safe book-mode/navigation planning logic and tests.
 - `single_instance*.go`: Platform-specific single-instance lock and argument forwarding.
 - `logging.go`: Structured logging helpers.
@@ -62,11 +62,13 @@ A quick orientation for humans and AI agents working on this repo. Short, factua
 - `make test-root-pure`: root-package `TestPure...` subset. These avoid GUI behavior but still build the Ebiten-backed root package.
 - `make test-gui`: root-package `TestGUI...` subset for renderer/Ebiten-dependent behavior.
 - Use `test_images/` fixtures. Keep new pure logic outside Ebiten paths when practical.
+- `make test-jxl-large` explicitly full-decodes the optional `test_images/jpegxltest.jxl` fixture; it is excluded from normal tests because of its memory cost.
 - If running Go commands directly in restricted environments, set `GOCACHE` to a writable path such as `/tmp/nv-go-build-cache`.
 
 ## Platform Notes
 - For Windows builds, install `rsrc`: `go install github.com/akavel/rsrc@latest`.
 - Linux native decode builds need `libpng-dev`, `libturbojpeg0-dev`, `libwebp-dev`, `libdeflate-dev`, and CGO.
+- JPEG XL uses the pure-Go decoder in both regular and native builds and needs no platform library.
 - Windows native decode cross-builds from WSL need `gcc-mingw-w64`,
   `g++-mingw-w64`, and `cmake`. Run `make windows-deps` once first to fetch
   and cross-build static libdeflate/libwebp libraries into

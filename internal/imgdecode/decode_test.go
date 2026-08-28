@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	jpegxl "github.com/gen2brain/jxl"
 )
 
 func TestDecodeBytesPNGMatchesBounds(t *testing.T) {
@@ -55,6 +57,24 @@ func TestDecodeFileJPEG(t *testing.T) {
 	}
 }
 
+func TestDecodeBytesJXLMatchesBoundsAndPixels(t *testing.T) {
+	src := image.NewNRGBA(image.Rect(0, 0, 16, 12))
+	wantPixel := color.NRGBA{R: 10, G: 20, B: 30, A: 128}
+	src.SetNRGBA(3, 4, wantPixel)
+
+	data := encodeTestJXL(t, src)
+	img, err := DecodeBytes(data, "test.jxl")
+	if err != nil {
+		t.Fatalf("DecodeBytes failed: %v", err)
+	}
+	if got, want := img.Bounds(), src.Bounds(); got != want {
+		t.Fatalf("bounds = %v, want %v", got, want)
+	}
+	if got := color.NRGBAModel.Convert(img.At(3, 4)).(color.NRGBA); got != wantPixel {
+		t.Fatalf("pixel = %+v, want %+v", got, wantPixel)
+	}
+}
+
 func TestDecodeBytesInvalid(t *testing.T) {
 	if _, err := DecodeBytes([]byte("not an image"), "bad.bin"); err == nil {
 		t.Fatalf("expected invalid image error")
@@ -63,17 +83,17 @@ func TestDecodeBytesInvalid(t *testing.T) {
 
 // TestDecodeBytesScaledIgnoresHintOutsideNativeJPEG covers every decode path
 // that Stage 2a leaves untouched: a zero Hint (full-resolution passthrough)
-// and PNG (which has no scaled-decode capability in libpng or the stdlib
-// decoder, so a hint must not change its output at all) -- including a PNG
-// large enough to cross nativePNGMinPixels, so this also exercises the
-// native PNG decoder's Info reporting on native_decode builds, not only the
-// stdlib fallback used by the small cases and by non-native builds. Every
-// case must report Info.Reduced == false with Width/Height ==
-// SourceWidth/SourceHeight == the image's real dimensions, regardless of
-// which decoder actually served it.
+// and formats without scaled-decode support (PNG and JPEG XL, whose Go
+// decoders must ignore the hint) -- including a PNG large enough to cross
+// nativePNGMinPixels. This also exercises the native PNG decoder's Info
+// reporting on native_decode builds, not only the registered Go decoder used
+// by the small cases and by non-native builds. Every case must report
+// Info.Reduced == false with Width/Height == SourceWidth/SourceHeight == the
+// image's real dimensions, regardless of which decoder actually served it.
 func TestDecodeBytesScaledIgnoresHintOutsideNativeJPEG(t *testing.T) {
 	pngSmall := encodeTestPNG(t, 24, 18)
 	pngAtNativeGate := encodeTestPNG(t, 1024, 1024) // >= nativePNGMinPixels
+	jxlSmall := encodeTestJXL(t, image.NewNRGBA(image.Rect(0, 0, 24, 18)))
 
 	cases := []struct {
 		name   string
@@ -86,6 +106,7 @@ func TestDecodeBytesScaledIgnoresHintOutsideNativeJPEG(t *testing.T) {
 		{"zero hint, small PNG", pngSmall, "zero.png", Hint{}, 24, 18},
 		{"small hint, small PNG (below native PNG gate)", pngSmall, "small.png", Hint{MaxWidth: 4, MaxHeight: 4}, 24, 18},
 		{"small hint, large PNG (at/above native PNG gate)", pngAtNativeGate, "large.png", Hint{MaxWidth: 4, MaxHeight: 4}, 1024, 1024},
+		{"small hint, JPEG XL", jxlSmall, "small.jxl", Hint{MaxWidth: 4, MaxHeight: 4}, 24, 18},
 	}
 
 	for _, tc := range cases {
@@ -106,6 +127,61 @@ func TestDecodeBytesScaledIgnoresHintOutsideNativeJPEG(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDecodeConfigLargeJXLFixture(t *testing.T) {
+	path := filepath.Join("..", "..", "test_images", "jpegxltest.jxl")
+	f, err := os.Open(path)
+	if os.IsNotExist(err) {
+		t.Skipf("optional fixture is not present: %s", path)
+	}
+	if err != nil {
+		t.Fatalf("open fixture: %v", err)
+	}
+	defer f.Close()
+
+	cfg, format, err := image.DecodeConfig(f)
+	if err != nil {
+		t.Fatalf("DecodeConfig failed: %v", err)
+	}
+	if format != "jxl" {
+		t.Fatalf("format = %q, want jxl", format)
+	}
+	if cfg.Width <= 10_000 || cfg.Height <= 10_000 {
+		t.Fatalf("fixture dimensions = %dx%d, want both axes above 10000", cfg.Width, cfg.Height)
+	}
+	t.Logf("large JPEG XL fixture dimensions: %dx%d", cfg.Width, cfg.Height)
+}
+
+// TestDecodeLargeJXLFixture exercises the full, memory-intensive decode of the
+// optional local fixture. It stays out of the regular suite; run it explicitly
+// with NV_TEST_LARGE_JXL=1 when validating large-image behavior.
+func TestDecodeLargeJXLFixture(t *testing.T) {
+	if os.Getenv("NV_TEST_LARGE_JXL") != "1" {
+		t.Skip("set NV_TEST_LARGE_JXL=1 to run the large JPEG XL decode")
+	}
+
+	path := filepath.Join("..", "..", "test_images", "jpegxltest.jxl")
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("stat fixture: %v", err)
+	}
+
+	img, info, err := DecodeFileScaled(path, Hint{MaxWidth: 1_000, MaxHeight: 1_000})
+	if err != nil {
+		t.Fatalf("DecodeFileScaled failed: %v", err)
+	}
+	b := img.Bounds()
+	if b.Dx() <= 10_000 || b.Dy() <= 10_000 {
+		t.Fatalf("decoded dimensions = %dx%d, want both axes above 10000", b.Dx(), b.Dy())
+	}
+	wantInfo := Info{
+		Width: b.Dx(), Height: b.Dy(),
+		SourceWidth: b.Dx(), SourceHeight: b.Dy(),
+	}
+	if info != wantInfo {
+		t.Fatalf("Info = %+v, want %+v", info, wantInfo)
+	}
+	t.Logf("decoded large JPEG XL fixture at full resolution: %dx%d (%T)", b.Dx(), b.Dy(), img)
 }
 
 // TestContainTarget covers containTarget's "contain" (fit-inside) math in
@@ -235,6 +311,15 @@ func encodeTestPNG(t *testing.T, w, h int) []byte {
 	var buf bytes.Buffer
 	if err := png.Encode(&buf, src); err != nil {
 		t.Fatalf("png encode: %v", err)
+	}
+	return buf.Bytes()
+}
+
+func encodeTestJXL(t *testing.T, src image.Image) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	if err := jpegxl.Encode(&buf, src, jpegxl.EncodeOptions{Lossless: true, Effort: 1, Threads: 1}); err != nil {
+		t.Fatalf("JPEG XL encode: %v", err)
 	}
 	return buf.Bytes()
 }

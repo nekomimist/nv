@@ -4,7 +4,7 @@ A simple image viewer built with Go and Ebiten, featuring seamless archive suppo
 
 ## Features
 
-- Multiple Format Support: PNG, JPEG, WebP, BMP, GIF
+- Multiple Format Support: PNG, JPEG, JPEG XL, WebP, BMP, GIF
 - Archive Integration: Direct ZIP, RAR, and 7Z file viewing
 - Book Mode: Side-by-side image display with configurable reading direction
 - Manual Zoom & Pan: Zoom in/out with mouse wheel or keyboard, pan with mouse drag or arrow keys
@@ -94,7 +94,7 @@ cd nv
 # Build the application
 go build
 
-# Build with opt-in native PNG/JPEG decoders
+# Build with opt-in native PNG/JPEG/WebP decoders
 make linux-native
 
 # Or run directly
@@ -103,7 +103,7 @@ go run . [image_files_or_directories...]
 
 ## Requirements
 
-- Go 1.24 or later
+- Go 1.26 or later
 - Platform support: Windows, Linux (macOS untested)
 
 Optional native PNG/JPEG/WebP decode builds require CGO:
@@ -111,13 +111,18 @@ Optional native PNG/JPEG/WebP decode builds require CGO:
 - Linux: `libpng-dev`, `libturbojpeg0-dev`, `libwebp-dev`, `libdeflate-dev`, and a C compiler
 - Windows cross-build from Linux/WSL: `gcc-mingw-w64`, `g++-mingw-w64`, `rsrc`, and `cmake` (run `make windows-deps` once to fetch and cross-build static libdeflate/libwebp libraries into `third_party/mingw`; `make windows-native` depends on it and skips the work when already installed)
 
-Native decode is opt-in through the `native_decode` build tag or the `make linux-native` / `make windows-native` targets. JPEG and WebP use the native decoder by default in these builds; PNG uses the native decoder only for images at least 1 megapixel, because small PNG files are often faster with Go's standard decoder. PNG additionally tries a libdeflate-backed fast path before falling back to libpng (Linux) or WIC (Windows) for the PNG shapes it doesn't cover (16-bit, palette, interlaced, or `tRNS`-bearing). WebP decodes through libwebp on both platforms (WIC is not used for WebP on Windows); on any native decode failure, the pure-Go stdlib decoder serves as the fallback, like any other unsupported format. The Windows build statically links libdeflate and libwebp -- see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for their licence terms.
+JPEG XL is decoded by the pure-Go `github.com/gen2brain/jxl` decoder in every build. It currently decodes at full resolution because the decoder does not expose reduced-resolution output; very large JXL files can therefore use substantial transient memory before NV tiles the decoded image for display.
+
+Native decode is opt-in through the `native_decode` build tag or the `make linux-native` / `make windows-native` targets. JPEG and WebP use the native decoder by default in these builds; PNG uses the native decoder only for images at least 1 megapixel, because small PNG files are often faster with Go's standard decoder. PNG additionally tries a libdeflate-backed fast path before falling back to libpng (Linux) or WIC (Windows) for the PNG shapes it doesn't cover (16-bit, palette, interlaced, or `tRNS`-bearing). WebP decodes through libwebp on both platforms (WIC is not used for WebP on Windows); on any native decode failure, a registered Go decoder serves as the fallback, like any other unsupported format. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for redistributed dependencies' licence terms.
 
 Decode benchmarks:
 
 ```bash
 make bench-decode
 make bench-decode-native
+
+# Full-decode the optional test_images/jpegxltest.jxl large-image fixture
+make test-jxl-large
 
 # From WSL, cross-build Windows benchmark executables and run them via Windows
 make bench-decode-windows

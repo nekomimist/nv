@@ -1,14 +1,77 @@
 # Third-Party Notices
 
-The Windows native-decode build (`make windows-native`, the `native_decode`
-build tag on `GOOS=windows`) statically links third-party C code into the
-resulting binary (`nv-native.exe`): the two image libraries below, plus the
-GCC and MinGW-w64 runtimes noted at the end. The image libraries' licence
-texts, taken verbatim from each project's `COPYING` file, are reproduced
-below. Neither is linked into the default `nv`/`nv.exe`/`nv-native` (Linux)
-builds; the Linux native-decode build links libpng, libjpeg-turbo, libwebp,
-and libdeflate as *shared* libraries via `pkg-config` instead, which does
-not require redistributing their licence text alongside the binary.
+Every build includes the pure-Go JPEG XL implementation listed first. The
+Windows native-decode build (`make windows-native`, the `native_decode` build
+tag on `GOOS=windows`) additionally statically links the two C image libraries
+below, plus the GCC and MinGW-w64 runtimes noted at the end. The Linux
+native-decode build links libpng, libjpeg-turbo, libwebp, and libdeflate as
+*shared* libraries via `pkg-config` instead.
+
+## github.com/gen2brain/jxl
+
+Included in every build for JPEG XL decoding.
+
+Version: v0.2.0
+
+License: BSD-3-Clause
+
+```
+Copyright (c) the JPEG XL Project Authors.
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its
+   contributors may be used to endorse or promote products derived from
+   this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
+
+The implementation is also distributed with the JPEG XL project's Additional
+IP Rights Grant (Patents):
+
+```
+"This implementation" means the copyrightable works distributed by
+Google as part of the JPEG XL project.
+
+Google hereby grants to You a perpetual, worldwide, non-exclusive,
+no-charge, royalty-free, irrevocable (except as stated in this section)
+patent license to make, have made, use, offer to sell, sell, import,
+transfer and otherwise run, modify and propagate the contents of this
+implementation of JPEG XL, where such license applies only to those patent
+claims, both currently owned or controlled by Google and acquired in the
+future, licensable by Google that are necessarily infringed by this
+implementation of JPEG XL.  This grant does not include claims that would be
+infringed only as a consequence of further modification of this
+implementation.  If you or your agent or exclusive licensee institute or
+order or agree to the institution of patent litigation against any
+entity (including a cross-claim or counterclaim in a lawsuit) alleging
+that this implementation of JPEG XL or any code incorporated within this
+implementation of JPEG XL constitutes direct or contributory patent
+infringement, or inducement of patent infringement, then any patent
+rights granted to you under this License for this implementation of JPEG XL
+shall terminate as of the date such litigation is filed.
+```
+
+Source: https://github.com/gen2brain/jxl (v0.2.0 `LICENSE` and `PATENTS`)
 
 ## libdeflate
 

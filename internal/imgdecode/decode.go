@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	_ "github.com/gen2brain/jxl"
 	_ "golang.org/x/image/bmp"
 	_ "golang.org/x/image/webp"
 )
@@ -156,13 +157,13 @@ func DecodeBytes(data []byte, origin string) (image.Image, error) {
 
 // DecodeBytesScaled decodes an image from memory, using hint to request a
 // reduced-resolution decode where the underlying decoder supports it (JPEG
-// and WebP via the native decoder only). Every other path -- PNG, non-
-// JPEG/WebP formats, and the stdlib decoder in general -- ignores hint and
-// decodes at full resolution, reporting Info.Reduced == false. Callers that
-// do not need Info can use DecodeBytes instead.
+// and WebP via the native decoder only). Every other path -- PNG, JPEG XL,
+// other non-JPEG/WebP formats, and the registered Go decoders in general --
+// ignores hint and decodes at full resolution, reporting Info.Reduced ==
+// false. Callers that do not need Info can use DecodeBytes instead.
 func DecodeBytesScaled(data []byte, origin string, hint Hint) (image.Image, Info, error) {
 	if !shouldTryNative(data, origin) {
-		img, err := decodeStdlib(data)
+		img, err := decodeRegistered(data)
 		if err != nil {
 			return nil, Info{}, err
 		}
@@ -175,10 +176,10 @@ func DecodeBytesScaled(data []byte, origin string, hint Hint) (image.Image, Info
 	}
 	nativeErr := err
 
-	img, err = decodeStdlib(data)
+	img, err = decodeRegistered(data)
 	if err != nil {
 		if nativeErr != errNativeUnavailable {
-			return nil, Info{}, fmt.Errorf("native decode failed: %v; stdlib decode failed: %w", nativeErr, err)
+			return nil, Info{}, fmt.Errorf("native decode failed: %v; Go decode failed: %w", nativeErr, err)
 		}
 		return nil, Info{}, err
 	}
@@ -205,7 +206,7 @@ func shouldTryNative(data []byte, origin string) bool {
 		// golang.org/x/image/webp fallback is dramatically slower than the
 		// native decoder at every size (measured ~582ms / ~51.6 MPix/s for
 		// a 30MP image, versus low milliseconds natively), so there is no
-		// image small enough for the stdlib path to be worth preferring.
+		// image small enough for the registered Go path to be worth preferring.
 		return true
 	}
 	if !isPNGData(data) && !hasPNGExt(origin) {
@@ -219,7 +220,7 @@ func shouldTryNative(data []byte, origin string) bool {
 	return int64(width)*int64(height) >= nativePNGMinPixels
 }
 
-func decodeStdlib(data []byte) (image.Image, error) {
+func decodeRegistered(data []byte) (image.Image, error) {
 	img, _, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
 		return nil, err

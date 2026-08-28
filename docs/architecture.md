@@ -134,8 +134,9 @@ Two modes bypass the generic action flow for practical reasons:
 
 Actual file/byte decoding is delegated to `internal/imgdecode` so that the
 decode path can be tested and benchmarked without importing Ebiten. The
-default build uses Go's standard image decoders. Builds with the
-`native_decode` tag opt into CGO-backed decode:
+default build uses Go's standard and registered image decoders, including
+the pure-Go `github.com/gen2brain/jxl` decoder. Builds with the
+`native_decode` tag opt into CGO-backed decode for PNG, JPEG and WebP:
 
 - Linux uses libpng, libdeflate, TurboJPEG and libwebp (all linked as shared
   libraries via `pkg-config`).
@@ -156,6 +157,8 @@ default build uses Go's standard image decoders. Builds with the
   use WIC for WebP, so there is no dependency on an installed WIC WebP
   codec. Any native decode failure falls back to the pure-Go decoder, same
   as any other unsupported format.
+- JPEG XL uses the registered pure-Go decoder in every build and never enters
+  the native dispatch path.
 - `internal/imgdecode/native_linux.go` and `native_windows.go` keep only
   what is genuinely platform-specific (libpng/TurboJPEG dispatch on Linux,
   WIC dispatch on Windows); `native_common.go` holds the small Go-only
@@ -171,8 +174,10 @@ This is the most explicit interface boundary in the repo.
 
 `imgdecode.Hint` names the box an image will be displayed in, and
 `imgdecode.Info` reports what was actually produced. JPEG (both platforms)
-and WebP (both platforms) can decode smaller; PNG cannot, and reports
-`Reduced: false`, which means "no higher-resolution version exists".
+and WebP (both platforms) can decode smaller; PNG and JPEG XL cannot, and
+report `Reduced: false`, which means "no higher-resolution version exists".
+JPEG XL therefore reaches the tiling stage only after a full-resolution
+decode and can have high transient memory use for very large sources.
 
 The cache is keyed by `imgCacheKey{path, tier}` with a budget tier and a
 full tier, so both can coexist and a late budget result can never overwrite

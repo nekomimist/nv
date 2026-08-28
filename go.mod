@@ -1,9 +1,10 @@
 module nv
 
-go 1.24.3
+go 1.26
 
 require (
 	github.com/bodgit/sevenzip v1.6.1
+	github.com/gen2brain/jxl v0.2.0
 	github.com/hajimehoshi/ebiten/v2 v2.8.8
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/maruel/natural v1.1.1

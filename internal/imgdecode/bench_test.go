@@ -48,7 +48,7 @@ func BenchmarkDecode(b *testing.B) {
 // native decoder, this hint should land on the 1/2 libjpeg-turbo/WIC DCT
 // scaling factor and decode substantially cheaper than BenchmarkDecode's
 // full-resolution pass over the same bytes. htop.png/debian-logo.png (and
-// any other PNG fixture) go through the untouched stdlib decoder either
+// any other PNG fixture) go through the registered Go decoder either
 // way -- PNG ignores the hint entirely -- so they serve as noise controls:
 // their numbers here should be indistinguishable from BenchmarkDecode's.
 func BenchmarkDecodeScaled(b *testing.B) {
@@ -130,7 +130,7 @@ func externalFixturePaths(tb testing.TB, dir string) []string {
 			return nil
 		}
 		switch strings.ToLower(filepath.Ext(path)) {
-		case ".png", ".jpg", ".jpeg", ".webp":
+		case ".png", ".jpg", ".jpeg", ".jxl", ".webp":
 			paths = append(paths, path)
 		}
 		return nil
@@ -147,7 +147,7 @@ func readBenchFile(tb testing.TB, path string) benchImage {
 	if err != nil {
 		tb.Fatalf("reading %s: %v", path, err)
 	}
-	img, err := decodeStdlib(data)
+	img, err := decodeRegistered(data)
 	if err != nil {
 		tb.Logf("skipping %s: %v", path, err)
 		return benchImage{}

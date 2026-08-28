@@ -21,7 +21,7 @@ func isArchiveExt(path string) bool {
 func isSupportedExt(path string) bool {
 	ext := strings.ToLower(filepath.Ext(path))
 	switch ext {
-	case ".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif":
+	case ".png", ".jpg", ".jpeg", ".jxl", ".webp", ".bmp", ".gif":
 		return true
 	default:
 		return false
