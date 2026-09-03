@@ -77,6 +77,12 @@ func NewInputHandler(inputActions InputActions, inputState InputState, keybindin
 // HandleInput processes all input for the current frame
 // Returns true if any input was processed, false otherwise
 func (h *InputHandler) HandleInput() bool {
+	return h.HandleInputWithPointerBlocked(false)
+}
+
+// HandleInputWithPointerBlocked processes keyboard input normally while
+// suppressing viewer mouse actions when an EbitenUI widget owns the cursor.
+func (h *InputHandler) HandleInputWithPointerBlocked(pointerBlocked bool) bool {
 	if h.inputActions.GetTotalPagesCount() == 0 {
 		debugKV("input", "handle_input_skip", "reason", "no_pages")
 		return false
@@ -86,9 +92,18 @@ func (h *InputHandler) HandleInput() bool {
 		return false
 	}
 
+	// Modal input modes never fall through to viewer mouse actions. Their UI
+	// widgets still receive the same frame through UIController.Update.
+	if h.inputState.IsInHelpMode() || h.inputState.IsInPageInputMode() || h.inputState.IsInSettingsMode() {
+		return h.handleKeyboardInput()
+	}
+
 	// Process keyboard input first
 	if h.handleKeyboardInput() {
 		return true
+	}
+	if pointerBlocked {
+		return false
 	}
 
 	// Process mouse input if keyboard didn't handle anything
@@ -157,6 +172,10 @@ func (h *InputHandler) frameHasPossibleInput() bool {
 
 // handleKeyboardInput processes all keyboard input for the current frame
 func (h *InputHandler) handleKeyboardInput() bool {
+	if h.inputState.IsInHelpMode() {
+		return h.handleHelpModeKeys()
+	}
+
 	// Page input mode requires special handling for dynamic digit input
 	if h.inputState.IsInPageInputMode() {
 		return h.handlePageInputModeKeys()
@@ -175,6 +194,19 @@ func (h *InputHandler) handleKeyboardInput() bool {
 		}
 	}
 
+	return false
+}
+
+func (h *InputHandler) handleHelpModeKeys() bool {
+	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
+		debugKV("input", "action", "source", "help", "action", "help_close")
+		h.inputActions.ToggleHelp()
+		return true
+	}
+	if h.keybindingManager.ExecuteAction("help", h.inputActions, h.inputState) {
+		debugKV("input", "action", "source", "help", "action", "help_close")
+		return true
+	}
 	return false
 }
 

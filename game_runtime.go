@@ -32,39 +32,59 @@ func (g *Game) saveCurrentWindowSize() {
 func (g *Game) ToggleSettings() {
 	g.showSettings = !g.showSettings
 	if g.showSettings {
+		g.showHelp = false
 		g.pendingConfig = g.config
 		g.settingsIndex = 0
 		debugKV("config", "settings_open", "selected_index", g.settingsIndex)
 		return
 	}
 
+	if g.uiController != nil {
+		g.uiController.DiscardSettingsInputs()
+	}
+	g.pendingConfig = g.config
 	g.showOverlayMessage("")
 	debugKV("config", "settings_close")
 }
 
 func (g *Game) SettingsMoveUp() {
+	g.clearUIFocus()
 	if g.settingsIndex > 0 {
 		g.settingsIndex--
 	}
 }
 
 func (g *Game) SettingsMoveDown() {
+	g.clearUIFocus()
 	if g.settingsIndex < len(settingsListOrder())-1 {
 		g.settingsIndex++
 	}
 }
 
-func (g *Game) SettingsLeft()  { g.settingsAdjust(true) }
-func (g *Game) SettingsRight() { g.settingsAdjust(false) }
-func (g *Game) SettingsEnter() { g.settingsToggleOrEnter() }
+func (g *Game) SettingsLeft()  { g.clearUIFocus(); g.settingsAdjust(true) }
+func (g *Game) SettingsRight() { g.clearUIFocus(); g.settingsAdjust(false) }
+func (g *Game) SettingsEnter() { g.clearUIFocus(); g.settingsToggleOrEnter() }
+
+func (g *Game) clearUIFocus() {
+	if g.uiController != nil {
+		g.uiController.ClearFocus()
+	}
+}
 
 func (g *Game) SettingsCancel() {
+	if g.uiController != nil {
+		g.uiController.DiscardSettingsInputs()
+	}
 	g.showSettings = false
+	g.pendingConfig = g.config
 	g.showOverlayMessage("Settings canceled")
 	debugKV("config", "settings_cancel")
 }
 
 func (g *Game) SettingsSave() {
+	if g.uiController != nil {
+		g.uiController.CommitSettingsInputs()
+	}
 	debugKV("config", "settings_save_begin", "config_path", g.configPath)
 	if g.configPath != "" {
 		saveConfigToPath(g.pendingConfig, g.configPath)
@@ -79,6 +99,12 @@ func (g *Game) SettingsSave() {
 	g.showSettings = false
 	g.showOverlayMessage("Settings saved")
 	debugKV("config", "settings_save_complete", "config_path", g.configPath)
+}
+
+func (g *Game) CancelSettingsEdit() {
+	if g.uiController != nil {
+		g.uiController.CancelFocusedNumericInput()
+	}
 }
 
 func (g *Game) applyConfigResult(res ConfigLoadResult) {

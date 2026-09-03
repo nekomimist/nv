@@ -29,6 +29,7 @@ type Game struct {
 	imageManager        ImageManager
 	inputHandler        *InputHandler
 	renderer            *Renderer
+	uiController        *UIController
 	keybindingManager   *KeybindingManager
 	mousebindingManager *MousebindingManager
 	idx                 int
@@ -139,10 +140,6 @@ func (g *Game) IsFlippedV() bool {
 	return g.flipV
 }
 
-func (g *Game) IsShowingHelp() bool {
-	return g.showHelp
-}
-
 func (g *Game) IsShowingInfo() bool {
 	return g.showInfo
 }
@@ -165,11 +162,13 @@ func (g *Game) GetOverlayMessageTime() time.Time {
 
 // Settings/InputState method
 func (g *Game) IsInSettingsMode() bool { return g.showSettings }
-
-// RenderState additions for settings overlay
-func (g *Game) IsShowingSettings() bool  { return g.IsInSettingsMode() }
-func (g *Game) GetPendingConfig() Config { return g.pendingConfig }
-func (g *Game) GetSettingsIndex() int    { return g.settingsIndex }
+func (g *Game) IsInHelpMode() bool     { return g.showHelp }
+func (g *Game) HasFocusedUIControl() bool {
+	return g.uiController != nil && g.uiController.HasFocus()
+}
+func (g *Game) IsEditingSettingsValue() bool {
+	return g.uiController != nil && g.uiController.IsEditingNumericInput()
+}
 
 func (g *Game) GetTotalPagesCount() int {
 	return g.imageManager.GetPathsCount()
@@ -198,6 +197,9 @@ func (g *Game) GetDisplayContent() *DisplayContent {
 // InputActions interface implementation
 func (g *Game) ToggleHelp() {
 	g.showHelp = !g.showHelp
+	if g.showHelp {
+		g.showSettings = false
+	}
 }
 
 func (g *Game) ToggleInfo() {

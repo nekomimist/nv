@@ -13,7 +13,12 @@ func (g *Game) Update() error {
 	}
 
 	if !g.wasInputHandled {
-		g.wasInputHandled = g.inputHandler.HandleInput()
+		pointerBlocked := g.uiController != nil && g.uiController.PointerCaptured()
+		g.wasInputHandled = g.inputHandler.HandleInputWithPointerBlocked(pointerBlocked)
+	}
+
+	if g.uiController != nil {
+		g.uiController.Update()
 	}
 
 	if g.overlayMessage != "" && time.Since(g.overlayMessageTime) >= overlayMessageDuration {
@@ -50,10 +55,12 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	currentSnapshot := NewRenderStateSnapshot(g, w, h)
 	redrawReason := ""
 
+	uiNeedsRedraw := g.uiController != nil && g.uiController.NeedsContinuousRedraw()
 	if g.wasInputHandled ||
 		!g.renderer.hasSnapshot ||
 		!currentSnapshot.Equals(g.renderer.lastSnapshot) ||
-		g.forceRedrawFrames > 0 {
+		g.forceRedrawFrames > 0 ||
+		uiNeedsRedraw {
 		switch {
 		case g.wasInputHandled:
 			redrawReason = "input_handled"
@@ -63,8 +70,15 @@ func (g *Game) Draw(screen *ebiten.Image) {
 			redrawReason = "snapshot_changed"
 		case g.forceRedrawFrames > 0:
 			redrawReason = "forced_redraw"
+		case uiNeedsRedraw:
+			redrawReason = "ui_active"
 		}
-		g.renderer.Draw(screen)
+		if g.uiController != nil {
+			g.renderer.DrawBase(screen)
+			g.uiController.Draw(screen, g.renderer.DrawOverlays)
+		} else {
+			g.renderer.Draw(screen)
+		}
 		g.renderer.lastSnapshot = currentSnapshot
 		g.renderer.hasSnapshot = true
 		if debugMode {

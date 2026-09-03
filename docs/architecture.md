@@ -31,8 +31,12 @@ updates from the July 4, 2026 performance and refactoring pass.
   - Ebiten `Update`, `Draw`, and `Layout`
 - `renderer.go`
   - Rendering implementation
-  - Help/info/settings overlays
+  - Image canvas and lightweight info/page-input/transient overlays
   - Draws from `RenderState`
+- `ui_controller.go`
+  - Retained EbitenUI tree, theme, Help and Settings panels
+  - Help uses one scrollable three-column action/binding/description grid
+  - Page-local image-load error cards and UI input capture
 - `input.go`
   - Frame-by-frame input coordination
   - Keyboard and mouse mode switching
@@ -61,14 +65,13 @@ The application startup path in `startup.go` is:
 
 1. Parse flags.
 2. Load config from the default path or `-c`.
-3. Initialize graphics resources for error placeholders.
-4. Collect image paths from files, directories, or archives.
-5. Create `ImageManager` with cache and preload settings.
-6. Create `Game`.
-7. Create keybinding and mousebinding managers.
-8. Create `InputHandler` and `Renderer`.
-9. Apply initial display state and Ebiten window settings.
-10. Run `ebiten.RunGame`.
+3. Collect image paths from files, directories, or archives.
+4. Create `ImageManager` with cache and preload settings.
+5. Create `Game`.
+6. Create keybinding and mousebinding managers.
+7. Create `InputHandler`, `Renderer`, and `UIController`.
+8. Apply initial display state and Ebiten window settings.
+9. Run `ebiten.RunGame`.
 
 ## Main Design Boundaries
 
@@ -111,10 +114,15 @@ Most input flows through the action table in `actions.go`:
 - `InputHandler` coordinates per-frame processing
 - actual behavior dispatch goes through the shared `ActionExecutor`
 
-Two modes bypass the generic action flow for practical reasons:
+Three modes bypass or gate the generic action flow for practical reasons:
 
+- help UI mode
 - page number input mode
 - settings screen input mode
+
+Help and Settings block viewer input while their retained UI is active.
+Page-error cards are non-modal: keyboard navigation remains available and
+mouse input is captured only while the pointer is over a card.
 
 ### Image loading is the main subsystem boundary
 
@@ -175,6 +183,12 @@ without allocating and converting a second full-size copy.
 
 This is the most explicit interface boundary in the repo.
 
+Load failures are cached as metadata-only `DisplayImage` sentinels. They
+retain fallback dimensions for stable navigation planning but allocate no
+Ebiten texture. `UIController` presents their source and error message in a
+scrollable card in the affected single/book-mode slot. A failed full-tier
+refinement does not replace an already usable budget-tier image.
+
 ### Images are decoded at display size
 
 `imgdecode.Hint` names the box an image will be displayed in, and
@@ -233,12 +247,20 @@ Config loading is defensive:
 - invalid or missing fields are corrected during load
 - missing key/mouse bindings are backfilled from defaults
 
-The settings UI edits `pendingConfig`, then saves and reloads config to
-reuse the same validation path before applying runtime changes.
+The EbitenUI settings panel is generated from the shared `settingSpec`
+catalog as a scrollable two-column setting/editor grid. Numeric editors
+support both step buttons and direct text entry; text is committed on
+Enter, focus change, or Save and clamped through the same bounds used by
+keyboard adjustment. The panel edits `pendingConfig`, then saves and
+reloads config to reuse the same validation path before applying runtime
+changes. Existing arrow, Enter, Ctrl+S and Escape controls remain available
+alongside mouse and Tab focus.
 
 ### Rendering optimization
 
-The app skips redraws when no relevant state changed.
+The app skips redraws when no relevant state changed and retained UI is
+inactive. Help, Settings and visible error cards redraw continuously so
+hover, focus and scroll feedback remains responsive.
 `RenderStateSnapshot` is used to detect changes that happen without key
 input, such as overlay expiration or window resizing.
 
