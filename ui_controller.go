@@ -6,7 +6,6 @@ import (
 	"image/color"
 	"math"
 	"path/filepath"
-	"reflect"
 	"strings"
 
 	"github.com/ebitenui/ebitenui"
@@ -14,15 +13,17 @@ import (
 	"github.com/ebitenui/ebitenui/themes"
 	"github.com/ebitenui/ebitenui/widget"
 	"github.com/hajimehoshi/ebiten/v2"
+	"github.com/hajimehoshi/ebiten/v2/inpututil"
+	"github.com/hajimehoshi/ebiten/v2/text/v2"
 )
 
 const errorWindowDrawLayer = -10
 
 const (
-	helpActionColumnMaxWidth      = 260
-	helpBindingColumnMaxWidth     = 600
-	helpDescriptionColumnMaxWidth = 520
+	helpBindingColumnBaseMaxWidth = 600
 	helpTableHorizontalChrome     = 144
+	minEbitenUIFontSize           = 16.0
+	maxEbitenUIFontSize           = 32.0
 )
 
 type uiErrorWindow struct {
@@ -32,12 +33,20 @@ type uiErrorWindow struct {
 	rect   image.Rectangle
 }
 
+type uiSettingRow struct {
+	label  *widget.Container
+	editor *widget.Container
+}
+
 // UIController owns the application's single retained EbitenUI tree. The
 // image canvas remains in Renderer; this controller supplies page-local
 // errors and modal application panels above it.
 type UIController struct {
 	game *Game
 	ui   *ebitenui.UI
+	// baseTheme owns the standard dark-theme images and metrics. Sized
+	// variants shallow-copy its parameter structs and replace only fonts.
+	baseTheme *widget.Theme
 
 	helpOverlay       *widget.Container
 	helpTable         *widget.Container
@@ -46,21 +55,42 @@ type UIController struct {
 	settingsPanel     *widget.Container
 	settingsScroller  *widget.ScrollContainer
 	settingsScrollTop float64
+	settingsRows      []uiSettingRow
 	numericInputs     map[string]*widget.TextInput
+	settingCheckboxes map[string]*widget.Checkbox
+	settingEnums      map[string]*widget.ListComboButton
+	settingRowIdle    *uiimage.NineSlice
+	settingRowActive  *uiimage.NineSlice
 
-	lastHelpVisible       bool
-	lastHelpLayoutWidth   int
-	lastSettingsVisible   bool
-	lastSettingsConfig    Config
-	lastSettingsIndex     int
-	suppressNumericCommit bool
+	lastHelpVisible        bool
+	lastHelpLayoutWidth    int
+	lastSettingsVisible    bool
+	lastSettingsConfig     Config
+	lastSettingsIndex      int
+	suppressNumericCommit  bool
+	syncingSettingControls bool
+	lastUIFontSize         float64
+	redrawRequested        bool
+	lastPointerPosition    image.Point
+	hasPointerPosition     bool
+	uiPressedKeysScratch   []ebiten.Key
 
 	errorWindows [2]uiErrorWindow
 }
 
 func NewUIController(game *Game) *UIController {
 	root := widget.NewContainer(widget.ContainerOpts.Layout(widget.NewStackedLayout()))
-	controller := &UIController{game: game}
+	baseTheme := themes.GetBasicDarkTheme()
+	controller := &UIController{
+		game:            game,
+		baseTheme:       baseTheme,
+		lastUIFontSize:  -1,
+		redrawRequested: true,
+		settingRowIdle:  uiimage.NewNineSliceColor(color.NRGBA{R: 30, G: 30, B: 30, A: 255}),
+		settingRowActive: uiimage.NewNineSliceColor(
+			color.NRGBA{R: 58, G: 58, B: 68, A: 255},
+		),
+	}
 	controller.helpOverlay, controller.helpTable, controller.helpStatus = controller.buildHelpOverlay()
 	controller.settingsOverlay, controller.settingsPanel = controller.buildSettingsOverlay()
 	controller.helpOverlay.GetWidget().SetVisibility(widget.Visibility_Hide)
@@ -69,8 +99,9 @@ func NewUIController(game *Game) *UIController {
 
 	controller.ui = &ebitenui.UI{
 		Container:    root,
-		PrimaryTheme: themes.GetBasicDarkTheme(),
+		PrimaryTheme: baseTheme,
 	}
+	controller.syncUIFontSize()
 	return controller
 }
 
@@ -138,6 +169,7 @@ func (c *UIController) Update() {
 		return
 	}
 	c.syncModalState()
+	c.captureUIInputActivity()
 	c.ui.Update()
 }
 
@@ -156,21 +188,77 @@ func (c *UIController) Draw(screen *ebiten.Image, drawNativeOverlays func(*ebite
 	c.syncErrorWindows(screen.Bounds().Dx(), screen.Bounds().Dy())
 	c.ui.PreRenderHook = drawNativeOverlays
 	c.ui.Draw(screen)
+	c.redrawRequested = false
 }
 
-func (c *UIController) NeedsContinuousRedraw() bool {
+func (c *UIController) NeedsRedraw() bool {
 	if c == nil || c.game == nil {
 		return false
 	}
-	if c.game.showHelp || c.game.showSettings {
+	if c.redrawRequested || c.IsEditingNumericInput() {
 		return true
 	}
-	for _, ew := range c.errorWindows {
-		if ew.window != nil {
+	return c.errorWindowsOutOfSync()
+}
+
+func (c *UIController) hasVisibleUI() bool {
+	if c == nil || c.game == nil {
+		return false
+	}
+	if c.game.showHelp || c.game.showSettings || c.displayHasFailure() {
+		return true
+	}
+	for _, window := range c.errorWindows {
+		if window.window != nil {
 			return true
 		}
 	}
-	return c.displayHasFailure()
+	return false
+}
+
+func (c *UIController) captureUIInputActivity() {
+	if !c.hasVisibleUI() {
+		c.hasPointerPosition = false
+		return
+	}
+
+	x, y := ebiten.CursorPosition()
+	position := image.Pt(x, y)
+	if !c.hasPointerPosition || position != c.lastPointerPosition {
+		c.redrawRequested = true
+		c.lastPointerPosition = position
+		c.hasPointerPosition = true
+	}
+	if wheelX, wheelY := ebiten.Wheel(); wheelX != 0 || wheelY != 0 {
+		c.redrawRequested = true
+	}
+	for _, button := range []ebiten.MouseButton{ebiten.MouseButtonLeft, ebiten.MouseButtonRight, ebiten.MouseButtonMiddle} {
+		if ebiten.IsMouseButtonPressed(button) || inpututil.IsMouseButtonJustReleased(button) {
+			c.redrawRequested = true
+			break
+		}
+	}
+	c.uiPressedKeysScratch = inpututil.AppendPressedKeys(c.uiPressedKeysScratch[:0])
+	if len(c.uiPressedKeysScratch) > 0 {
+		c.redrawRequested = true
+	}
+}
+
+func (c *UIController) errorWindowsOutOfSync() bool {
+	if c.game.showHelp || c.game.showSettings {
+		return false
+	}
+	var images [2]DisplayImage
+	if content := c.game.displayContent; content != nil {
+		images = [2]DisplayImage{content.LeftImage, content.RightImage}
+	}
+	for slot, img := range images {
+		_, failed := displayImageFailure(img)
+		if failed != (c.errorWindows[slot].window != nil) {
+			return true
+		}
+	}
+	return false
 }
 
 // PointerCaptured lets the existing viewer input layer avoid reacting to a
@@ -194,7 +282,9 @@ func (c *UIController) syncModalState() {
 	if c.game == nil {
 		return
 	}
+	c.syncUIFontSize()
 	if c.game.showHelp != c.lastHelpVisible {
+		c.redrawRequested = true
 		if c.game.showHelp {
 			width := c.game.currentLogicalW
 			if width <= 0 {
@@ -210,15 +300,11 @@ func (c *UIController) syncModalState() {
 		c.lastHelpVisible = c.game.showHelp
 	}
 
-	settingsChanged := c.game.showSettings &&
-		(c.game.settingsIndex != c.lastSettingsIndex ||
-			!reflect.DeepEqual(c.game.pendingConfig, c.lastSettingsConfig))
-	if c.game.showSettings != c.lastSettingsVisible || settingsChanged {
+	if c.game.showSettings != c.lastSettingsVisible {
+		c.redrawRequested = true
 		if c.game.showSettings {
-			if !c.lastSettingsVisible {
-				c.settingsScroller = nil
-				c.settingsScrollTop = 0
-			}
+			c.settingsScroller = nil
+			c.settingsScrollTop = 0
 			c.rebuildSettingsPanel()
 			c.settingsOverlay.GetWidget().SetVisibility(widget.Visibility_Show)
 			c.lastSettingsConfig = c.game.pendingConfig
@@ -231,6 +317,134 @@ func (c *UIController) syncModalState() {
 		}
 		c.lastSettingsVisible = c.game.showSettings
 	}
+	if c.game.showSettings {
+		if c.game.settingsIndex != c.lastSettingsIndex {
+			c.updateSettingsSelection(c.lastSettingsIndex, c.game.settingsIndex)
+			c.lastSettingsIndex = c.game.settingsIndex
+			c.redrawRequested = true
+		}
+		if !editableSettingsEqual(c.game.pendingConfig, c.lastSettingsConfig) {
+			c.syncSettingsControls()
+			c.lastSettingsConfig = c.game.pendingConfig
+			c.redrawRequested = true
+		}
+	}
+}
+
+func effectiveEbitenUIFontSize(configured float64) float64 {
+	return min(maxEbitenUIFontSize, max(minEbitenUIFontSize, configured))
+}
+
+// syncUIFontSize previews pending FontSize changes inside Settings. Outside
+// Settings, only the saved config drives the theme, so Cancel naturally
+// restores the previous size and Save keeps the previewed size.
+func (c *UIController) syncUIFontSize() {
+	if c == nil || c.ui == nil || c.game == nil || c.baseTheme == nil {
+		return
+	}
+	configured := c.game.config.FontSize
+	if c.game.showSettings {
+		configured = c.game.pendingConfig.FontSize
+	}
+	size := effectiveEbitenUIFontSize(configured)
+	if size == c.lastUIFontSize {
+		return
+	}
+
+	theme := ebitenUIThemeWithFontSize(c.baseTheme, size)
+	c.ui.PrimaryTheme = theme
+	c.redrawRequested = true
+	for slot := range c.errorWindows {
+		window := c.errorWindows[slot].window
+		if window == nil || window.GetContainer() == nil {
+			continue
+		}
+		window.GetContainer().GetWidget().SetTheme(theme)
+		window.RequestRelayout()
+	}
+	c.lastUIFontSize = size
+}
+
+// ebitenUIThemeWithFontSize preserves the basic dark theme's colors, images,
+// and spacing while replacing every text face used by this application.
+// Parameter structs are copied before modification so base remains reusable.
+func ebitenUIThemeWithFontSize(base *widget.Theme, size float64) *widget.Theme {
+	if base == nil || base.DefaultFace == nil {
+		return base
+	}
+	goFace, ok := (*base.DefaultFace).(*text.GoTextFace)
+	if !ok || goFace.Source == nil {
+		return base
+	}
+
+	var face text.Face = &text.GoTextFace{Source: goFace.Source, Size: size}
+	facePtr := &face
+	theme := *base
+	theme.DefaultFace = facePtr
+
+	if base.ButtonTheme != nil {
+		params := *base.ButtonTheme
+		params.TextFace = facePtr
+		theme.ButtonTheme = &params
+	}
+	if base.LabelTheme != nil {
+		params := *base.LabelTheme
+		params.Face = facePtr
+		theme.LabelTheme = &params
+	}
+	if base.TextTheme != nil {
+		params := *base.TextTheme
+		params.Face = facePtr
+		theme.TextTheme = &params
+	}
+	if base.TextInputTheme != nil {
+		params := *base.TextInputTheme
+		params.Face = facePtr
+		theme.TextInputTheme = &params
+	}
+	if base.TextAreaTheme != nil {
+		params := *base.TextAreaTheme
+		params.Face = facePtr
+		theme.TextAreaTheme = &params
+	}
+	if base.ListTheme != nil {
+		params := *base.ListTheme
+		params.EntryFace = facePtr
+		theme.ListTheme = &params
+	}
+	if base.ListComboButtonTheme != nil {
+		params := *base.ListComboButtonTheme
+		if base.ListComboButtonTheme.List != nil {
+			list := *base.ListComboButtonTheme.List
+			list.EntryFace = facePtr
+			params.List = &list
+		}
+		if base.ListComboButtonTheme.Button != nil {
+			button := *base.ListComboButtonTheme.Button
+			button.TextFace = facePtr
+			params.Button = &button
+		}
+		theme.ListComboButtonTheme = &params
+	}
+	if base.CheckboxTheme != nil {
+		params := *base.CheckboxTheme
+		if base.CheckboxTheme.Label != nil {
+			label := *base.CheckboxTheme.Label
+			label.Face = facePtr
+			params.Label = &label
+		}
+		theme.CheckboxTheme = &params
+	}
+	if base.TabbookTheme != nil {
+		params := *base.TabbookTheme
+		if base.TabbookTheme.TabButton != nil {
+			button := *base.TabbookTheme.TabButton
+			button.TextFace = facePtr
+			params.TabButton = &button
+		}
+		theme.TabbookTheme = &params
+	}
+	return &theme
 }
 
 func (c *UIController) buildHelpOverlay() (*widget.Container, *widget.Container, *widget.Container) {
@@ -290,7 +504,17 @@ func (c *UIController) rebuildHelpContents(windowWidth int) {
 	}
 	c.helpTable.RemoveChildren()
 	c.helpStatus.RemoveChildren()
-	actionWidth, bindingWidth, descriptionWidth := helpColumnWidths(windowWidth)
+	face := c.currentUIFontFace()
+	preferredActionWidth := 60
+	for _, action := range actionDefinitions {
+		width, _ := text.Measure(action.Name, face, 0)
+		preferredActionWidth = max(preferredActionWidth, int(math.Ceil(width))+8)
+	}
+	fontScale := effectiveEbitenUIFontSize(c.game.config.FontSize) / 20
+	bindingMaxWidth := int(math.Round(helpBindingColumnBaseMaxWidth * fontScale))
+	actionWidth, bindingWidth, descriptionWidth := helpColumnWidths(
+		windowWidth, preferredActionWidth, bindingMaxWidth,
+	)
 
 	c.helpTable.AddChild(
 		newHelpCell("Action", actionWidth, color.NRGBA{R: 225, G: 225, B: 235, A: 255}, false),
@@ -312,7 +536,7 @@ func (c *UIController) rebuildHelpContents(windowWidth int) {
 			continue
 		}
 		c.helpTable.AddChild(
-			newHelpCell(action.Name, actionWidth, color.NRGBA{R: 205, G: 205, B: 255, A: 255}, false),
+			newHelpCell(wrapHelpActionName(action.Name, actionWidth, face), actionWidth, color.NRGBA{R: 205, G: 205, B: 255, A: 255}, false),
 			newHelpCell(strings.Join(bindings, " | "), bindingWidth, color.White, true),
 			newHelpCell(action.Description, descriptionWidth, color.NRGBA{R: 205, G: 205, B: 205, A: 255}, false),
 		)
@@ -334,12 +558,93 @@ func (c *UIController) rebuildHelpContents(windowWidth int) {
 	}
 }
 
-func helpColumnWidths(windowWidth int) (action, binding, description int) {
+func (c *UIController) currentUIFontFace() text.Face {
+	if c != nil && c.ui != nil && c.ui.PrimaryTheme != nil && c.ui.PrimaryTheme.DefaultFace != nil {
+		return *c.ui.PrimaryTheme.DefaultFace
+	}
+	return *c.baseTheme.DefaultFace
+}
+
+func helpColumnWidths(windowWidth, preferredActionWidth, bindingMaxWidth int) (action, binding, description int) {
 	available := max(180, windowWidth-helpTableHorizontalChrome)
-	action = min(helpActionColumnMaxWidth, max(60, available*45/100))
-	binding = min(helpBindingColumnMaxWidth, max(80, available*40/100))
-	description = min(helpDescriptionColumnMaxWidth, max(36, available-action-binding))
+	action = min(max(60, preferredActionWidth), max(60, available*35/100))
+	remaining := max(1, available-action)
+	binding = min(max(80, bindingMaxWidth), max(80, remaining*55/100))
+	if action+binding > available-36 {
+		binding = max(1, available-action-36)
+	}
+	description = max(1, available-action-binding)
 	return action, binding, description
+}
+
+func wrapHelpActionName(name string, maxWidth int, face text.Face) string {
+	parts := strings.SplitAfter(name, "_")
+	if len(parts) < 2 {
+		return wrapHelpActionPart(name, maxWidth, face)
+	}
+	lines := make([]string, 0, len(parts))
+	line := ""
+	for _, part := range parts {
+		candidate := line + part
+		width, _ := text.Measure(candidate, face, 0)
+		if line != "" && width > float64(maxWidth) {
+			lines = append(lines, line)
+			line = ""
+		}
+		wrappedPart := strings.Split(wrapHelpActionPart(part, maxWidth, face), "\n")
+		for i, piece := range wrappedPart {
+			if i == 0 && line != "" {
+				line += piece
+				continue
+			}
+			if line != "" {
+				lines = append(lines, line)
+			}
+			line = piece
+			if i != len(wrappedPart)-1 {
+				lines = append(lines, line)
+				line = ""
+			}
+		}
+		if len(wrappedPart) > 1 {
+			continue
+		}
+		if line == "" {
+			line = part
+		}
+	}
+	if line != "" {
+		lines = append(lines, line)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func wrapHelpActionPart(part string, maxWidth int, face text.Face) string {
+	width, _ := text.Measure(part, face, 0)
+	if width <= float64(maxWidth) {
+		return part
+	}
+
+	runes := []rune(part)
+	lines := make([]string, 0, 2)
+	start := 0
+	for start < len(runes) {
+		end := start + 1
+		for end <= len(runes) {
+			candidateWidth, _ := text.Measure(string(runes[start:end]), face, 0)
+			if candidateWidth > float64(maxWidth) {
+				if end == start+1 {
+					end++
+				}
+				break
+			}
+			end++
+		}
+		end = min(end-1, len(runes))
+		lines = append(lines, string(runes[start:end]))
+		start = end
+	}
+	return strings.Join(lines, "\n")
 }
 
 func newVerticalScrollArea(content *widget.Container, scrollImage *widget.ScrollContainerImage, minWidth, minHeight int) (*widget.Container, *widget.ScrollContainer) {
@@ -459,6 +764,9 @@ func (c *UIController) rebuildSettingsPanel() {
 	}
 	c.settingsPanel.RemoveChildren()
 	c.numericInputs = make(map[string]*widget.TextInput)
+	c.settingCheckboxes = make(map[string]*widget.Checkbox)
+	c.settingEnums = make(map[string]*widget.ListComboButton)
+	c.settingsRows = c.settingsRows[:0]
 	c.settingsPanel.AddChild(widget.NewLabel(
 		widget.LabelOpts.LabelText("Settings"),
 		widget.LabelOpts.LabelPadding(widget.NewInsetsSimple(10)),
@@ -476,6 +784,7 @@ func (c *UIController) rebuildSettingsPanel() {
 	)
 	for index, spec := range editableSettingSpecs {
 		label, editor := c.buildSettingCells(index, spec)
+		c.settingsRows = append(c.settingsRows, uiSettingRow{label: label, editor: editor})
 		content.AddChild(label, editor)
 	}
 	scrollArea, scroller := newVerticalScrollArea(
@@ -510,12 +819,12 @@ func (c *UIController) rebuildSettingsPanel() {
 func (c *UIController) buildSettingCells(index int, spec settingSpec) (*widget.Container, *widget.Container) {
 	name := spec.ID
 	selected := index == c.game.settingsIndex
-	background := color.NRGBA{R: 30, G: 30, B: 30, A: 255}
+	background := c.settingRowIdle
 	if selected {
-		background = color.NRGBA{R: 58, G: 58, B: 68, A: 255}
+		background = c.settingRowActive
 	}
 	labelCell := widget.NewContainer(
-		widget.ContainerOpts.BackgroundImage(uiimage.NewNineSliceColor(background)),
+		widget.ContainerOpts.BackgroundImage(background),
 		widget.ContainerOpts.Layout(widget.NewRowLayout(
 			widget.RowLayoutOpts.Direction(widget.DirectionHorizontal),
 			widget.RowLayoutOpts.Padding(&widget.Insets{Left: 10, Right: 10, Top: 4, Bottom: 4}),
@@ -523,7 +832,7 @@ func (c *UIController) buildSettingCells(index int, spec settingSpec) (*widget.C
 		widget.ContainerOpts.WidgetOpts(widget.WidgetOpts.LayoutData(widget.GridLayoutData{})),
 	)
 	editorCell := widget.NewContainer(
-		widget.ContainerOpts.BackgroundImage(uiimage.NewNineSliceColor(background)),
+		widget.ContainerOpts.BackgroundImage(background),
 		widget.ContainerOpts.Layout(widget.NewRowLayout(
 			widget.RowLayoutOpts.Direction(widget.DirectionHorizontal),
 			widget.RowLayoutOpts.Spacing(8),
@@ -543,13 +852,18 @@ func (c *UIController) buildSettingCells(index int, spec settingSpec) (*widget.C
 		if value {
 			state = widget.WidgetChecked
 		}
-		editorCell.AddChild(widget.NewCheckbox(
+		checkbox := widget.NewCheckbox(
 			widget.CheckboxOpts.InitialState(state),
 			widget.CheckboxOpts.StateChangedHandler(func(args *widget.CheckboxChangedEventArgs) {
+				if c.syncingSettingControls {
+					return
+				}
 				c.game.settingsIndex = index
 				setSettingBoolValue(&c.game.pendingConfig, name, args.State == widget.WidgetChecked)
 			}),
-		))
+		)
+		c.settingCheckboxes[name] = checkbox
+		editorCell.AddChild(checkbox)
 		return labelCell, editorCell
 	}
 
@@ -560,7 +874,7 @@ func (c *UIController) buildSettingCells(index int, spec settingSpec) (*widget.C
 			entries[i] = options[i]
 		}
 		current := getSettingValueStringFromConfig(c.game.pendingConfig, name)
-		editorCell.AddChild(widget.NewListComboButton(
+		combo := widget.NewListComboButton(
 			widget.ListComboButtonOpts.Entries(entries),
 			widget.ListComboButtonOpts.InitialEntry(current),
 			widget.ListComboButtonOpts.EntryLabelFunc(
@@ -568,10 +882,18 @@ func (c *UIController) buildSettingCells(index int, spec settingSpec) (*widget.C
 				func(entry any) string { return fmt.Sprint(entry) },
 			),
 			widget.ListComboButtonOpts.EntrySelectedHandler(func(args *widget.ListComboButtonEntrySelectedEventArgs) {
+				// EbitenUI emits a deferred selection event while applying
+				// InitialEntry. It has no previous entry and must not move the
+				// Settings keyboard selection away from the first row.
+				if c.syncingSettingControls || args.PreviousEntry == nil {
+					return
+				}
 				c.game.settingsIndex = index
 				setSettingEnumValue(&c.game.pendingConfig, name, fmt.Sprint(args.Entry))
 			}),
-		))
+		)
+		c.settingEnums[name] = combo
+		editorCell.AddChild(combo)
 		return labelCell, editorCell
 	}
 
@@ -602,6 +924,64 @@ func (c *UIController) buildSettingCells(index int, spec settingSpec) (*widget.C
 		))
 	}
 	return labelCell, editorCell
+}
+
+func editableSettingsEqual(a, b Config) bool {
+	for _, spec := range editableSettingSpecs {
+		if getSettingValueStringFromConfig(a, spec.ID) != getSettingValueStringFromConfig(b, spec.ID) {
+			return false
+		}
+	}
+	return true
+}
+
+func (c *UIController) updateSettingsSelection(previous, current int) {
+	for _, index := range []int{previous, current} {
+		if index < 0 || index >= len(c.settingsRows) {
+			continue
+		}
+		background := c.settingRowIdle
+		if index == current {
+			background = c.settingRowActive
+		}
+		row := c.settingsRows[index]
+		row.label.SetBackgroundImage(background)
+		row.editor.SetBackgroundImage(background)
+	}
+}
+
+func (c *UIController) syncSettingsControls() {
+	if c == nil || c.game == nil {
+		return
+	}
+	c.syncingSettingControls = true
+	defer func() { c.syncingSettingControls = false }()
+
+	for name, checkbox := range c.settingCheckboxes {
+		value, ok := settingBoolValue(c.game.pendingConfig, name)
+		if !ok {
+			continue
+		}
+		state := widget.WidgetUnchecked
+		if value {
+			state = widget.WidgetChecked
+		}
+		if checkbox.State() != state {
+			checkbox.SetState(state)
+		}
+	}
+	for name, combo := range c.settingEnums {
+		value := getSettingValueStringFromConfig(c.game.pendingConfig, name)
+		if fmt.Sprint(combo.SelectedEntry()) != value {
+			combo.SetSelectedEntry(value)
+		}
+	}
+	for name, input := range c.numericInputs {
+		value, ok := getSettingNumericInputText(c.game.pendingConfig, name)
+		if ok && input.GetText() != value {
+			input.SetText(value)
+		}
+	}
 }
 
 func newSettingCell(label string, background color.Color) *widget.Container {
@@ -639,9 +1019,6 @@ func (c *UIController) newNumericSettingInput(index int, spec settingSpec) *widg
 		}
 		if focused.Focused {
 			c.game.settingsIndex = index
-			// Keep the editor alive while typing. The row highlight catches up
-			// on the next intentional panel rebuild.
-			c.lastSettingsIndex = index
 			return
 		}
 		c.commitNumericInput(spec.ID, input)
@@ -662,9 +1039,10 @@ func (c *UIController) commitNumericInput(name string, input *widget.TextInput) 
 		return false
 	}
 	input.SetText(normalized)
-	// Numeric text is already synchronized in place; avoid rebuilding the
-	// whole panel and disrupting Tab focus merely because it was committed.
+	// Numeric text is already synchronized in place; avoid disturbing Tab
+	// focus merely because it was committed.
 	c.lastSettingsConfig = c.game.pendingConfig
+	c.redrawRequested = true
 	debugKV("config", "settings_text_commit", "setting", name, "value", normalized)
 	return true
 }

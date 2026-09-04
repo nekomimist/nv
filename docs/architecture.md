@@ -256,11 +256,19 @@ reloads config to reuse the same validation path before applying runtime
 changes. Existing arrow, Enter, Ctrl+S and Escape controls remain available
 alongside mouse and Tab focus.
 
+`FontSize` also drives Help, Settings and image-error text through a sized
+variant of the EbitenUI theme. Settings previews its pending value before
+Save; Cancel restores the configured size. Retained UI text is clamped to
+16–32 points so extreme overlay font sizes cannot make the controls
+unusable.
+
 ### Rendering optimization
 
-The app skips redraws when no relevant state changed and retained UI is
-inactive. Help, Settings and visible error cards redraw continuously so
-hover, focus and scroll feedback remains responsive.
+The app skips redraws when no relevant state changed. Retained UI requests
+frames for pointer, wheel, keyboard and state changes; numeric text editing
+also redraws continuously for caret blinking. Idle Help, Settings and error
+cards therefore do not force the underlying image to be rendered every
+frame.
 `RenderStateSnapshot` is used to detect changes that happen without key
 input, such as overlay expiration or window resizing.
 

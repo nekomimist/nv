@@ -55,7 +55,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	currentSnapshot := NewRenderStateSnapshot(g, w, h)
 	redrawReason := ""
 
-	uiNeedsRedraw := g.uiController != nil && g.uiController.NeedsContinuousRedraw()
+	uiNeedsRedraw := g.uiController != nil && g.uiController.NeedsRedraw()
 	if g.wasInputHandled ||
 		!g.renderer.hasSnapshot ||
 		!currentSnapshot.Equals(g.renderer.lastSnapshot) ||
@@ -71,7 +71,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		case g.forceRedrawFrames > 0:
 			redrawReason = "forced_redraw"
 		case uiNeedsRedraw:
-			redrawReason = "ui_active"
+			redrawReason = "ui_dirty"
 		}
 		if g.uiController != nil {
 			g.renderer.DrawBase(screen)

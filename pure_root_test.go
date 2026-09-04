@@ -55,6 +55,26 @@ func TestPureMixedErrorCardAvailableRectAvoidsValidPage(t *testing.T) {
 	}
 }
 
+func TestPureEffectiveEbitenUIFontSize(t *testing.T) {
+	tests := []struct {
+		configured float64
+		want       float64
+	}{
+		{configured: 12, want: 16},
+		{configured: 20, want: 20},
+		{configured: 24, want: 24},
+		{configured: 32, want: 32},
+		{configured: 48, want: 32},
+		{configured: 72, want: 32},
+	}
+
+	for _, tt := range tests {
+		if got := effectiveEbitenUIFontSize(tt.configured); got != tt.want {
+			t.Errorf("effectiveEbitenUIFontSize(%v) = %v, want %v", tt.configured, got, tt.want)
+		}
+	}
+}
+
 func TestPureApplyConfigResultUpdatesStatus(t *testing.T) {
 	g := &Game{
 		imageManager: &stubImageManager{},
@@ -997,16 +1017,20 @@ func TestPureSettingsNumericInputAdapters(t *testing.T) {
 
 func TestPureHelpColumnWidthsFitSupportedWindows(t *testing.T) {
 	for _, width := range []int{minWidth, defaultWidth, 1640} {
-		action, binding, description := helpColumnWidths(width)
+		const preferredActionWidth = 340
+		action, binding, description := helpColumnWidths(width, preferredActionWidth, 960)
 		if action <= 0 || binding <= 0 || description <= 0 {
 			t.Fatalf("helpColumnWidths(%d) = (%d, %d, %d), want positive widths", width, action, binding, description)
 		}
-		if action > helpActionColumnMaxWidth || binding > helpBindingColumnMaxWidth || description > helpDescriptionColumnMaxWidth {
-			t.Fatalf("helpColumnWidths(%d) exceeds column cap: (%d, %d, %d)", width, action, binding, description)
-		}
 		available := max(180, width-helpTableHorizontalChrome)
-		if action+binding+description > available {
-			t.Fatalf("helpColumnWidths(%d) uses %d px, only %d px available", width, action+binding+description, available)
+		if action+binding+description != available {
+			t.Fatalf("helpColumnWidths(%d) uses %d px, want all %d available pixels", width, action+binding+description, available)
+		}
+		if action > available*35/100 && available*35/100 >= 60 {
+			t.Fatalf("helpColumnWidths(%d) action width %d exceeds its responsive limit", width, action)
+		}
+		if width == 1640 && action != preferredActionWidth {
+			t.Fatalf("helpColumnWidths(%d) action width = %d, want measured width %d", width, action, preferredActionWidth)
 		}
 	}
 }
