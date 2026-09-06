@@ -48,19 +48,22 @@ type UIController struct {
 	// variants shallow-copy its parameter structs and replace only fonts.
 	baseTheme *widget.Theme
 
-	helpOverlay       *widget.Container
-	helpTable         *widget.Container
-	helpStatus        *widget.Container
-	settingsOverlay   *widget.Container
-	settingsPanel     *widget.Container
-	settingsScroller  *widget.ScrollContainer
-	settingsScrollTop float64
-	settingsRows      []uiSettingRow
-	numericInputs     map[string]*widget.TextInput
-	settingCheckboxes map[string]*widget.Checkbox
-	settingEnums      map[string]*widget.ListComboButton
-	settingRowIdle    *uiimage.NineSlice
-	settingRowActive  *uiimage.NineSlice
+	helpOverlay              *widget.Container
+	helpTable                *widget.Container
+	helpStatus               *widget.Container
+	settingsOverlay          *widget.Container
+	settingsPanel            *widget.Container
+	settingsScroller         *widget.ScrollContainer
+	settingsSlider           *widget.Slider
+	settingsSelectionPending bool
+	lastSettingsDrawSize     image.Point
+	settingsScrollTop        float64
+	settingsRows             []uiSettingRow
+	numericInputs            map[string]*widget.TextInput
+	settingCheckboxes        map[string]*widget.Checkbox
+	settingEnums             map[string]*widget.ListComboButton
+	settingRowIdle           *uiimage.NineSlice
+	settingRowActive         *uiimage.NineSlice
 
 	lastHelpVisible        bool
 	lastHelpLayoutWidth    int
@@ -181,6 +184,10 @@ func (c *UIController) Draw(screen *ebiten.Image, drawNativeOverlays func(*ebite
 		return
 	}
 	c.syncModalState()
+	if size := screen.Bounds().Size(); c.game.showSettings && size != c.lastSettingsDrawSize {
+		c.lastSettingsDrawSize = size
+		c.settingsSelectionPending = true
+	}
 	if width := screen.Bounds().Dx(); c.game.showHelp && width != c.lastHelpLayoutWidth {
 		c.rebuildHelpContents(width)
 		c.lastHelpLayoutWidth = width
@@ -188,7 +195,9 @@ func (c *UIController) Draw(screen *ebiten.Image, drawNativeOverlays func(*ebite
 	c.syncErrorWindows(screen.Bounds().Dx(), screen.Bounds().Dy())
 	c.ui.PreRenderHook = drawNativeOverlays
 	c.ui.Draw(screen)
-	c.redrawRequested = false
+	// Row geometry is available after EbitenUI lays out the scroll content.
+	// If selection moved offscreen, present the adjusted scroll on the next frame.
+	c.redrawRequested = c.scrollToSettingsSelection()
 }
 
 func (c *UIController) NeedsRedraw() bool {
@@ -309,6 +318,7 @@ func (c *UIController) syncModalState() {
 			c.settingsOverlay.GetWidget().SetVisibility(widget.Visibility_Show)
 			c.lastSettingsConfig = c.game.pendingConfig
 			c.lastSettingsIndex = c.game.settingsIndex
+			c.settingsSelectionPending = true
 		} else {
 			c.settingsOverlay.GetWidget().SetVisibility(widget.Visibility_Hide)
 			c.ui.ClearFocus()
@@ -322,6 +332,7 @@ func (c *UIController) syncModalState() {
 			c.updateSettingsSelection(c.lastSettingsIndex, c.game.settingsIndex)
 			c.lastSettingsIndex = c.game.settingsIndex
 			c.redrawRequested = true
+			c.settingsSelectionPending = true
 		}
 		if !editableSettingsEqual(c.game.pendingConfig, c.lastSettingsConfig) {
 			c.syncSettingsControls()
@@ -354,6 +365,7 @@ func (c *UIController) syncUIFontSize() {
 	theme := ebitenUIThemeWithFontSize(c.baseTheme, size)
 	c.ui.PrimaryTheme = theme
 	c.redrawRequested = true
+	c.settingsSelectionPending = c.game.showSettings
 	for slot := range c.errorWindows {
 		window := c.errorWindows[slot].window
 		if window == nil || window.GetContainer() == nil {
@@ -475,7 +487,7 @@ func (c *UIController) buildHelpOverlay() (*widget.Container, *widget.Container,
 		widget.GridLayoutOpts.Padding(&widget.Insets{Left: 14, Right: 22, Top: 10, Bottom: 10}),
 		widget.GridLayoutOpts.Stretch([]bool{false, false, true}, nil),
 	)))
-	helpScrollArea, _ := newVerticalScrollArea(
+	helpScrollArea, _, _ := c.newScrollArea(
 		helpTable,
 		&widget.ScrollContainerImage{
 			Idle: uiimage.NewNineSliceColor(color.NRGBA{R: 26, G: 26, B: 28, A: 72}),
@@ -483,6 +495,7 @@ func (c *UIController) buildHelpOverlay() (*widget.Container, *widget.Container,
 		},
 		240,
 		180,
+		false,
 	)
 	helpStatus := widget.NewContainer(widget.ContainerOpts.Layout(widget.NewRowLayout(
 		widget.RowLayoutOpts.Direction(widget.DirectionVertical),
@@ -647,7 +660,7 @@ func wrapHelpActionPart(part string, maxWidth int, face text.Face) string {
 	return strings.Join(lines, "\n")
 }
 
-func newVerticalScrollArea(content *widget.Container, scrollImage *widget.ScrollContainerImage, minWidth, minHeight int) (*widget.Container, *widget.ScrollContainer) {
+func (c *UIController) newScrollArea(content *widget.Container, scrollImage *widget.ScrollContainerImage, minWidth, minHeight int, horizontal bool) (*widget.Container, *widget.ScrollContainer, *widget.Slider) {
 	scroller := widget.NewScrollContainer(
 		widget.ScrollContainerOpts.Content(content),
 		widget.ScrollContainerOpts.StretchContentWidth(),
@@ -666,9 +679,11 @@ func newVerticalScrollArea(content *widget.Container, scrollImage *widget.Scroll
 	slider := widget.NewSlider(
 		widget.SliderOpts.Direction(widget.DirectionVertical),
 		widget.SliderOpts.MinMax(0, 1000),
+		widget.SliderOpts.InitialCurrent(0),
 		widget.SliderOpts.PageSizeFunc(pageSize),
 		widget.SliderOpts.ChangedHandler(func(args *widget.SliderChangedEventArgs) {
 			scroller.ScrollTop = float64(args.Slider.Current) / 1000
+			c.redrawRequested = true
 		}),
 		widget.SliderOpts.WidgetOpts(
 			widget.WidgetOpts.LayoutData(widget.GridLayoutData{}),
@@ -702,7 +717,38 @@ func newVerticalScrollArea(content *widget.Container, scrollImage *widget.Scroll
 		),
 	)
 	area.AddChild(scroller, slider)
-	return area, scroller
+	if horizontal {
+		horizontalSlider := widget.NewSlider(
+			widget.SliderOpts.Direction(widget.DirectionHorizontal),
+			widget.SliderOpts.MinMax(0, 1000),
+			widget.SliderOpts.InitialCurrent(0),
+			widget.SliderOpts.PageSizeFunc(func() int {
+				width := scroller.ContentRect().Dx()
+				if width <= scroller.ViewRect().Dx() || width <= 0 {
+					return 1000
+				}
+				return max(1, int(math.Round(float64(scroller.ViewRect().Dx())/float64(width)*1000)))
+			}),
+			widget.SliderOpts.ChangedHandler(func(args *widget.SliderChangedEventArgs) {
+				scroller.ScrollLeft = float64(args.Slider.Current) / 1000
+				c.redrawRequested = true
+			}),
+			widget.SliderOpts.WidgetOpts(widget.WidgetOpts.MinSize(0, 14)),
+		)
+		scroller.GetWidget().ScrolledEvent.AddHandler(func(args any) {
+			scrolled, ok := args.(*widget.WidgetScrolledEventArgs)
+			if !ok {
+				return
+			}
+			overflow := scroller.ContentRect().Dx() - scroller.ViewRect().Dx()
+			if overflow > 0 {
+				scroller.ScrollLeft = min(1, max(0, scroller.ScrollLeft-scrolled.X*48/float64(overflow)))
+				horizontalSlider.Current = int(math.Round(scroller.ScrollLeft * 1000))
+			}
+		})
+		area.AddChild(horizontalSlider, widget.NewContainer())
+	}
+	return area, scroller, slider
 }
 
 func newHelpCell(label string, maxWidth int, textColor color.Color, processBBCode bool) *widget.Label {
@@ -787,7 +833,7 @@ func (c *UIController) rebuildSettingsPanel() {
 		c.settingsRows = append(c.settingsRows, uiSettingRow{label: label, editor: editor})
 		content.AddChild(label, editor)
 	}
-	scrollArea, scroller := newVerticalScrollArea(
+	scrollArea, scroller, slider := c.newScrollArea(
 		content,
 		&widget.ScrollContainerImage{
 			Idle: uiimage.NewNineSliceColor(color.NRGBA{R: 28, G: 28, B: 28, A: 255}),
@@ -795,9 +841,12 @@ func (c *UIController) rebuildSettingsPanel() {
 		},
 		320,
 		200,
+		true,
 	)
 	scroller.ScrollTop = c.settingsScrollTop
 	c.settingsScroller = scroller
+	c.settingsSlider = slider
+	slider.Current = int(math.Round(scroller.ScrollTop * 1000))
 	c.settingsPanel.AddChild(scrollArea)
 
 	buttons := widget.NewContainer(widget.ContainerOpts.Layout(widget.NewRowLayout(
@@ -805,14 +854,22 @@ func (c *UIController) rebuildSettingsPanel() {
 		widget.RowLayoutOpts.Spacing(12),
 		widget.RowLayoutOpts.Padding(widget.NewInsetsSimple(8)),
 	)))
-	buttons.AddChild(
-		widget.NewButton(widget.ButtonOpts.TextLabel("Save"), widget.ButtonOpts.ClickedHandler(func(*widget.ButtonClickedEventArgs) {
-			c.game.SettingsSave()
-		})),
-		widget.NewButton(widget.ButtonOpts.TextLabel("Cancel"), widget.ButtonOpts.ClickedHandler(func(*widget.ButtonClickedEventArgs) {
-			c.game.SettingsCancel()
-		})),
-	)
+	for _, action := range []struct {
+		label string
+		run   func()
+	}{{"Save", c.game.SettingsSave}, {"Cancel", c.game.SettingsCancel}} {
+		index := len(c.settingsRows)
+		cell := widget.NewContainer(
+			widget.ContainerOpts.BackgroundImage(c.settingRowIdle),
+			widget.ContainerOpts.Layout(widget.NewRowLayout(widget.RowLayoutOpts.Padding(widget.NewInsetsSimple(4)))),
+		)
+		cell.AddChild(widget.NewButton(widget.ButtonOpts.TextLabel(action.label), widget.ButtonOpts.ClickedHandler(func(*widget.ButtonClickedEventArgs) {
+			action.run()
+		})))
+		c.selectSettingOnFocus(cell, index)
+		c.settingsRows = append(c.settingsRows, uiSettingRow{label: cell, editor: cell})
+		buttons.AddChild(cell)
+	}
 	c.settingsPanel.AddChild(buttons)
 }
 
@@ -840,6 +897,7 @@ func (c *UIController) buildSettingCells(index int, spec settingSpec) (*widget.C
 		)),
 		widget.ContainerOpts.WidgetOpts(widget.WidgetOpts.LayoutData(widget.GridLayoutData{})),
 	)
+	c.selectSettingOnFocus(editorCell, index)
 	label := spec.Label
 	if spec.Restart {
 		label += " (restart required)"
@@ -928,6 +986,31 @@ func (c *UIController) buildSettingCells(index int, spec settingSpec) (*widget.C
 
 func editableSettingsEqual(a, b Config) bool {
 	for _, spec := range editableSettingSpecs {
+		// Keep float comparisons independent from the rounded display text. The
+		// text renderer intentionally uses fewer decimal places than the editor
+		// accepts, so comparing it would make distinct pending values look equal.
+		switch spec.ID {
+		case "FontSize":
+			if a.FontSize != b.FontSize {
+				return false
+			}
+			continue
+		case "AspectRatioThreshold":
+			if a.AspectRatioThreshold != b.AspectRatioThreshold {
+				return false
+			}
+			continue
+		case "Mouse.WheelSensitivity":
+			if a.MouseSettings.WheelSensitivity != b.MouseSettings.WheelSensitivity {
+				return false
+			}
+			continue
+		case "Mouse.DragSensitivity":
+			if a.MouseSettings.DragSensitivity != b.MouseSettings.DragSensitivity {
+				return false
+			}
+			continue
+		}
 		if getSettingValueStringFromConfig(a, spec.ID) != getSettingValueStringFromConfig(b, spec.ID) {
 			return false
 		}
@@ -948,6 +1031,46 @@ func (c *UIController) updateSettingsSelection(previous, current int) {
 		row.label.SetBackgroundImage(background)
 		row.editor.SetBackgroundImage(background)
 	}
+}
+
+func (c *UIController) selectSettingOnFocus(container *widget.Container, index int) {
+	container.GetWidget().FocusEvent.AddHandler(func(args any) {
+		if focus, ok := args.(*widget.WidgetFocusEventArgs); ok && focus.Focused {
+			c.game.settingsIndex = index
+		}
+	})
+}
+
+func (c *UIController) scrollToSettingsSelection() bool {
+	if !c.game.showSettings || !c.settingsSelectionPending || c.settingsScroller == nil {
+		return false
+	}
+	c.settingsSelectionPending = false
+	index := c.game.settingsIndex
+	// Save and Cancel remain outside the scrolling content.
+	if index < 0 || index >= len(editableSettingSpecs) {
+		return false
+	}
+	scroller := c.settingsScroller
+	view := scroller.ViewRect()
+	overflow := scroller.ContentRect().Dy() - view.Dy()
+	if overflow <= 0 {
+		return false
+	}
+	row := c.settingsRows[index]
+	rect := row.label.GetWidget().Rect.Union(row.editor.GetWidget().Rect)
+	delta := 0
+	if rect.Min.Y < view.Min.Y {
+		delta = rect.Min.Y - view.Min.Y
+	} else if rect.Max.Y > view.Max.Y {
+		delta = rect.Max.Y - view.Max.Y
+	}
+	if delta == 0 {
+		return false
+	}
+	scroller.ScrollTop = min(1, max(0, scroller.ScrollTop+float64(delta)/float64(overflow)))
+	c.settingsSlider.Current = int(math.Round(scroller.ScrollTop * 1000))
+	return true
 }
 
 func (c *UIController) syncSettingsControls() {
