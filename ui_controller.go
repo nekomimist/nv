@@ -7,6 +7,7 @@ import (
 	"math"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/ebitenui/ebitenui"
 	uiimage "github.com/ebitenui/ebitenui/image"
@@ -18,6 +19,10 @@ import (
 )
 
 const errorWindowDrawLayer = -10
+
+// Numeric input only needs periodic redraws while its caret is idle; input and
+// other UI changes set redrawRequested immediately.
+const numericInputIdleRedrawInterval = 100 * time.Millisecond
 
 const (
 	helpBindingColumnBaseMaxWidth = 600
@@ -77,6 +82,7 @@ type UIController struct {
 	lastPointerPosition    image.Point
 	hasPointerPosition     bool
 	uiPressedKeysScratch   []ebiten.Key
+	lastUIDrawAt           time.Time
 
 	errorWindows [2]uiErrorWindow
 }
@@ -195,6 +201,7 @@ func (c *UIController) Draw(screen *ebiten.Image, drawNativeOverlays func(*ebite
 	c.syncErrorWindows(screen.Bounds().Dx(), screen.Bounds().Dy())
 	c.ui.PreRenderHook = drawNativeOverlays
 	c.ui.Draw(screen)
+	c.lastUIDrawAt = time.Now()
 	// Row geometry is available after EbitenUI lays out the scroll content.
 	// If selection moved offscreen, present the adjusted scroll on the next frame.
 	c.redrawRequested = c.scrollToSettingsSelection()
@@ -204,10 +211,17 @@ func (c *UIController) NeedsRedraw() bool {
 	if c == nil || c.game == nil {
 		return false
 	}
-	if c.redrawRequested || c.IsEditingNumericInput() {
+	if c.redrawRequested {
+		return true
+	}
+	if c.IsEditingNumericInput() && numericInputRedrawDue(c.lastUIDrawAt, time.Now()) {
 		return true
 	}
 	return c.errorWindowsOutOfSync()
+}
+
+func numericInputRedrawDue(lastDraw, now time.Time) bool {
+	return lastDraw.IsZero() || now.Sub(lastDraw) >= numericInputIdleRedrawInterval
 }
 
 func (c *UIController) hasVisibleUI() bool {
@@ -778,12 +792,12 @@ func newHelpStatusLabel(label string, textColor color.Color, maxWidth int) *widg
 
 func (c *UIController) buildSettingsOverlay() (*widget.Container, *widget.Container) {
 	overlay := widget.NewContainer(
-		widget.ContainerOpts.BackgroundImage(uiimage.NewNineSliceColor(color.NRGBA{A: 180})),
+		widget.ContainerOpts.BackgroundImage(uiimage.NewNineSliceColor(color.NRGBA{A: 255})),
 		widget.ContainerOpts.Layout(widget.NewAnchorLayout()),
 	)
 	panel := widget.NewContainer(
 		widget.ContainerOpts.BackgroundImage(uiimage.NewBorderedNineSliceColor(
-			color.NRGBA{R: 18, G: 18, B: 18, A: 250},
+			color.NRGBA{R: 18, G: 18, B: 18, A: 255},
 			color.NRGBA{R: 95, G: 95, B: 105, A: 255}, 2,
 		)),
 		widget.ContainerOpts.Layout(widget.NewGridLayout(
@@ -1038,6 +1052,7 @@ func (c *UIController) selectSettingOnFocus(container *widget.Container, index i
 		if focus, ok := args.(*widget.WidgetFocusEventArgs); ok && focus.Focused {
 			c.game.settingsIndex = index
 		}
+		c.redrawRequested = true
 	})
 }
 
@@ -1126,6 +1141,9 @@ func (c *UIController) newNumericSettingInput(index int, spec settingSpec) *widg
 		widget.TextInputOpts.Validation(func(candidate string) (bool, *string) {
 			return validSettingNumericInput(spec.Number, candidate), nil
 		}),
+		widget.TextInputOpts.ChangedHandler(func(*widget.TextInputChangedEventArgs) {
+			c.redrawRequested = true
+		}),
 		widget.TextInputOpts.WidgetOpts(widget.WidgetOpts.MinSize(140, 0)),
 	)
 	input.SetText(value)
@@ -1140,6 +1158,7 @@ func (c *UIController) newNumericSettingInput(index int, spec settingSpec) *widg
 		if !ok || focused.Widget != input {
 			return
 		}
+		c.redrawRequested = true
 		if focused.Focused {
 			c.game.settingsIndex = index
 			return

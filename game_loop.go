@@ -74,8 +74,12 @@ func (g *Game) Draw(screen *ebiten.Image) {
 			redrawReason = "ui_dirty"
 		}
 		if g.uiController != nil {
-			g.renderer.DrawBase(screen)
-			g.uiController.Draw(screen, g.renderer.DrawOverlays)
+			if g.showSettings {
+				g.uiController.Draw(screen, nil)
+			} else {
+				g.renderer.DrawBase(screen)
+				g.uiController.Draw(screen, g.renderer.DrawOverlays)
+			}
 		} else {
 			g.renderer.Draw(screen)
 		}
