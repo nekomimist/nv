@@ -5,13 +5,12 @@ A quick orientation for humans and AI agents working on this repo. Short, factua
 ## Overview
 - Go 1.26+. Entry point is `startup.go`.
 - The app is a mostly root-package Ebiten viewer, with pure navigation logic in `navlogic/` and decode helpers in `internal/imgdecode/`.
-- Build outputs include `nv`, `nv.exe`, `nv-debug.exe`, `nv-native`, and `nv-native.exe`. Test fixtures live in `test_images/`.
+- Build outputs are `nv`, `nv.exe`, and `nv-debug.exe`. All application targets use CGO image decoding. Test fixtures live in `test_images/`.
 - Detailed design notes live in `docs/architecture.md`; technical follow-ups live in `docs/todo.md`.
 
 ## Quickstart
-- Build: `make linux` / `make windows` / `make debug` (Windows icon requires `rsrc`).
-- Native decode build: `make linux-native` / `make windows-native`.
-- Run: `go run . [images|directories|archives...]`
+- Build: `make linux` / `make windows` / `make debug` (all enable CGO and `native_decode`; Windows icon requires `rsrc`). `make` / `make all` builds Linux and Windows GUI binaries.
+- Run: `CGO_ENABLED=1 go run -tags native_decode . [images|directories|archives...]`
 - Checks: `make test` / `make test-pure` / `make test-root-pure` / `make test-gui` / `make test-jxl-large` / `make fmt` / `make vet` / `make lint` / `make check`
 - Decode benchmarks: `make bench-decode` / `make bench-decode-native` / `make bench-decode-windows`
 - Utilities: `make deps` / `make icon` / `make clean` / `make distclean` / `make info`
@@ -57,23 +56,24 @@ A quick orientation for humans and AI agents working on this repo. Short, factua
 
 ## Testing
 - Use standard `testing`; prefer table-driven tests.
-- `make test`: full suite with `GOCACHE` redirected to `/tmp/nv-go-build-cache`.
+- `make test`: full suite with CGO and `native_decode` enabled and `GOCACHE` redirected to `/tmp/nv-go-build-cache`. `make vet` and `make lint` use the same decode configuration.
 - `make test-pure`: strict headless-safe pure tests in `navlogic/`.
 - `make test-root-pure`: root-package `TestPure...` subset. These avoid GUI behavior but still build the Ebiten-backed root package.
-- `make test-gui`: root-package `TestGUI...` subset for renderer/Ebiten-dependent behavior.
+- `make test-gui`: root-package `TestGUI...` subset for renderer/Ebiten-dependent behavior, with CGO and `native_decode` enabled.
+- Untagged Go commands, `make test-root-pure`, and `make bench-decode` retain the registered Go decode path for tests and comparisons.
 - Use `test_images/` fixtures. Keep new pure logic outside Ebiten paths when practical.
 - `make test-jxl-large` explicitly full-decodes the optional `test_images/jpegxltest.jxl` fixture; it is excluded from normal tests because of its memory cost.
 - If running Go commands directly in restricted environments, set `GOCACHE` to a writable path such as `/tmp/nv-go-build-cache`.
 
 ## Platform Notes
 - For Windows builds, install `rsrc`: `go install github.com/akavel/rsrc@latest`.
-- Linux native decode builds need `libpng-dev`, `libturbojpeg0-dev`, `libwebp-dev`, `libdeflate-dev`, and CGO.
-- JPEG XL uses the pure-Go decoder in both regular and native builds and needs no platform library.
-- Windows native decode cross-builds from WSL need `gcc-mingw-w64`,
+- Linux builds need `libpng-dev`, `libturbojpeg0-dev`, `libwebp-dev`, `libdeflate-dev`, and CGO.
+- JPEG XL uses the pure-Go decoder in every build and needs no platform library.
+- Windows cross-builds from WSL need `gcc-mingw-w64`,
   `g++-mingw-w64`, and `cmake`. Run `make windows-deps` once first to fetch
   and cross-build static libdeflate/libwebp libraries into
-  `third_party/mingw` (gitignored); `make windows-native` depends on this
-  target and skips the work when the libraries are already installed. PNG
+  `third_party/mingw` (gitignored); `make windows` and `make debug` depend on this
+  target, which skips the work when the libraries are already installed. PNG
   and WebP decode natively (libdeflate fast path + WIC fallback for PNG,
   libwebp for WebP) with no dependency on an installed WIC WebP codec; see
   `THIRD_PARTY_NOTICES.md` for the statically-linked libraries' licence

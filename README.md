@@ -91,29 +91,42 @@ Book mode displays two images side-by-side, perfect for reading manga or viewing
 git clone https://github.com/nekomimist/nv.git
 cd nv
 
-# Build the application
-go build
+# Build for Linux (nv)
+make linux
 
-# Build with opt-in native PNG/JPEG/WebP decoders
-make linux-native
+# Cross-build for Windows x64 from Linux/WSL (nv.exe)
+make windows
+
+# Windows build with a console (nv-debug.exe)
+make debug
 
 # Or run directly
-go run . [image_files_or_directories...]
+CGO_ENABLED=1 go run -tags native_decode . [image_files_or_directories...]
 ```
+
+All application targets use CGO-backed PNG/JPEG/WebP decoding. `make` (or
+`make all`) builds both Linux and Windows GUI binaries. The former
+`linux-native` / `windows-native` targets are now `linux` / `windows`, and
+the output names are `nv` / `nv.exe` instead of `nv-native` / `nv-native.exe`.
 
 ## Requirements
 
 - Go 1.26 or later
 - Platform support: Windows, Linux (macOS untested)
 
-Optional native PNG/JPEG/WebP decode builds require CGO:
+Application builds require CGO and the following decode dependencies:
 
 - Linux: `libpng-dev`, `libturbojpeg0-dev`, `libwebp-dev`, `libdeflate-dev`, and a C compiler
-- Windows cross-build from Linux/WSL: `gcc-mingw-w64`, `g++-mingw-w64`, `rsrc`, and `cmake` (run `make windows-deps` once to fetch and cross-build static libdeflate/libwebp libraries into `third_party/mingw`; `make windows-native` depends on it and skips the work when already installed)
+- Windows cross-build from Linux/WSL: `gcc-mingw-w64`, `g++-mingw-w64`, `rsrc`, and `cmake` (`make windows` and `make debug` run `make windows-deps` to fetch and cross-build static libdeflate/libwebp libraries into `third_party/mingw`, skipping the work when already installed)
 
 JPEG XL is decoded by the pure-Go `github.com/gen2brain/jxl` decoder in every build. It currently decodes at full resolution because the decoder does not expose reduced-resolution output; very large JXL files can therefore use substantial transient memory before NV tiles the decoded image for display.
 
-Native decode is opt-in through the `native_decode` build tag or the `make linux-native` / `make windows-native` targets. JPEG and WebP use the native decoder by default in these builds; PNG uses the native decoder only for images at least 1 megapixel, because small PNG files are often faster with Go's standard decoder. PNG additionally tries a libdeflate-backed fast path before falling back to libpng (Linux) or WIC (Windows) for the PNG shapes it doesn't cover (16-bit, palette, interlaced, or `tRNS`-bearing). WebP decodes through libwebp on both platforms (WIC is not used for WebP on Windows); on any native decode failure, a registered Go decoder serves as the fallback, like any other unsupported format. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for redistributed dependencies' licence terms.
+The Makefile enables the `native_decode` build tag and CGO for every application build. JPEG and WebP use the native decoder by default; PNG uses the native decoder only for images at least 1 megapixel, because small PNG files are often faster with Go's standard decoder. PNG additionally tries a libdeflate-backed fast path before falling back to libpng (Linux) or WIC (Windows) for the PNG shapes it doesn't cover (16-bit, palette, interlaced, or `tRNS`-bearing). WebP decodes through libwebp on both platforms (WIC is not used for WebP on Windows); on any native decode failure, a registered Go decoder serves as the fallback, like any other unsupported format. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for redistributed dependencies' licence terms.
+
+`make test`, `make test-gui`, `make vet`, and `make lint` also enable native
+decode. Untagged Go commands still select the Go decoders for testing and
+benchmark comparisons; the `native_decode` build tag remains available for
+direct Go commands.
 
 Decode benchmarks:
 

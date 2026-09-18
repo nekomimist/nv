@@ -133,10 +133,12 @@ Two modes bypass the generic action flow for practical reasons:
   preceding entries on every load
 
 Actual file/byte decoding is delegated to `internal/imgdecode` so that the
-decode path can be tested and benchmarked without importing Ebiten. The
-default build uses Go's standard and registered image decoders, including
-the pure-Go `github.com/gen2brain/jxl` decoder. Builds with the
-`native_decode` tag opt into CGO-backed decode for PNG, JPEG and WebP:
+decode path can be tested and benchmarked without importing Ebiten. All
+Makefile application targets enable CGO and the `native_decode` tag for
+PNG, JPEG and WebP. Untagged Go builds retain Go's standard and registered
+image decoders for testing and benchmark comparisons.
+
+With native decode enabled:
 
 - Linux uses libpng, libdeflate, TurboJPEG and libwebp (all linked as shared
   libraries via `pkg-config`).

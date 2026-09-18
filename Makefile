@@ -6,20 +6,19 @@ BUILD_DATE := $(shell date '+%Y-%m-%d %H:%M:%S')
 COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 
 # Build flags
+BUILD_TAGS := native_decode
 LDFLAGS := -X main.version=$(VERSION) -X 'main.buildDate=$(BUILD_DATE)'
 LDFLAGS_GUI := $(LDFLAGS) -H windowsgui
+WINDOWS_ENV := GOOS=windows GOARCH=amd64 CGO_ENABLED=1 CC=x86_64-w64-mingw32-gcc CXX=x86_64-w64-mingw32-g++
 
 # Output binaries
 BINARY_LINUX := nv
 BINARY_WINDOWS := nv.exe
 BINARY_WINDOWS_DEBUG := nv-debug.exe
-BINARY_LINUX_NATIVE := nv-native
-BINARY_WINDOWS_NATIVE := nv-native.exe
 RESOURCE_FILE := nv.syso
 
-# Windows native-decode dependencies (static mingw-w64 libs, see
+# Windows decode dependencies (static mingw-w64 libs, see
 # scripts/windows-deps.sh and the windows-deps target below).
-MINGW_DEPS_DIR := third_party/mingw
 LIBDEFLATE_VERSION := 1.24
 LIBWEBP_VERSION := 1.5.0
 
@@ -27,44 +26,32 @@ LIBWEBP_VERSION := 1.5.0
 .PHONY: all
 all: linux windows
 
-# Linux build
+# Application builds use CGO-backed PNG/JPEG/WebP decode.
 .PHONY: linux
-linux: $(RESOURCE_FILE)
+linux:
 	@echo "Building Linux version v$(VERSION)..."
-	go build -ldflags "$(LDFLAGS)" -o $(BINARY_LINUX)
+	CGO_ENABLED=1 go build -tags $(BUILD_TAGS) -ldflags "$(LDFLAGS)" -o $(BINARY_LINUX)
 	@echo "Linux build complete: $(BINARY_LINUX)"
-
-.PHONY: linux-native
-linux-native: $(RESOURCE_FILE)
-	@echo "Building Linux native-decode version v$(VERSION)..."
-	CGO_ENABLED=1 go build -tags native_decode -ldflags "$(LDFLAGS)" -o $(BINARY_LINUX_NATIVE)
-	@echo "Linux native-decode build complete: $(BINARY_LINUX_NATIVE)"
 
 # Windows GUI build
 .PHONY: windows
-windows: $(RESOURCE_FILE)
+windows: $(RESOURCE_FILE) windows-deps
 	@echo "Building Windows GUI version v$(VERSION)..."
-	GOOS=windows GOARCH=amd64 go build -ldflags "$(LDFLAGS_GUI)" -o $(BINARY_WINDOWS)
+	$(WINDOWS_ENV) go build -tags $(BUILD_TAGS) -ldflags "$(LDFLAGS_GUI)" -o $(BINARY_WINDOWS)
 	@echo "Windows GUI build complete: $(BINARY_WINDOWS)"
 
-.PHONY: windows-native
-windows-native: $(RESOURCE_FILE) windows-deps
-	@echo "Building Windows native-decode GUI version v$(VERSION)..."
-	GOOS=windows GOARCH=amd64 CGO_ENABLED=1 CC=x86_64-w64-mingw32-gcc CXX=x86_64-w64-mingw32-g++ go build -tags native_decode -ldflags "$(LDFLAGS_GUI)" -o $(BINARY_WINDOWS_NATIVE)
-	@echo "Windows native-decode GUI build complete: $(BINARY_WINDOWS_NATIVE)"
-
 # Fetch and cross-build libdeflate + libwebp as static mingw-w64 libraries
-# for the Windows native-decode build (PNG fast path and WebP decode). Idempotent:
-# skips work when $(MINGW_DEPS_DIR) already has both libraries installed.
+# for Windows builds (PNG fast path and WebP decode). Idempotent:
+# skips work when third_party/mingw already has both libraries installed.
 .PHONY: windows-deps
 windows-deps:
 	@LIBDEFLATE_VERSION=$(LIBDEFLATE_VERSION) LIBWEBP_VERSION=$(LIBWEBP_VERSION) scripts/windows-deps.sh
 
 # Windows debug build (with console)
 .PHONY: debug
-debug: $(RESOURCE_FILE)
+debug: $(RESOURCE_FILE) windows-deps
 	@echo "Building Windows debug version v$(VERSION)..."
-	GOOS=windows GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o $(BINARY_WINDOWS_DEBUG)
+	$(WINDOWS_ENV) go build -tags $(BUILD_TAGS) -ldflags "$(LDFLAGS)" -o $(BINARY_WINDOWS_DEBUG)
 	@echo "Windows debug build complete: $(BINARY_WINDOWS_DEBUG)"
 
 # Generate Windows resource file from icon
@@ -75,7 +62,7 @@ $(RESOURCE_FILE): icon/icon.ico
 		echo "  go install github.com/akavel/rsrc@latest"; \
 		exit 1; \
 	fi
-	rsrc -ico icon/icon.ico -o $(RESOURCE_FILE)
+	rsrc -arch amd64 -ico icon/icon.ico -o $(RESOURCE_FILE)
 	@echo "Resource file generated: $(RESOURCE_FILE)"
 
 # Force icon regeneration
@@ -89,7 +76,7 @@ icon:
 .PHONY: clean
 clean:
 	@echo "Cleaning build artifacts..."
-	@rm -f $(BINARY_LINUX) $(BINARY_WINDOWS) $(BINARY_WINDOWS_DEBUG) $(BINARY_LINUX_NATIVE) $(BINARY_WINDOWS_NATIVE)
+	@rm -f $(BINARY_LINUX) $(BINARY_WINDOWS) $(BINARY_WINDOWS_DEBUG)
 	@echo "Clean complete"
 
 # Clean everything including generated files
@@ -122,7 +109,7 @@ deps:
 .PHONY: test
 test:
 	@echo "Running tests..."
-	GOCACHE=/tmp/nv-go-build-cache go test ./...
+	GOCACHE=/tmp/nv-go-build-cache CGO_ENABLED=1 go test -tags $(BUILD_TAGS) ./...
 
 .PHONY: test-pure
 test-pure:
@@ -157,7 +144,7 @@ test-root-pure:
 .PHONY: test-gui
 test-gui:
 	@echo "Running GUI-dependent tests..."
-	GOCACHE=/tmp/nv-go-build-cache go test . -run '^TestGUI'
+	GOCACHE=/tmp/nv-go-build-cache CGO_ENABLED=1 go test -tags $(BUILD_TAGS) . -run '^TestGUI'
 
 # Format code
 .PHONY: fmt
@@ -169,14 +156,14 @@ fmt:
 .PHONY: vet
 vet:
 	@echo "Vetting code..."
-	GOCACHE=/tmp/nv-go-build-cache go vet ./...
+	GOCACHE=/tmp/nv-go-build-cache CGO_ENABLED=1 go vet -tags $(BUILD_TAGS) ./...
 
 # Lint (requires golangci-lint)
 .PHONY: lint
 lint:
 	@echo "Linting code..."
 	@if command -v golangci-lint > /dev/null; then \
-		golangci-lint run; \
+		GOCACHE=/tmp/nv-go-build-cache CGO_ENABLED=1 golangci-lint run --build-tags $(BUILD_TAGS); \
 	else \
 		echo "golangci-lint not found, skipping lint"; \
 	fi
@@ -190,21 +177,20 @@ check: fmt vet test lint
 help:
 	@echo "Nekomimist's Image Viewer - Build Targets:"
 	@echo ""
-	@echo "  make           - Build Linux and Windows versions"
-	@echo "  make linux     - Build Linux version"
-	@echo "  make linux-native - Build Linux version with CGO native PNG/JPEG/WebP decode"
-	@echo "  make windows   - Build Windows GUI version"
-	@echo "  make windows-native - Build Windows GUI version with CGO WIC decode"
-	@echo "  make debug     - Build Windows debug version (with console)"
-	@echo "  make all       - Build all versions"
+	@echo "  All application builds use CGO native PNG/JPEG/WebP decode."
+	@echo "  make           - Build Linux and Windows GUI versions"
+	@echo "  make linux     - Build Linux version (nv)"
+	@echo "  make windows   - Build Windows GUI version (nv.exe)"
+	@echo "  make debug     - Build Windows console version (nv-debug.exe)"
+	@echo "  make all       - Build Linux and Windows GUI versions"
 	@echo ""
 	@echo "  make icon      - Force regenerate Windows icon resource"
 	@echo "  make clean     - Clean build artifacts"
 	@echo "  make distclean - Clean everything including generated files"
 	@echo ""
 	@echo "  make deps      - Install build dependencies"
-	@echo "  make windows-deps - Fetch/build libdeflate+libwebp for windows-native"
-	@echo "  make test      - Run tests"
+	@echo "  make windows-deps - Fetch/build libdeflate+libwebp for Windows builds"
+	@echo "  make test      - Run tests with native decode enabled"
 	@echo "  make test-pure - Run strict pure/headless-safe tests"
 	@echo "  make test-jxl-large - Full-decode the optional large JPEG XL fixture"
 	@echo "  make bench-decode - Benchmark registered Go image decoders"

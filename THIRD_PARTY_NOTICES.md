@@ -1,10 +1,10 @@
 # Third-Party Notices
 
 Every build includes the pure-Go JPEG XL implementation listed first. The
-Windows native-decode build (`make windows-native`, the `native_decode` build
-tag on `GOOS=windows`) additionally statically links the two C image libraries
+Windows builds (`make windows` / `make debug`, the `native_decode` build
+tag on `GOOS=windows`) additionally statically link the two C image libraries
 below, plus the GCC and MinGW-w64 runtimes noted at the end. The Linux
-native-decode build links libpng, libjpeg-turbo, libwebp, and libdeflate as
+build (`make linux`) links libpng, libjpeg-turbo, libwebp, and libdeflate as
 *shared* libraries via `pkg-config` instead.
 
 ## github.com/gen2brain/jxl
