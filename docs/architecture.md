@@ -143,9 +143,12 @@ With native decode enabled:
 - Linux uses libpng, libdeflate, TurboJPEG and libwebp (all linked as shared
   libraries via `pkg-config`).
 - Windows uses libdeflate and libwebp (statically linked from
-  `third_party/mingw`, fetched by `make windows-deps`; see
+  `third_party/mingw` for x64 or `third_party/zig-arm64` for ARM64,
+  fetched by `make windows-deps` with the matching `WINDOWS_ARCH`; see
   `THIRD_PARTY_NOTICES.md` for their licence terms) for PNG and WebP, and
   the Windows Imaging Component (WIC) for JPEG and as the PNG fallback.
+- Windows x64 uses MinGW-w64 GCC; ARM64 uses Zig's C/C++ cross-compiler
+  targeting `aarch64-windows-gnu`. The decode implementation is shared.
 - JPEG and WebP always try native decode first in native builds.
 - PNG only tries native decode for images of at least 1 megapixel; smaller
   PNG files stay on the standard decoder to avoid native setup overhead.

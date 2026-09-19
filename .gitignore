@@ -14,6 +14,7 @@ nv.exe
 nv-debug
 nv-native
 nv.syso
+nv_windows_*.syso
 
 # Go workspace file
 go.work

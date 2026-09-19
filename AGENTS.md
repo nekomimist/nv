@@ -5,11 +5,12 @@ A quick orientation for humans and AI agents working on this repo. Short, factua
 ## Overview
 - Go 1.26+. Entry point is `startup.go`.
 - The app is a mostly root-package Ebiten viewer, with pure navigation logic in `navlogic/` and decode helpers in `internal/imgdecode/`.
-- Build outputs are `nv`, `nv.exe`, and `nv-debug.exe`. All application targets use CGO image decoding. Test fixtures live in `test_images/`.
+- Build outputs are `nv`, `nv.exe`, `nv-debug.exe`, `nv-arm64.exe`, and `nv-debug-arm64.exe`. All application targets use CGO image decoding. Test fixtures live in `test_images/`.
 - Detailed design notes live in `docs/architecture.md`; technical follow-ups live in `docs/todo.md`.
 
 ## Quickstart
 - Build: `make linux` / `make windows` / `make debug` (all enable CGO and `native_decode`; Windows icon requires `rsrc`). `make` / `make all` builds Linux and Windows GUI binaries.
+- Windows ARM64: `make windows-arm64` / `make debug WINDOWS_ARCH=arm64` (Zig C/C++ cross-compiler; `make all` still defaults to x64).
 - Run: `CGO_ENABLED=1 go run -tags native_decode . [images|directories|archives...]`
 - Checks: `make test` / `make test-pure` / `make test-root-pure` / `make test-gui` / `make test-jxl-large` / `make fmt` / `make vet` / `make lint` / `make check`
 - Decode benchmarks: `make bench-decode` / `make bench-decode-native` / `make bench-decode-windows`
@@ -69,7 +70,7 @@ A quick orientation for humans and AI agents working on this repo. Short, factua
 - For Windows builds, install `rsrc`: `go install github.com/akavel/rsrc@latest`.
 - Linux builds need `libpng-dev`, `libturbojpeg0-dev`, `libwebp-dev`, `libdeflate-dev`, and CGO.
 - JPEG XL uses the pure-Go decoder in every build and needs no platform library.
-- Windows cross-builds from WSL need `gcc-mingw-w64`,
+- Windows x64 cross-builds from WSL need `gcc-mingw-w64`,
   `g++-mingw-w64`, and `cmake`. Run `make windows-deps` once first to fetch
   and cross-build static libdeflate/libwebp libraries into
   `third_party/mingw` (gitignored); `make windows` and `make debug` depend on this
@@ -78,6 +79,13 @@ A quick orientation for humans and AI agents working on this repo. Short, factua
   libwebp for WebP) with no dependency on an installed WIC WebP codec; see
   `THIRD_PARTY_NOTICES.md` for the statically-linked libraries' licence
   terms.
+- Windows ARM64 cross-builds use Zig (`WINDOWS_ZIG`, default `zig`; tested
+  with Nix-installed Zig 0.16.0), `rsrc`, and `cmake`. `make windows-arm64`
+  uses `aarch64-windows-gnu` and keeps its static decode libraries in
+  `third_party/zig-arm64`; `make windows-deps WINDOWS_ARCH=arm64` prepares
+  them separately. ARM64 runtime behavior needs hardware verification.
+- Windows icon resources are `nv_windows_amd64.syso` / `nv_windows_arm64.syso`.
+  Application builds remove the old generated `nv.syso` before Go scans resources.
 
 ## Config Paths
 - Linux: `~/.config/nekomimist/nv/config.json`

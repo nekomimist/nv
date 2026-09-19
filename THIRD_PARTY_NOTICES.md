@@ -1,9 +1,10 @@
 # Third-Party Notices
 
 Every build includes the pure-Go JPEG XL implementation listed first. The
-Windows builds (`make windows` / `make debug`, the `native_decode` build
-tag on `GOOS=windows`) additionally statically link the two C image libraries
-below, plus the GCC and MinGW-w64 runtimes noted at the end. The Linux
+Windows builds (`make windows` / `make windows-arm64` / `make debug`, the
+`native_decode` build tag on `GOOS=windows`) additionally statically link
+the two C image libraries below, plus the architecture-specific compiler
+runtimes and MinGW-w64 runtime noted at the end. The Linux
 build (`make linux`) links libpng, libjpeg-turbo, libwebp, and libdeflate as
 *shared* libraries via `pkg-config` instead.
 
@@ -75,7 +76,8 @@ Source: https://github.com/gen2brain/jxl (v0.2.0 `LICENSE` and `PATENTS`)
 
 ## libdeflate
 
-Statically linked on Windows only, via `third_party/mingw` (see
+Statically linked on Windows only, via `third_party/mingw` (x64) or
+`third_party/zig-arm64` (ARM64; see
 `scripts/windows-deps.sh` and `internal/imgdecode/native_png_fastpath.go`).
 
 License: MIT
@@ -110,7 +112,8 @@ Source: https://github.com/ebiggers/libdeflate (v1.24 `COPYING`)
 ## libwebp
 
 Statically linked on Windows only, as `libwebpdecoder` (decode-only, no
-encoder/`libsharpyuv`) via `third_party/mingw` (see
+encoder/`libsharpyuv`) via `third_party/mingw` (x64) or
+`third_party/zig-arm64` (ARM64; see
 `scripts/windows-deps.sh` and `internal/imgdecode/native_webp.go`).
 
 License: BSD-3-Clause
@@ -151,7 +154,7 @@ Source: https://github.com/webmproject/libwebp (v1.5.0 `COPYING`)
 
 ## GCC runtime libraries
 
-The Windows binary is built with the MinGW-w64 GCC toolchain and links
+The Windows x64 binary is built with the MinGW-w64 GCC toolchain and links
 `libgcc` and `libstdc++` statically (`-static-libgcc -static-libstdc++`,
 see `internal/imgdecode/native_windows.go`), so that it depends only on
 DLLs every Windows installation already has.
@@ -169,7 +172,29 @@ every GCC-produced binary regardless.
 
 Exception text: https://www.gnu.org/licenses/gcc-exception-3.1.html
 
+## Zig / LLVM runtime libraries (Windows ARM64)
+
+The Windows ARM64 binary is built with Zig's C/C++ cross-compiler, tested
+with Zig 0.16.0. Zig supplies the compiler runtime and static C++ runtimes
+instead of GCC's `libgcc` and `libstdc++`.
+
+Zig's compiler runtime is MIT-licensed. The bundled LLVM libc++, libc++abi,
+and libunwind use Apache-2.0 WITH LLVM-exception; their license files also
+record applicable third-party notices and legacy license terms.
+
+Sources and license texts:
+
+- https://codeberg.org/ziglang/zig/src/tag/0.16.0/LICENSE
+- https://codeberg.org/ziglang/zig/src/tag/0.16.0/lib/libcxx/LICENSE.TXT
+- https://codeberg.org/ziglang/zig/src/tag/0.16.0/lib/libcxxabi/LICENSE.TXT
+- https://codeberg.org/ziglang/zig/src/tag/0.16.0/lib/libunwind/LICENSE.TXT
+
+## MinGW-w64 runtime (Windows x64 and ARM64)
+
 The MinGW-w64 C runtime (`libmingw32`, `libmingwex`), also statically
 linked, is distributed under the Zope Public License 2.1 with a number of
 permissive per-file licences; see the `mingw-w64-common` package copyright
 for the full breakdown.
+
+The ARM64 build uses the MinGW-w64 runtime bundled with Zig; its notices
+are in https://codeberg.org/ziglang/zig/src/tag/0.16.0/lib/libc/mingw/COPYING.

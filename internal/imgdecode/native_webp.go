@@ -4,8 +4,10 @@ package imgdecode
 
 /*
 #cgo linux pkg-config: libwebp
-#cgo windows CFLAGS: -I${SRCDIR}/../../third_party/mingw/include
-#cgo windows LDFLAGS: -L${SRCDIR}/../../third_party/mingw/lib -lwebpdecoder
+#cgo windows,amd64 CFLAGS: -I${SRCDIR}/../../third_party/mingw/include
+#cgo windows,amd64 LDFLAGS: -L${SRCDIR}/../../third_party/mingw/lib -lwebpdecoder
+#cgo windows,arm64 CFLAGS: -I${SRCDIR}/../../third_party/zig-arm64/include
+#cgo windows,arm64 LDFLAGS: -L${SRCDIR}/../../third_party/zig-arm64/lib -lwebpdecoder
 
 #include <stdint.h>
 #include <stdlib.h>

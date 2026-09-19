@@ -9,13 +9,28 @@ COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_TAGS := native_decode
 LDFLAGS := -X main.version=$(VERSION) -X 'main.buildDate=$(BUILD_DATE)'
 LDFLAGS_GUI := $(LDFLAGS) -H windowsgui
-WINDOWS_ENV := GOOS=windows GOARCH=amd64 CGO_ENABLED=1 CC=x86_64-w64-mingw32-gcc CXX=x86_64-w64-mingw32-g++
+WINDOWS_ARCH ?= amd64
+WINDOWS_ZIG ?= zig
+ifeq ($(WINDOWS_ARCH),amd64)
+WINDOWS_CC := x86_64-w64-mingw32-gcc
+WINDOWS_CXX := x86_64-w64-mingw32-g++
+WINDOWS_SUFFIX :=
+else ifeq ($(WINDOWS_ARCH),arm64)
+WINDOWS_CC := $(WINDOWS_ZIG) cc -target aarch64-windows-gnu
+WINDOWS_CXX := $(WINDOWS_ZIG) c++ -target aarch64-windows-gnu
+WINDOWS_SUFFIX := -arm64
+# Zig's external linker needs an explicit GUI subsystem as well.
+LDFLAGS_GUI += -extldflags=-Wl,--subsystem,windows
+else
+$(error Unsupported WINDOWS_ARCH '$(WINDOWS_ARCH)'; use amd64 or arm64)
+endif
+WINDOWS_ENV := GOOS=windows GOARCH=$(WINDOWS_ARCH) CGO_ENABLED=1 CC="$(WINDOWS_CC)" CXX="$(WINDOWS_CXX)"
 
 # Output binaries
 BINARY_LINUX := nv
-BINARY_WINDOWS := nv.exe
-BINARY_WINDOWS_DEBUG := nv-debug.exe
-RESOURCE_FILE := nv.syso
+BINARY_WINDOWS := nv$(WINDOWS_SUFFIX).exe
+BINARY_WINDOWS_DEBUG := nv-debug$(WINDOWS_SUFFIX).exe
+RESOURCE_FILE := nv_windows_$(WINDOWS_ARCH).syso
 
 # Windows decode dependencies (static mingw-w64 libs, see
 # scripts/windows-deps.sh and the windows-deps target below).
@@ -28,31 +43,41 @@ all: linux windows
 
 # Application builds use CGO-backed PNG/JPEG/WebP decode.
 .PHONY: linux
-linux:
+linux: legacy-resource-cleanup
 	@echo "Building Linux version v$(VERSION)..."
 	CGO_ENABLED=1 go build -tags $(BUILD_TAGS) -ldflags "$(LDFLAGS)" -o $(BINARY_LINUX)
 	@echo "Linux build complete: $(BINARY_LINUX)"
 
 # Windows GUI build
 .PHONY: windows
-windows: $(RESOURCE_FILE) windows-deps
+windows: legacy-resource-cleanup $(RESOURCE_FILE) windows-deps
 	@echo "Building Windows GUI version v$(VERSION)..."
 	$(WINDOWS_ENV) go build -tags $(BUILD_TAGS) -ldflags "$(LDFLAGS_GUI)" -o $(BINARY_WINDOWS)
 	@echo "Windows GUI build complete: $(BINARY_WINDOWS)"
 
+.PHONY: windows-arm64
+windows-arm64:
+	$(MAKE) windows WINDOWS_ARCH=arm64
+
 # Fetch and cross-build libdeflate + libwebp as static mingw-w64 libraries
-# for Windows builds (PNG fast path and WebP decode). Idempotent:
-# skips work when third_party/mingw already has both libraries installed.
+# for Windows builds (PNG fast path and WebP decode). Existing installations
+# are reused; x64 GCC and ARM64 Zig libraries have separate install prefixes.
 .PHONY: windows-deps
 windows-deps:
-	@LIBDEFLATE_VERSION=$(LIBDEFLATE_VERSION) LIBWEBP_VERSION=$(LIBWEBP_VERSION) scripts/windows-deps.sh
+	@WINDOWS_ARCH=$(WINDOWS_ARCH) WINDOWS_ZIG="$(WINDOWS_ZIG)" LIBDEFLATE_VERSION=$(LIBDEFLATE_VERSION) LIBWEBP_VERSION=$(LIBWEBP_VERSION) scripts/windows-deps.sh
 
 # Windows debug build (with console)
 .PHONY: debug
-debug: $(RESOURCE_FILE) windows-deps
+debug: legacy-resource-cleanup $(RESOURCE_FILE) windows-deps
 	@echo "Building Windows debug version v$(VERSION)..."
 	$(WINDOWS_ENV) go build -tags $(BUILD_TAGS) -ldflags "$(LDFLAGS)" -o $(BINARY_WINDOWS_DEBUG)
 	@echo "Windows debug build complete: $(BINARY_WINDOWS_DEBUG)"
+
+# Remove the old, architecture-independent generated file before Go scans it.
+# Architecture-suffixed resources are selected automatically by the Go tool.
+.PHONY: legacy-resource-cleanup
+legacy-resource-cleanup:
+	@rm -f nv.syso
 
 # Generate Windows resource file from icon
 $(RESOURCE_FILE): icon/icon.ico
@@ -62,12 +87,12 @@ $(RESOURCE_FILE): icon/icon.ico
 		echo "  go install github.com/akavel/rsrc@latest"; \
 		exit 1; \
 	fi
-	rsrc -arch amd64 -ico icon/icon.ico -o $(RESOURCE_FILE)
+	rsrc -arch $(WINDOWS_ARCH) -ico icon/icon.ico -o $(RESOURCE_FILE)
 	@echo "Resource file generated: $(RESOURCE_FILE)"
 
 # Force icon regeneration
 .PHONY: icon
-icon:
+icon: legacy-resource-cleanup
 	@echo "Forcing icon regeneration..."
 	@rm -f $(RESOURCE_FILE)
 	@$(MAKE) $(RESOURCE_FILE)
@@ -76,14 +101,14 @@ icon:
 .PHONY: clean
 clean:
 	@echo "Cleaning build artifacts..."
-	@rm -f $(BINARY_LINUX) $(BINARY_WINDOWS) $(BINARY_WINDOWS_DEBUG)
+	@rm -f $(BINARY_LINUX) nv.exe nv-debug.exe nv-arm64.exe nv-debug-arm64.exe
 	@echo "Clean complete"
 
 # Clean everything including generated files
 .PHONY: distclean
 distclean: clean
 	@echo "Cleaning generated files..."
-	@rm -f $(RESOURCE_FILE)
+	@rm -f nv.syso nv_windows_amd64.syso nv_windows_arm64.syso
 	@echo "Distclean complete"
 
 # Show build information
@@ -181,7 +206,9 @@ help:
 	@echo "  make           - Build Linux and Windows GUI versions"
 	@echo "  make linux     - Build Linux version (nv)"
 	@echo "  make windows   - Build Windows GUI version (nv.exe)"
+	@echo "  make windows-arm64 - Build Windows ARM64 GUI version with Zig (nv-arm64.exe)"
 	@echo "  make debug     - Build Windows console version (nv-debug.exe)"
+	@echo "  make debug WINDOWS_ARCH=arm64 - Build ARM64 console version (nv-debug-arm64.exe)"
 	@echo "  make all       - Build Linux and Windows GUI versions"
 	@echo ""
 	@echo "  make icon      - Force regenerate Windows icon resource"
@@ -189,7 +216,7 @@ help:
 	@echo "  make distclean - Clean everything including generated files"
 	@echo ""
 	@echo "  make deps      - Install build dependencies"
-	@echo "  make windows-deps - Fetch/build libdeflate+libwebp for Windows builds"
+	@echo "  make windows-deps - Fetch/build libdeflate+libwebp (WINDOWS_ARCH=amd64 or arm64)"
 	@echo "  make test      - Run tests with native decode enabled"
 	@echo "  make test-pure - Run strict pure/headless-safe tests"
 	@echo "  make test-jxl-large - Full-decode the optional large JPEG XL fixture"

@@ -97,15 +97,21 @@ make linux
 # Cross-build for Windows x64 from Linux/WSL (nv.exe)
 make windows
 
+# Cross-build for Windows ARM64 with Zig (nv-arm64.exe)
+make windows-arm64
+
 # Windows build with a console (nv-debug.exe)
 make debug
+
+# ARM64 build with a console (nv-debug-arm64.exe)
+make debug WINDOWS_ARCH=arm64
 
 # Or run directly
 CGO_ENABLED=1 go run -tags native_decode . [image_files_or_directories...]
 ```
 
 All application targets use CGO-backed PNG/JPEG/WebP decoding. `make` (or
-`make all`) builds both Linux and Windows GUI binaries. The former
+`make all`) builds Linux and Windows x64 GUI binaries. The former
 `linux-native` / `windows-native` targets are now `linux` / `windows`, and
 the output names are `nv` / `nv.exe` instead of `nv-native` / `nv-native.exe`.
 
@@ -117,7 +123,21 @@ the output names are `nv` / `nv.exe` instead of `nv-native` / `nv-native.exe`.
 Application builds require CGO and the following decode dependencies:
 
 - Linux: `libpng-dev`, `libturbojpeg0-dev`, `libwebp-dev`, `libdeflate-dev`, and a C compiler
-- Windows cross-build from Linux/WSL: `gcc-mingw-w64`, `g++-mingw-w64`, `rsrc`, and `cmake` (`make windows` and `make debug` run `make windows-deps` to fetch and cross-build static libdeflate/libwebp libraries into `third_party/mingw`, skipping the work when already installed)
+- Windows x64 cross-build from Linux/WSL: `gcc-mingw-w64`, `g++-mingw-w64`, `rsrc`, and `cmake`
+- Windows ARM64 cross-build from Linux/WSL: Zig (`zig` on `PATH`, tested with Nix-installed Zig 0.16.0), `rsrc`, and `cmake`. Override `WINDOWS_ZIG` to use a specific Zig executable.
+
+Windows targets automatically run `make windows-deps` for their architecture.
+It fetches and cross-builds static libdeflate/libwebp libraries into
+`third_party/mingw` for x64 and `third_party/zig-arm64` for ARM64, reusing
+existing installations. ARM64 uses `zig cc` / `zig c++` with
+`-target aarch64-windows-gnu`; `make windows WINDOWS_ARCH=arm64` is equivalent
+to `make windows-arm64`. Windows icon resources are also architecture-specific.
+Builds remove the legacy generated `nv.syso` to prevent duplicate or mismatched
+resources when switching architectures.
+
+ARM64 builds have been cross-compiled and their PE architecture, GUI/console
+subsystem, and DLL imports checked. Runtime behavior on Windows ARM64 hardware
+still needs verification.
 
 JPEG XL is decoded by the pure-Go `github.com/gen2brain/jxl` decoder in every build. It currently decodes at full resolution because the decoder does not expose reduced-resolution output; very large JXL files can therefore use substantial transient memory before NV tiles the decoded image for display.
 
