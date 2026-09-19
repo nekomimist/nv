@@ -60,9 +60,9 @@ type UIController struct {
 	settingsPanel            *widget.Container
 	settingsScroller         *widget.ScrollContainer
 	settingsSlider           *widget.Slider
+	settingsHorizontalSlider *widget.Slider
 	settingsSelectionPending bool
 	lastSettingsDrawSize     image.Point
-	settingsScrollTop        float64
 	settingsRows             []uiSettingRow
 	numericInputs            map[string]*widget.TextInput
 	settingCheckboxes        map[string]*widget.Checkbox
@@ -70,19 +70,18 @@ type UIController struct {
 	settingRowIdle           *uiimage.NineSlice
 	settingRowActive         *uiimage.NineSlice
 
-	lastHelpVisible        bool
-	lastHelpLayoutWidth    int
-	lastSettingsVisible    bool
-	lastSettingsConfig     Config
-	lastSettingsIndex      int
-	suppressNumericCommit  bool
-	syncingSettingControls bool
-	lastUIFontSize         float64
-	redrawRequested        bool
-	lastPointerPosition    image.Point
-	hasPointerPosition     bool
-	uiPressedKeysScratch   []ebiten.Key
-	lastUIDrawAt           time.Time
+	lastHelpVisible       bool
+	lastHelpLayoutWidth   int
+	lastSettingsVisible   bool
+	lastSettingsConfig    Config
+	lastSettingsIndex     int
+	suppressNumericCommit bool
+	lastUIFontSize        float64
+	redrawRequested       bool
+	lastPointerPosition   image.Point
+	hasPointerPosition    bool
+	uiPressedKeysScratch  []ebiten.Key
+	lastUIDrawAt          time.Time
 
 	errorWindows [2]uiErrorWindow
 }
@@ -326,9 +325,18 @@ func (c *UIController) syncModalState() {
 	if c.game.showSettings != c.lastSettingsVisible {
 		c.redrawRequested = true
 		if c.game.showSettings {
-			c.settingsScroller = nil
-			c.settingsScrollTop = 0
-			c.rebuildSettingsPanel()
+			// Retain the widgets and their screen-sized render buffers across
+			// opens. Recreating them causes expensive GPU allocations at 4K.
+			if c.settingsScroller == nil {
+				c.buildSettingsPanel()
+			} else {
+				c.syncSettingsControls()
+				c.updateSettingsSelection(c.lastSettingsIndex, c.game.settingsIndex)
+			}
+			c.settingsScroller.ScrollTop = 0
+			c.settingsScroller.ScrollLeft = 0
+			c.settingsSlider.Current = 0
+			c.settingsHorizontalSlider.Current = 0
 			c.settingsOverlay.GetWidget().SetVisibility(widget.Visibility_Show)
 			c.lastSettingsConfig = c.game.pendingConfig
 			c.lastSettingsIndex = c.game.settingsIndex
@@ -336,8 +344,10 @@ func (c *UIController) syncModalState() {
 		} else {
 			c.settingsOverlay.GetWidget().SetVisibility(widget.Visibility_Hide)
 			c.ui.ClearFocus()
+			for _, combo := range c.settingEnums {
+				combo.SetContentVisible(false)
+			}
 			c.lastSettingsConfig = Config{}
-			c.lastSettingsIndex = -1
 		}
 		c.lastSettingsVisible = c.game.showSettings
 	}
@@ -501,7 +511,7 @@ func (c *UIController) buildHelpOverlay() (*widget.Container, *widget.Container,
 		widget.GridLayoutOpts.Padding(&widget.Insets{Left: 14, Right: 22, Top: 10, Bottom: 10}),
 		widget.GridLayoutOpts.Stretch([]bool{false, false, true}, nil),
 	)))
-	helpScrollArea, _, _ := c.newScrollArea(
+	helpScrollArea, _, _, _ := c.newScrollArea(
 		helpTable,
 		&widget.ScrollContainerImage{
 			Idle: uiimage.NewNineSliceColor(color.NRGBA{R: 26, G: 26, B: 28, A: 72}),
@@ -674,7 +684,7 @@ func wrapHelpActionPart(part string, maxWidth int, face text.Face) string {
 	return strings.Join(lines, "\n")
 }
 
-func (c *UIController) newScrollArea(content *widget.Container, scrollImage *widget.ScrollContainerImage, minWidth, minHeight int, horizontal bool) (*widget.Container, *widget.ScrollContainer, *widget.Slider) {
+func (c *UIController) newScrollArea(content *widget.Container, scrollImage *widget.ScrollContainerImage, minWidth, minHeight int, horizontal bool) (*widget.Container, *widget.ScrollContainer, *widget.Slider, *widget.Slider) {
 	scroller := widget.NewScrollContainer(
 		widget.ScrollContainerOpts.Content(content),
 		widget.ScrollContainerOpts.StretchContentWidth(),
@@ -731,8 +741,9 @@ func (c *UIController) newScrollArea(content *widget.Container, scrollImage *wid
 		),
 	)
 	area.AddChild(scroller, slider)
+	var horizontalSlider *widget.Slider
 	if horizontal {
-		horizontalSlider := widget.NewSlider(
+		horizontalSlider = widget.NewSlider(
 			widget.SliderOpts.Direction(widget.DirectionHorizontal),
 			widget.SliderOpts.MinMax(0, 1000),
 			widget.SliderOpts.InitialCurrent(0),
@@ -762,7 +773,7 @@ func (c *UIController) newScrollArea(content *widget.Container, scrollImage *wid
 		})
 		area.AddChild(horizontalSlider, widget.NewContainer())
 	}
-	return area, scroller, slider
+	return area, scroller, slider, horizontalSlider
 }
 
 func newHelpCell(label string, maxWidth int, textColor color.Color, processBBCode bool) *widget.Label {
@@ -815,18 +826,13 @@ func (c *UIController) buildSettingsOverlay() (*widget.Container, *widget.Contai
 	return overlay, panel
 }
 
-func (c *UIController) rebuildSettingsPanel() {
+func (c *UIController) buildSettingsPanel() {
 	if c.settingsPanel == nil || c.game == nil {
 		return
 	}
-	if c.settingsScroller != nil {
-		c.settingsScrollTop = c.settingsScroller.ScrollTop
-	}
-	c.settingsPanel.RemoveChildren()
 	c.numericInputs = make(map[string]*widget.TextInput)
 	c.settingCheckboxes = make(map[string]*widget.Checkbox)
 	c.settingEnums = make(map[string]*widget.ListComboButton)
-	c.settingsRows = c.settingsRows[:0]
 	c.settingsPanel.AddChild(widget.NewLabel(
 		widget.LabelOpts.LabelText("Settings"),
 		widget.LabelOpts.LabelPadding(widget.NewInsetsSimple(10)),
@@ -847,7 +853,7 @@ func (c *UIController) rebuildSettingsPanel() {
 		c.settingsRows = append(c.settingsRows, uiSettingRow{label: label, editor: editor})
 		content.AddChild(label, editor)
 	}
-	scrollArea, scroller, slider := c.newScrollArea(
+	scrollArea, scroller, slider, horizontalSlider := c.newScrollArea(
 		content,
 		&widget.ScrollContainerImage{
 			Idle: uiimage.NewNineSliceColor(color.NRGBA{R: 28, G: 28, B: 28, A: 255}),
@@ -857,10 +863,9 @@ func (c *UIController) rebuildSettingsPanel() {
 		200,
 		true,
 	)
-	scroller.ScrollTop = c.settingsScrollTop
 	c.settingsScroller = scroller
 	c.settingsSlider = slider
-	slider.Current = int(math.Round(scroller.ScrollTop * 1000))
+	c.settingsHorizontalSlider = horizontalSlider
 	c.settingsPanel.AddChild(scrollArea)
 
 	buttons := widget.NewContainer(widget.ContainerOpts.Layout(widget.NewRowLayout(
@@ -927,11 +932,15 @@ func (c *UIController) buildSettingCells(index int, spec settingSpec) (*widget.C
 		checkbox := widget.NewCheckbox(
 			widget.CheckboxOpts.InitialState(state),
 			widget.CheckboxOpts.StateChangedHandler(func(args *widget.CheckboxChangedEventArgs) {
-				if c.syncingSettingControls {
+				value := args.State == widget.WidgetChecked
+				current, _ := settingBoolValue(c.game.pendingConfig, name)
+				// Events are deferred; a programmatic sync has already updated
+				// pendingConfig and must not move the keyboard selection.
+				if !c.game.showSettings || current == value {
 					return
 				}
 				c.game.settingsIndex = index
-				setSettingBoolValue(&c.game.pendingConfig, name, args.State == widget.WidgetChecked)
+				setSettingBoolValue(&c.game.pendingConfig, name, value)
 			}),
 		)
 		c.settingCheckboxes[name] = checkbox
@@ -957,11 +966,12 @@ func (c *UIController) buildSettingCells(index int, spec settingSpec) (*widget.C
 				// EbitenUI emits a deferred selection event while applying
 				// InitialEntry. It has no previous entry and must not move the
 				// Settings keyboard selection away from the first row.
-				if c.syncingSettingControls || args.PreviousEntry == nil {
+				value := fmt.Sprint(args.Entry)
+				if !c.game.showSettings || args.PreviousEntry == nil || getSettingValueStringFromConfig(c.game.pendingConfig, name) == value {
 					return
 				}
 				c.game.settingsIndex = index
-				setSettingEnumValue(&c.game.pendingConfig, name, fmt.Sprint(args.Entry))
+				setSettingEnumValue(&c.game.pendingConfig, name, value)
 			}),
 		)
 		c.settingEnums[name] = combo
@@ -1092,9 +1102,6 @@ func (c *UIController) syncSettingsControls() {
 	if c == nil || c.game == nil {
 		return
 	}
-	c.syncingSettingControls = true
-	defer func() { c.syncingSettingControls = false }()
-
 	for name, checkbox := range c.settingCheckboxes {
 		value, ok := settingBoolValue(c.game.pendingConfig, name)
 		if !ok {
@@ -1170,7 +1177,7 @@ func (c *UIController) newNumericSettingInput(index int, spec settingSpec) *widg
 }
 
 func (c *UIController) commitNumericInput(name string, input *widget.TextInput) bool {
-	if c == nil || c.game == nil || input == nil || c.suppressNumericCommit {
+	if c == nil || c.game == nil || !c.game.showSettings || input == nil || c.suppressNumericCommit {
 		return false
 	}
 	normalized, ok := applySettingNumericInput(&c.game.pendingConfig, name, input.GetText())
