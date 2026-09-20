@@ -90,6 +90,52 @@ type DisplayImage interface {
 	Deallocate()
 }
 
+// ImageLoadFailure is displayable metadata for an image that could not be
+// decoded or uploaded. Failed loads deliberately carry no Ebiten texture;
+// the UI layer renders this information as a page-local card instead.
+type ImageLoadFailure struct {
+	Source  string
+	Message string
+}
+
+type failedDisplayImage struct {
+	bounds  image.Rectangle
+	failure ImageLoadFailure
+}
+
+func newFailedDisplayImage(source string, err error) DisplayImage {
+	message := "unknown image load error"
+	if err != nil {
+		message = err.Error()
+	}
+	return &failedDisplayImage{
+		// Preserve the old error placeholder's aspect ratio for book-mode
+		// planning without allocating a texture for it.
+		bounds: image.Rect(0, 0, 400, 300),
+		failure: ImageLoadFailure{
+			Source:  source,
+			Message: message,
+		},
+	}
+}
+
+func (i *failedDisplayImage) Bounds() image.Rectangle       { return i.bounds }
+func (i *failedDisplayImage) SourceBounds() image.Rectangle { return i.bounds }
+func (i *failedDisplayImage) Tiles() []DisplayTile          { return nil }
+func (i *failedDisplayImage) TileCount() int                { return 0 }
+func (i *failedDisplayImage) Deallocate()                   {}
+
+// displayImageFailure reports the failure carried by img, if any. Keeping
+// this as an optional capability avoids making every DisplayImage
+// implementation and test double expose error-specific behavior.
+func displayImageFailure(img DisplayImage) (ImageLoadFailure, bool) {
+	failed, ok := img.(*failedDisplayImage)
+	if !ok || failed == nil {
+		return ImageLoadFailure{}, false
+	}
+	return failed.failure, true
+}
+
 type tiledDisplayImage struct {
 	bounds image.Rectangle
 	// sourceW, sourceH hold the original image's full-resolution size.
@@ -682,8 +728,18 @@ func (m *DefaultImageManager) processLoadRequest(req loadRequest) {
 			"error", err,
 			"total_ms", formatMillis(time.Since(start)),
 		)
-		errorImg := createDisplayImageFromEbitenImage(CreateErrorImage(400, 300, req.path.Path, err.Error()))
-		m.cache.Add(req.cacheKey, errorImg)
+		// A refinement is optional: if its budget-tier source is still
+		// usable, retain that image and only log the failed upgrade. Adding a
+		// failure entry could otherwise evict the working image when the
+		// configured cache size is one.
+		if req.source == loadSourceRefine {
+			if budget, ok := m.cache.Peek(imgCacheKey{path: req.cacheKey.path, tier: tierBudget}); ok {
+				if _, failed := displayImageFailure(budget); !failed {
+					return
+				}
+			}
+		}
+		m.cache.Add(req.cacheKey, newFailedDisplayImage(req.path.Path, err))
 		m.asyncRefresh.Store(true)
 		m.recordPreloadResult(req.source == loadSourcePreload, false)
 		return
@@ -978,9 +1034,13 @@ func (m *DefaultImageManager) GetImage(idx int, hint imgdecode.Hint) DisplayImag
 	imagePath := m.paths[idx]
 	m.mu.RUnlock()
 
-	// tierFull is always "good enough": nothing beats full resolution.
-	if img, ok := m.cache.Get(imgCacheKey{path: imagePath.Path, tier: tierFull}); ok {
-		return img
+	// Prefer usable pixels across tiers. In particular, a failed
+	// full-resolution refinement must not hide a working budget decode.
+	fullImg, fullOK := m.cache.Get(imgCacheKey{path: imagePath.Path, tier: tierFull})
+	if fullOK {
+		if _, failed := displayImageFailure(fullImg); !failed {
+			return fullImg
+		}
 	}
 
 	// A budget-tier hit still has real pixels, so return it immediately
@@ -988,9 +1048,21 @@ func (m *DefaultImageManager) GetImage(idx int, hint imgdecode.Hint) DisplayImag
 	// placeholder when real pixels exist. Whether it's actually too small
 	// is EnsureResolution's decision (the write-triggered path), queued
 	// here as a side effect but not blocking this read.
-	if img, ok := m.cache.Get(imgCacheKey{path: imagePath.Path, tier: tierBudget}); ok {
-		m.EnsureResolution(idx, hint)
-		return img
+	budgetImg, budgetOK := m.cache.Get(imgCacheKey{path: imagePath.Path, tier: tierBudget})
+	if budgetOK {
+		if _, failed := displayImageFailure(budgetImg); !failed {
+			m.EnsureResolution(idx, hint)
+			return budgetImg
+		}
+	}
+
+	// No usable image exists. Prefer the maximal tier's diagnostic when
+	// available, otherwise show the budget-tier failure.
+	if fullOK {
+		return fullImg
+	}
+	if budgetOK {
+		return budgetImg
 	}
 
 	debugKV("cache", "cache_lookup_miss", "idx", idx, "path", imagePath.Path)

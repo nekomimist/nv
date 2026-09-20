@@ -108,6 +108,7 @@ func newGameFromStartup(configResult ConfigLoadResult, configPath string, args [
 	g.mousebindingManager = mousebindingManager
 	g.inputHandler = NewInputHandler(g, g, keybindingManager, mousebindingManager)
 	g.renderer = NewRenderer(g)
+	g.uiController = NewUIController(g)
 
 	applyStartupConfigWarning(g, configResult)
 	initializeSingleFileMode(g, args)
@@ -220,10 +221,6 @@ func main() {
 		"args", opts.args,
 		"debug", debugMode,
 	)
-
-	if err := InitGraphics(); err != nil {
-		warnKV("startup", "graphics_init_failed", "error", err)
-	}
 
 	paths, err := collectImages(opts.args, configResult.Config.SortMethod)
 	if err != nil {

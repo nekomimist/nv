@@ -1,6 +1,7 @@
 package main
 
 import (
+	"image"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -10,6 +11,69 @@ import (
 
 	"nv/internal/imgdecode"
 )
+
+func TestPureMixedErrorCardAvailableRectAvoidsValidPage(t *testing.T) {
+	tests := []struct {
+		name       string
+		failedRect image.Rectangle
+		validRect  image.Rectangle
+		want       image.Rectangle
+	}{
+		{
+			name:       "failed page on right",
+			failedRect: image.Rect(768, 422, 1168, 902),
+			validRect:  image.Rect(118, 422, 758, 902),
+			want:       image.Rect(758, 0, 1280, 1280),
+		},
+		{
+			name:       "failed page on left",
+			failedRect: image.Rect(119, 422, 519, 902),
+			validRect:  image.Rect(529, 422, 1169, 902),
+			want:       image.Rect(0, 0, 529, 1280),
+		},
+		{
+			name:       "rotated failed page above",
+			failedRect: image.Rect(400, 100, 700, 500),
+			validRect:  image.Rect(400, 510, 700, 1150),
+			want:       image.Rect(0, 0, 1280, 510),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := mixedErrorCardAvailableRect(1280, 1280, tt.failedRect, tt.validRect)
+			if !ok {
+				t.Fatal("mixedErrorCardAvailableRect() unexpectedly rejected visible page rectangles")
+			}
+			if got != tt.want {
+				t.Fatalf("mixedErrorCardAvailableRect() = %v, want %v", got, tt.want)
+			}
+			if card := errorCardRectWithin(got); card.Overlaps(tt.validRect) {
+				t.Fatalf("error card %v overlaps valid page %v", card, tt.validRect)
+			}
+		})
+	}
+}
+
+func TestPureEffectiveEbitenUIFontSize(t *testing.T) {
+	tests := []struct {
+		configured float64
+		want       float64
+	}{
+		{configured: 12, want: 16},
+		{configured: 20, want: 20},
+		{configured: 24, want: 24},
+		{configured: 32, want: 32},
+		{configured: 48, want: 32},
+		{configured: 72, want: 32},
+	}
+
+	for _, tt := range tests {
+		if got := effectiveEbitenUIFontSize(tt.configured); got != tt.want {
+			t.Errorf("effectiveEbitenUIFontSize(%v) = %v, want %v", tt.configured, got, tt.want)
+		}
+	}
+}
 
 func TestPureApplyConfigResultUpdatesStatus(t *testing.T) {
 	g := &Game{
@@ -870,6 +934,104 @@ func TestPureImagePathCreation(t *testing.T) {
 				t.Errorf("ImagePath creation failed.\nExpected: %+v\nGot: %+v", tt.expected, imagePath)
 			}
 		})
+	}
+}
+
+func TestPureSettingsCatalogDrivesDisplayOrder(t *testing.T) {
+	order := settingsListOrder()
+	if len(order) != len(editableSettingSpecs)+2 {
+		t.Fatalf("settings order length = %d, want %d", len(order), len(editableSettingSpecs)+2)
+	}
+	seen := make(map[string]bool, len(editableSettingSpecs))
+	for i, spec := range editableSettingSpecs {
+		if spec.ID == "" || spec.Label == "" {
+			t.Fatalf("setting %d has incomplete metadata: %+v", i, spec)
+		}
+		if seen[spec.ID] {
+			t.Fatalf("duplicate setting ID %q", spec.ID)
+		}
+		seen[spec.ID] = true
+		if order[i] != spec.ID {
+			t.Fatalf("settings order[%d] = %q, want %q", i, order[i], spec.ID)
+		}
+		if spec.Control == settingControlEnum && len(spec.Options) == 0 {
+			t.Fatalf("enum setting %q has no options", spec.ID)
+		}
+	}
+	if order[len(order)-2] != "[ Save ]" || order[len(order)-1] != "[ Cancel ]" {
+		t.Fatalf("settings actions = %v, want Save then Cancel", order[len(order)-2:])
+	}
+}
+
+func TestPureSettingsControlAdapters(t *testing.T) {
+	cfg := defaultConfig()
+	setSettingBoolValue(&cfg, "BookMode", true)
+	if value, ok := settingBoolValue(cfg, "BookMode"); !ok || !value {
+		t.Fatalf("BookMode adapter = (%v, %v), want (true, true)", value, ok)
+	}
+
+	setSettingEnumValue(&cfg, "SortMethod", "Entry Order")
+	if got := getSettingValueStringFromConfig(cfg, "SortMethod"); got != "Entry Order" {
+		t.Fatalf("SortMethod = %q, want Entry Order", got)
+	}
+	setSettingEnumValue(&cfg, "InitialZoomMode", "actual_size")
+	if cfg.InitialZoomMode != "actual_size" {
+		t.Fatalf("InitialZoomMode = %q, want actual_size", cfg.InitialZoomMode)
+	}
+}
+
+func TestPureSettingsNumericInputAdapters(t *testing.T) {
+	cfg := defaultConfig()
+	for _, spec := range editableSettingSpecs {
+		if spec.Control != settingControlNumber {
+			continue
+		}
+		value, ok := getSettingNumericInputText(cfg, spec.ID)
+		if !ok {
+			t.Fatalf("numeric setting %q has no editable value adapter", spec.ID)
+		}
+		if _, ok := applySettingNumericInput(&cfg, spec.ID, value); !ok {
+			t.Fatalf("numeric setting %q rejected its current value %q", spec.ID, value)
+		}
+	}
+
+	if !validSettingNumericInput(settingNumberInt, "1920") || validSettingNumericInput(settingNumberInt, "19.2") {
+		t.Fatal("integer input validation accepted or rejected the wrong syntax")
+	}
+	if !validSettingNumericInput(settingNumberFloat, "1.25") || validSettingNumericInput(settingNumberFloat, "1.2.5") {
+		t.Fatal("float input validation accepted or rejected the wrong syntax")
+	}
+	if _, ok := applySettingNumericInput(&cfg, "WindowWidth", "99999"); !ok || cfg.WindowWidth != windowWidthBound.max {
+		t.Fatalf("WindowWidth clamp = (%d, %v), want (%d, true)", cfg.WindowWidth, ok, windowWidthBound.max)
+	}
+	if normalized, ok := applySettingNumericInput(&cfg, "FontSize", "19.25"); !ok || normalized != "19.25" || cfg.FontSize != 19.25 {
+		t.Fatalf("FontSize commit = (%q, %v, %v), want (19.25, true, 19.25)", normalized, ok, cfg.FontSize)
+	}
+	if _, ok := applySettingNumericInput(&cfg, "MaxImageDimension", "1"); !ok || cfg.MaxImageDimension != 512 {
+		t.Fatalf("MaxImageDimension minimum = (%d, %v), want (512, true)", cfg.MaxImageDimension, ok)
+	}
+	if normalized, ok := applySettingNumericInput(&cfg, "MaxImageDimension", "0"); !ok || normalized != "0" || cfg.MaxImageDimension != 0 {
+		t.Fatalf("MaxImageDimension auto = (%q, %v, %d), want (0, true, 0)", normalized, ok, cfg.MaxImageDimension)
+	}
+}
+
+func TestPureHelpColumnWidthsFitSupportedWindows(t *testing.T) {
+	for _, width := range []int{minWidth, defaultWidth, 1640} {
+		const preferredActionWidth = 340
+		action, binding, description := helpColumnWidths(width, preferredActionWidth, 960)
+		if action <= 0 || binding <= 0 || description <= 0 {
+			t.Fatalf("helpColumnWidths(%d) = (%d, %d, %d), want positive widths", width, action, binding, description)
+		}
+		available := max(180, width-helpTableHorizontalChrome)
+		if action+binding+description != available {
+			t.Fatalf("helpColumnWidths(%d) uses %d px, want all %d available pixels", width, action+binding+description, available)
+		}
+		if action > available*35/100 && available*35/100 >= 60 {
+			t.Fatalf("helpColumnWidths(%d) action width %d exceeds its responsive limit", width, action)
+		}
+		if width == 1640 && action != preferredActionWidth {
+			t.Fatalf("helpColumnWidths(%d) action width = %d, want measured width %d", width, action, preferredActionWidth)
+		}
 	}
 }
 

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"image"
 	"image/color"
 	"math"
@@ -413,6 +414,72 @@ func TestGUI_GetImageTierFullWinsOverTierBudget(t *testing.T) {
 	got := manager.GetImage(0, imgdecode.Hint{})
 	if got != fullImg {
 		t.Fatalf("GetImage() = %v, want the full-tier image to win over the budget-tier one", got)
+	}
+}
+
+func TestGUI_GetImageKeepsBudgetTierWhenFullTierFailed(t *testing.T) {
+	manager := NewImageManager(4).(*DefaultImageManager)
+	t.Cleanup(func() {
+		manager.StopPreload()
+	})
+
+	path := ImagePath{Path: "failed-refinement.png"}
+	manager.SetPaths([]ImagePath{path})
+
+	budgetImg := testDisplayImage(40, 30)
+	manager.cache.Add(imgCacheKey{path: path.Path, tier: tierBudget}, budgetImg)
+	manager.cache.Add(
+		imgCacheKey{path: path.Path, tier: tierFull},
+		newFailedDisplayImage(path.Path, fmt.Errorf("full decode failed")),
+	)
+
+	got := manager.GetImage(0, imgdecode.Hint{})
+	if got != budgetImg {
+		t.Fatalf("GetImage() = %v, want the usable budget-tier image", got)
+	}
+}
+
+func TestGUI_FailedRefinementDoesNotEvictSingleEntryBudgetCache(t *testing.T) {
+	manager := NewImageManager(1).(*DefaultImageManager)
+	t.Cleanup(func() {
+		manager.StopPreload()
+	})
+
+	path := ImagePath{Path: filepath.Join(t.TempDir(), "missing.png")}
+	manager.SetPaths([]ImagePath{path})
+	budgetImg := testDisplayImage(40, 30)
+	budgetKey := imgCacheKey{path: path.Path, tier: tierBudget}
+	manager.cache.Add(budgetKey, budgetImg)
+
+	manager.processLoadRequest(loadRequest{
+		path:     path,
+		cacheKey: imgCacheKey{path: path.Path, tier: tierFull},
+		source:   loadSourceRefine,
+	})
+
+	got, ok := manager.cache.Peek(budgetKey)
+	if !ok || got != budgetImg {
+		t.Fatalf("budget cache entry after failed refinement = (%v, %v), want original image", got, ok)
+	}
+	if _, ok := manager.cache.Peek(imgCacheKey{path: path.Path, tier: tierFull}); ok {
+		t.Fatal("failed refinement was cached over a usable budget image")
+	}
+}
+
+func TestGUI_FailedDisplayImageCarriesMessageWithoutTexture(t *testing.T) {
+	img := newFailedDisplayImage("broken.webp", fmt.Errorf("unsupported bitstream"))
+	failure, ok := displayImageFailure(img)
+	if !ok {
+		t.Fatal("displayImageFailure() did not recognize failed display image")
+	}
+	if failure.Source != "broken.webp" || failure.Message != "unsupported bitstream" {
+		t.Fatalf("unexpected failure metadata: %+v", failure)
+	}
+	if img.TileCount() != 0 || len(img.Tiles()) != 0 {
+		t.Fatalf("failed display image allocated render tiles: count=%d tiles=%v", img.TileCount(), img.Tiles())
+	}
+	if got := img.Bounds(); got != image.Rect(0, 0, 400, 300) {
+		t.Fatalf("failure bounds = %v, want 400x300 fallback", got)
 	}
 }
 

@@ -2,48 +2,78 @@ package main
 
 import (
 	"fmt"
+	"math"
+	"strconv"
+
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
 )
 
-// Settings UI model is intentionally simple: a flat list of items with
-// index-based dispatch. We edit a copy (pendingConfig) and apply on Save.
+type settingControlKind uint8
+
+const (
+	settingControlNumber settingControlKind = iota
+	settingControlBool
+	settingControlEnum
+)
+
+type settingNumberKind uint8
+
+const (
+	settingNumberInt settingNumberKind = iota
+	settingNumberFloat
+)
+
+// settingSpec is the single display-order and control-kind catalog used by
+// both keyboard adjustment and the retained Settings UI.
+type settingSpec struct {
+	ID      string
+	Label   string
+	Control settingControlKind
+	Options []string
+	Restart bool
+	Number  settingNumberKind
+	Unit    string
+	Hint    string
+}
+
+var editableSettingSpecs = []settingSpec{
+	{ID: "WindowWidth", Label: "WindowWidth"},
+	{ID: "WindowHeight", Label: "WindowHeight"},
+	{ID: "DefaultWindowWidth", Label: "DefaultWindowWidth"},
+	{ID: "DefaultWindowHeight", Label: "DefaultWindowHeight"},
+	{ID: "Fullscreen", Label: "Fullscreen", Control: settingControlBool},
+	{ID: "FontSize", Label: "FontSize", Number: settingNumberFloat},
+	{ID: "BookMode", Label: "BookMode", Control: settingControlBool},
+	{ID: "RightToLeft", Label: "RightToLeft", Control: settingControlBool},
+	{ID: "SortMethod", Label: "SortMethod", Control: settingControlEnum, Options: []string{"Natural", "Simple", "Entry Order"}},
+	{ID: "AspectRatioThreshold", Label: "AspectRatioThreshold", Number: settingNumberFloat},
+	{ID: "InitialZoomMode", Label: "InitialZoomMode", Control: settingControlEnum, Options: []string{"fit_window", "fit_width", "fit_height", "actual_size"}},
+	{ID: "FitWidthAlignTop", Label: "FitWidthAlignTop", Control: settingControlBool},
+	{ID: "FitHeightAlignLeft", Label: "FitHeightAlignLeft", Control: settingControlBool},
+	{ID: "MaxImageDimension", Label: "MaxImageDimension", Hint: "0 = Auto"},
+	{ID: "CacheSize (restart)", Label: "CacheSize", Restart: true},
+	{ID: "TransitionFrames", Label: "TransitionFrames"},
+	{ID: "PreloadEnabled", Label: "PreloadEnabled", Control: settingControlBool},
+	{ID: "PreloadCount", Label: "PreloadCount"},
+	{ID: "Mouse.EnableMouse", Label: "Mouse.EnableMouse", Control: settingControlBool},
+	{ID: "Mouse.WheelSensitivity", Label: "Mouse.WheelSensitivity", Number: settingNumberFloat},
+	{ID: "Mouse.WheelInverted", Label: "Mouse.WheelInverted", Control: settingControlBool},
+	{ID: "Mouse.EnableDragPan", Label: "Mouse.EnableDragPan", Control: settingControlBool},
+	{ID: "Mouse.DragSensitivity", Label: "Mouse.DragSensitivity", Number: settingNumberFloat},
+	{ID: "Mouse.DragPanInverted", Label: "Mouse.DragPanInverted", Control: settingControlBool},
+	{ID: "Mouse.DoubleClickTime", Label: "Mouse.DoubleClickTime", Unit: "ms"},
+	{ID: "Mouse.DragThreshold", Label: "Mouse.DragThreshold", Unit: "px"},
+}
 
 // settingsListOrder returns display order of editable items
 func settingsListOrder() []string {
-	return []string{
-		"WindowWidth",
-		"WindowHeight",
-		"DefaultWindowWidth",
-		"DefaultWindowHeight",
-		"Fullscreen",
-		"FontSize",
-		"BookMode",
-		"RightToLeft",
-		"SortMethod",
-		"AspectRatioThreshold",
-		"InitialZoomMode",
-		"FitWidthAlignTop",
-		"FitHeightAlignLeft",
-		"MaxImageDimension",
-		"CacheSize (restart)",
-		"TransitionFrames",
-		"PreloadEnabled",
-		"PreloadCount",
-		"Mouse.EnableMouse",
-		"Mouse.WheelSensitivity",
-		"Mouse.WheelInverted",
-		"Mouse.EnableDragPan",
-		"Mouse.DragSensitivity",
-		"Mouse.DragPanInverted",
-		"Mouse.DoubleClickTime",
-		"Mouse.DragThreshold",
-		"[ Save ]",
-		"[ Cancel ]",
+	order := make([]string, 0, len(editableSettingSpecs)+2)
+	for _, spec := range editableSettingSpecs {
+		order = append(order, spec.ID)
 	}
+	return append(order, "[ Save ]", "[ Cancel ]")
 }
-
-// (moved) settings overlay drawing lives in renderer.go
 
 // getSettingValueString returns human-friendly value for the named item
 func getSettingValueStringFromConfig(c Config, name string) string {
@@ -140,6 +170,179 @@ func getSettingValueStringFromConfig(c Config, name string) string {
 	default:
 		return ""
 	}
+}
+
+// getSettingNumericInputText returns an editable value without display-only
+// decorations such as "Auto", "ms", or "px".
+func getSettingNumericInputText(c Config, name string) (string, bool) {
+	switch name {
+	case "WindowWidth":
+		return strconv.Itoa(c.WindowWidth), true
+	case "WindowHeight":
+		return strconv.Itoa(c.WindowHeight), true
+	case "DefaultWindowWidth":
+		return strconv.Itoa(c.DefaultWindowWidth), true
+	case "DefaultWindowHeight":
+		return strconv.Itoa(c.DefaultWindowHeight), true
+	case "FontSize":
+		return formatSettingFloat(c.FontSize), true
+	case "AspectRatioThreshold":
+		return formatSettingFloat(c.AspectRatioThreshold), true
+	case "MaxImageDimension":
+		return strconv.Itoa(c.MaxImageDimension), true
+	case "CacheSize (restart)":
+		return strconv.Itoa(c.CacheSize), true
+	case "TransitionFrames":
+		return strconv.Itoa(c.TransitionFrames), true
+	case "PreloadCount":
+		return strconv.Itoa(c.PreloadCount), true
+	case "Mouse.WheelSensitivity":
+		return formatSettingFloat(c.MouseSettings.WheelSensitivity), true
+	case "Mouse.DragSensitivity":
+		return formatSettingFloat(c.MouseSettings.DragSensitivity), true
+	case "Mouse.DoubleClickTime":
+		return strconv.Itoa(c.MouseSettings.DoubleClickTime), true
+	case "Mouse.DragThreshold":
+		return strconv.Itoa(c.MouseSettings.DragThreshold), true
+	default:
+		return "", false
+	}
+}
+
+func formatSettingFloat(value float64) string {
+	return strconv.FormatFloat(math.Round(value*100)/100, 'f', -1, 64)
+}
+
+func validSettingNumericInput(kind settingNumberKind, value string) bool {
+	if value == "" {
+		return true
+	}
+	dotSeen := false
+	for _, r := range value {
+		if r >= '0' && r <= '9' {
+			continue
+		}
+		if kind == settingNumberFloat && r == '.' && !dotSeen {
+			dotSeen = true
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+// applySettingNumericInput parses and clamps a committed editor value using
+// the same limits as keyboard adjustment. The returned string is the
+// normalized value that should be shown in the editor.
+func applySettingNumericInput(c *Config, name, input string) (string, bool) {
+	if c == nil || input == "" || input == "." {
+		return "", false
+	}
+
+	parseInt := func() (int, bool) {
+		value, err := strconv.Atoi(input)
+		return value, err == nil
+	}
+	parseFloat := func() (float64, bool) {
+		value, err := strconv.ParseFloat(input, 64)
+		return value, err == nil && !math.IsInf(value, 0) && !math.IsNaN(value)
+	}
+
+	switch name {
+	case "WindowWidth":
+		value, ok := parseInt()
+		if !ok {
+			return "", false
+		}
+		c.WindowWidth = clampInt(value, windowWidthBound.min, windowWidthBound.max)
+	case "WindowHeight":
+		value, ok := parseInt()
+		if !ok {
+			return "", false
+		}
+		c.WindowHeight = clampInt(value, windowHeightBound.min, windowHeightBound.max)
+	case "DefaultWindowWidth":
+		value, ok := parseInt()
+		if !ok {
+			return "", false
+		}
+		c.DefaultWindowWidth = clampInt(value, defaultWindowWidthBound.min, defaultWindowWidthBound.max)
+	case "DefaultWindowHeight":
+		value, ok := parseInt()
+		if !ok {
+			return "", false
+		}
+		c.DefaultWindowHeight = clampInt(value, defaultWindowHeightBound.min, defaultWindowHeightBound.max)
+	case "FontSize":
+		value, ok := parseFloat()
+		if !ok {
+			return "", false
+		}
+		c.FontSize = clampFloat(value, fontSizeBound.min, fontSizeBound.max)
+	case "AspectRatioThreshold":
+		value, ok := parseFloat()
+		if !ok {
+			return "", false
+		}
+		c.AspectRatioThreshold = clampFloat(value, aspectRatioThresholdBound.min, aspectRatioThresholdBound.max)
+	case "MaxImageDimension":
+		value, ok := parseInt()
+		if !ok {
+			return "", false
+		}
+		if value <= 0 {
+			c.MaxImageDimension = 0
+		} else {
+			c.MaxImageDimension = clampInt(value, 512, maxImageDimensionBound.max)
+		}
+	case "CacheSize (restart)":
+		value, ok := parseInt()
+		if !ok {
+			return "", false
+		}
+		c.CacheSize = clampInt(value, cacheSizeBound.min, cacheSizeBound.max)
+	case "TransitionFrames":
+		value, ok := parseInt()
+		if !ok {
+			return "", false
+		}
+		c.TransitionFrames = clampInt(value, transitionFramesBound.min, transitionFramesBound.max)
+	case "PreloadCount":
+		value, ok := parseInt()
+		if !ok {
+			return "", false
+		}
+		c.PreloadCount = clampInt(value, preloadCountBound.min, preloadCountBound.max)
+	case "Mouse.WheelSensitivity":
+		value, ok := parseFloat()
+		if !ok {
+			return "", false
+		}
+		c.MouseSettings.WheelSensitivity = clampFloat(value, 0.1, 5.0)
+	case "Mouse.DragSensitivity":
+		value, ok := parseFloat()
+		if !ok {
+			return "", false
+		}
+		c.MouseSettings.DragSensitivity = clampFloat(value, 0.1, 5.0)
+	case "Mouse.DoubleClickTime":
+		value, ok := parseInt()
+		if !ok {
+			return "", false
+		}
+		c.MouseSettings.DoubleClickTime = clampInt(value, 100, 1000)
+	case "Mouse.DragThreshold":
+		value, ok := parseInt()
+		if !ok {
+			return "", false
+		}
+		c.MouseSettings.DragThreshold = clampInt(value, 1, 20)
+	default:
+		return "", false
+	}
+
+	normalized, _ := getSettingNumericInputText(*c, name)
+	return normalized, true
 }
 
 // mutate helpers
@@ -305,6 +508,11 @@ func (h *InputHandler) handleSettingsModeKeys() bool {
 
 	// Navigation
 	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
+		if h.inputState.IsEditingSettingsValue() {
+			debugKV("input", "action", "source", "settings", "action", "settings_edit_cancel")
+			h.inputActions.CancelSettingsEdit()
+			return true
+		}
 		debugKV("input", "action", "source", "settings", "action", "settings_cancel")
 		h.inputActions.SettingsCancel()
 		return true
@@ -325,16 +533,25 @@ func (h *InputHandler) handleSettingsModeKeys() bool {
 		return true
 	}
 	if inpututil.IsKeyJustPressed(ebiten.KeyArrowLeft) {
+		if h.inputState.IsEditingSettingsValue() {
+			return false
+		}
 		debugKV("input", "action", "source", "settings", "action", "settings_left")
 		h.inputActions.SettingsLeft()
 		return true
 	}
 	if inpututil.IsKeyJustPressed(ebiten.KeyArrowRight) {
+		if h.inputState.IsEditingSettingsValue() {
+			return false
+		}
 		debugKV("input", "action", "source", "settings", "action", "settings_right")
 		h.inputActions.SettingsRight()
 		return true
 	}
 	if inpututil.IsKeyJustPressed(ebiten.KeyEnter) || inpututil.IsKeyJustPressed(ebiten.KeyNumpadEnter) {
+		if h.inputState.HasFocusedUIControl() {
+			return false
+		}
 		debugKV("input", "action", "source", "settings", "action", "settings_enter")
 		h.inputActions.SettingsEnter()
 		return true
