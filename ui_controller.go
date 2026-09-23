@@ -44,7 +44,6 @@ type uiErrorWindow struct {
 	key    string
 	window *widget.Window
 	remove widget.RemoveWindowFunc
-	rect   image.Rectangle
 }
 
 type uiSettingRow struct {
@@ -300,23 +299,6 @@ func (c *UIController) errorWindowsOutOfSync() bool {
 	for slot, img := range images {
 		_, failed := displayImageFailure(img)
 		if failed != (c.errorWindows[slot].window != nil) {
-			return true
-		}
-	}
-	return false
-}
-
-// PointerCaptured lets the existing viewer input layer avoid reacting to a
-// click or wheel event that belongs to an error card. Modal panels are
-// handled by InputHandler's explicit help/settings modes.
-func (c *UIController) PointerCaptured() bool {
-	if c == nil {
-		return false
-	}
-	x, y := ebiten.CursorPosition()
-	p := image.Pt(x, y)
-	for _, ew := range c.errorWindows {
-		if ew.window != nil && p.In(ew.rect) {
 			return true
 		}
 	}
@@ -1367,7 +1349,6 @@ func (c *UIController) syncErrorWindows(width, height int) {
 				remove: c.ui.AddWindowQuietly(window, false),
 			}
 		}
-		c.errorWindows[slot].rect = rect
 		c.errorWindows[slot].window.SetLocation(rect)
 	}
 }

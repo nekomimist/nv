@@ -13,8 +13,7 @@ func (g *Game) Update() error {
 	}
 
 	if !g.wasInputHandled {
-		pointerBlocked := g.uiController != nil && g.uiController.PointerCaptured()
-		g.wasInputHandled = g.inputHandler.HandleInputWithPointerBlocked(pointerBlocked)
+		g.wasInputHandled = g.inputHandler.HandleInput()
 	}
 
 	if g.uiController != nil {

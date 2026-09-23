@@ -36,7 +36,7 @@ updates from the July 4, 2026 performance and refactoring pass.
 - `ui_controller.go`
   - Retained EbitenUI tree, theme, Help and Settings panels
   - Help uses one scrollable three-column action/binding/description grid
-  - Page-local image-load error cards and UI input capture
+  - Page-local image-load error cards
 - `input.go`
   - Frame-by-frame input coordination
   - Keyboard and mouse mode switching
@@ -121,8 +121,8 @@ Three modes bypass or gate the generic action flow for practical reasons:
 - settings screen input mode
 
 Help and Settings block viewer input while their retained UI is active.
-Page-error cards are non-modal: keyboard navigation remains available and
-mouse input is captured only while the pointer is over a card.
+Page-error cards are non-modal and hold no interactive widgets, so keyboard
+and mouse navigation keep working while the pointer is over a card.
 
 ### Image loading is the main subsystem boundary
 

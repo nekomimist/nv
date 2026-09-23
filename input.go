@@ -77,12 +77,6 @@ func NewInputHandler(inputActions InputActions, inputState InputState, keybindin
 // HandleInput processes all input for the current frame
 // Returns true if any input was processed, false otherwise
 func (h *InputHandler) HandleInput() bool {
-	return h.HandleInputWithPointerBlocked(false)
-}
-
-// HandleInputWithPointerBlocked processes keyboard input normally while
-// suppressing viewer mouse actions when an EbitenUI widget owns the cursor.
-func (h *InputHandler) HandleInputWithPointerBlocked(pointerBlocked bool) bool {
 	if h.inputActions.GetTotalPagesCount() == 0 {
 		debugKV("input", "handle_input_skip", "reason", "no_pages")
 		return false
@@ -101,9 +95,6 @@ func (h *InputHandler) HandleInputWithPointerBlocked(pointerBlocked bool) bool {
 	// Process keyboard input first
 	if h.handleKeyboardInput() {
 		return true
-	}
-	if pointerBlocked {
-		return false
 	}
 
 	// Process mouse input if keyboard didn't handle anything
