@@ -185,9 +185,11 @@ This is the most explicit interface boundary in the repo.
 
 Load failures are cached as metadata-only `DisplayImage` sentinels. They
 retain fallback dimensions for stable navigation planning but allocate no
-Ebiten texture. `UIController` presents their source and error message in a
-scrollable card in the affected single/book-mode slot. A failed full-tier
-refinement does not replace an already usable budget-tier image.
+Ebiten texture. `UIController` presents their error message and source in a
+card in the affected single/book-mode slot. The card is plain labels wrapped
+to its size and truncated with an ellipsis; it deliberately avoids EbitenUI
+scroll containers, which allocate screen-sized render buffers. A failed
+full-tier refinement does not replace an already usable budget-tier image.
 
 ### Images are decoded at display size
 

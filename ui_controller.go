@@ -20,6 +20,14 @@ import (
 
 const errorWindowDrawLayer = -10
 
+// Error card chrome, shared by the card layout and the text budget computed
+// for it in newErrorWindow.
+const (
+	errorCardBorder      = 2
+	errorCardSpacing     = 8
+	errorCardTextPadding = 10
+)
+
 // Numeric input only needs periodic redraws while its caret is idle; input and
 // other UI changes set redrawRequested immediately.
 const numericInputIdleRedrawInterval = 100 * time.Millisecond
@@ -79,6 +87,7 @@ type UIController struct {
 	settingEnums             map[string]*uiEnumStepper
 	settingRowIdle           *uiimage.NineSlice
 	settingRowActive         *uiimage.NineSlice
+	errorCardBackground      *uiimage.NineSlice
 
 	lastHelpVisible       bool
 	lastHelpLayoutWidth   int
@@ -107,6 +116,10 @@ func NewUIController(game *Game) *UIController {
 		settingRowIdle:  uiimage.NewNineSliceColor(color.NRGBA{R: 30, G: 30, B: 30, A: 255}),
 		settingRowActive: uiimage.NewNineSliceColor(
 			color.NRGBA{R: 58, G: 58, B: 68, A: 255},
+		),
+		errorCardBackground: uiimage.NewBorderedNineSliceColor(
+			color.NRGBA{R: 78, G: 20, B: 24, A: 245},
+			color.NRGBA{R: 235, G: 150, B: 150, A: 255}, errorCardBorder,
 		),
 	}
 	controller.helpOverlay, controller.helpTable, controller.helpStatus = controller.buildHelpOverlay()
@@ -398,14 +411,8 @@ func (c *UIController) syncUIFontSize() {
 	c.updateEnumStepperWidths(*theme.DefaultFace)
 	c.redrawRequested = true
 	c.settingsSelectionPending = c.game.showSettings
-	for slot := range c.errorWindows {
-		window := c.errorWindows[slot].window
-		if window == nil || window.GetContainer() == nil {
-			continue
-		}
-		window.GetContainer().GetWidget().SetTheme(theme)
-		window.RequestRelayout()
-	}
+	// Error cards are pre-wrapped for one face; syncErrorWindows rebuilds
+	// them because the font size is part of their key.
 	c.lastUIFontSize = size
 }
 
@@ -670,6 +677,47 @@ func wrapHelpActionPart(part string, maxWidth int, face text.Face) string {
 		lines = append(lines, string(runes[start:end]))
 		start = end
 	}
+	return strings.Join(lines, "\n")
+}
+
+// wrapTextLines breaks s into lines no wider than maxWidth, at spaces where
+// possible and between characters for long tokens such as paths. At most
+// maxLines lines are kept; when text is cut, the last line ends with "…".
+func wrapTextLines(s string, maxWidth, maxLines int, face text.Face) string {
+	if maxLines <= 0 {
+		return ""
+	}
+	fits := func(line string) bool {
+		width, _ := text.Measure(line, face, 0)
+		return width <= float64(maxWidth)
+	}
+	lines := make([]string, 0, maxLines)
+	for _, paragraph := range strings.Split(s, "\n") {
+		line := ""
+		for _, word := range strings.Split(paragraph, " ") {
+			if line != "" && fits(line+" "+word) {
+				line += " " + word
+				continue
+			}
+			if line != "" {
+				lines = append(lines, line)
+			}
+			pieces := strings.Split(wrapHelpActionPart(word, maxWidth, face), "\n")
+			lines = append(lines, pieces[:len(pieces)-1]...)
+			line = pieces[len(pieces)-1]
+		}
+		lines = append(lines, line)
+	}
+	if len(lines) <= maxLines {
+		return strings.Join(lines, "\n")
+	}
+
+	lines = lines[:maxLines]
+	last := []rune(strings.TrimRight(lines[maxLines-1], " "))
+	for len(last) > 0 && !fits(string(last)+"…") {
+		last = last[:len(last)-1]
+	}
+	lines[maxLines-1] = string(last) + "…"
 	return strings.Join(lines, "\n")
 }
 
@@ -1296,16 +1344,6 @@ func (c *UIController) syncErrorWindows(width, height int) {
 			c.removeErrorWindow(slot)
 			continue
 		}
-		key := fmt.Sprintf("%d|%d|%s|%s", slot, pages[slot], failure.Source, failure.Message)
-		if c.errorWindows[slot].key != key {
-			c.removeErrorWindow(slot)
-			window := c.newErrorWindow(failure, pages[slot])
-			c.errorWindows[slot] = uiErrorWindow{
-				key:    key,
-				window: window,
-				remove: c.ui.AddWindowQuietly(window, false),
-			}
-		}
 		slotRect := errorCardSlotRect(slot, actualImages, width, height)
 		if actualImages == 2 && images[1-slot] != nil {
 			if _, otherFailed := displayImageFailure(images[1-slot]); !otherFailed {
@@ -1317,6 +1355,18 @@ func (c *UIController) syncErrorWindows(width, height int) {
 			}
 		}
 		rect := errorCardRectWithin(slotRect)
+		// Text is wrapped to the card size and face, so either change rebuilds
+		// the card. That is cheap: the card holds only labels.
+		key := fmt.Sprintf("%d|%d|%s|%s|%v|%g", slot, pages[slot], failure.Source, failure.Message, rect.Size(), c.lastUIFontSize)
+		if c.errorWindows[slot].key != key {
+			c.removeErrorWindow(slot)
+			window := c.newErrorWindow(failure, pages[slot], rect.Size())
+			c.errorWindows[slot] = uiErrorWindow{
+				key:    key,
+				window: window,
+				remove: c.ui.AddWindowQuietly(window, false),
+			}
+		}
 		c.errorWindows[slot].rect = rect
 		c.errorWindows[slot].window.SetLocation(rect)
 	}
@@ -1330,29 +1380,44 @@ func (c *UIController) removeErrorWindow(slot int) {
 	*ew = uiErrorWindow{}
 }
 
-func (c *UIController) newErrorWindow(failure ImageLoadFailure, page int) *widget.Window {
+// newErrorWindow builds a card from plain labels pre-wrapped to size. A
+// TextArea would scroll long messages, but its ScrollContainer allocates two
+// screen-sized render buffers per card; overflowing text is truncated here
+// instead, and the full error is in the log.
+func (c *UIController) newErrorWindow(failure ImageLoadFailure, page int, size image.Point) *widget.Window {
+	face := c.currentUIFontFace()
+	_, lineHeight := text.Measure(" ", face, 0)
+	textWidth := size.X - 2*errorCardBorder - 2*errorCardTextPadding
+	titleHeight := lineHeight + 2*errorCardTextPadding
+	detailsHeight := float64(size.Y-2*errorCardBorder-errorCardSpacing-errorCardTextPadding) - titleHeight
+	detailLines := 0
+	if lineHeight > 0 {
+		detailLines = int(detailsHeight / lineHeight)
+	}
+
 	card := widget.NewContainer(
-		widget.ContainerOpts.BackgroundImage(uiimage.NewBorderedNineSliceColor(
-			color.NRGBA{R: 78, G: 20, B: 24, A: 245},
-			color.NRGBA{R: 235, G: 150, B: 150, A: 255}, 2,
-		)),
+		widget.ContainerOpts.BackgroundImage(c.errorCardBackground),
 		widget.ContainerOpts.Layout(widget.NewGridLayout(
 			widget.GridLayoutOpts.Columns(1),
-			widget.GridLayoutOpts.Spacing(0, 8),
+			widget.GridLayoutOpts.Spacing(0, errorCardSpacing),
 			widget.GridLayoutOpts.Stretch([]bool{true}, []bool{false, true}),
 		)),
 	)
 	title := fmt.Sprintf("Image error — page %d — %s", page, filepath.Base(failure.Source))
 	card.AddChild(widget.NewLabel(
-		widget.LabelOpts.LabelText(title),
-		widget.LabelOpts.LabelPadding(widget.NewInsetsSimple(10)),
+		widget.LabelOpts.LabelText(wrapTextLines(title, textWidth, 1, face)),
+		widget.LabelOpts.LabelPadding(widget.NewInsetsSimple(errorCardTextPadding)),
 	))
-	details := fmt.Sprintf("Source: %s\n\nReason: %s", failure.Source, failure.Message)
-	card.AddChild(widget.NewTextArea(
-		widget.TextAreaOpts.ContainerOpts(widget.ContainerOpts.WidgetOpts(widget.WidgetOpts.MinSize(180, 100))),
-		widget.TextAreaOpts.Text(details),
-		widget.TextAreaOpts.TextPadding(widget.Insets{Left: 10, Right: 20, Top: 8, Bottom: 8}),
-		widget.TextAreaOpts.ShowVerticalScrollbar(),
+	// Reason comes first so truncation drops the long path, not the cause.
+	details := fmt.Sprintf("Reason: %s\n\nSource: %s", failure.Message, failure.Source)
+	card.AddChild(widget.NewLabel(
+		widget.LabelOpts.LabelText(wrapTextLines(details, textWidth, detailLines, face)),
+		widget.LabelOpts.LabelPadding(&widget.Insets{
+			Left:   errorCardTextPadding,
+			Right:  errorCardTextPadding,
+			Bottom: errorCardTextPadding,
+		}),
+		widget.LabelOpts.TextOpts(widget.TextOpts.Position(widget.TextPositionStart, widget.TextPositionStart)),
 	))
 	return widget.NewWindow(
 		widget.WindowOpts.Contents(card),
