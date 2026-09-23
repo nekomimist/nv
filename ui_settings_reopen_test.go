@@ -30,9 +30,7 @@ func TestGUI_SettingsReopenRetainsControlsAndResetsState(t *testing.T) {
 
 			g.pendingConfig.FontSize = 28
 			g.pendingConfig.BookMode = !g.config.BookMode
-			setSettingEnumValue(&g.pendingConfig, "SortMethod", "Simple")
-			settle()
-			combo.SetContentVisible(true)
+			g.pendingConfig.SortMethod = SortSimple
 			settle()
 			c.ui.SetFocusedWidget(input)
 			settle()
@@ -49,8 +47,8 @@ func TestGUI_SettingsReopenRetainsControlsAndResetsState(t *testing.T) {
 			if !editableSettingsEqual(g.pendingConfig, g.config) {
 				t.Fatal("deferred UI events changed discarded settings")
 			}
-			if combo.ContentVisible() || c.HasFocus() {
-				t.Fatal("closing settings retained a popup or input focus")
+			if c.HasFocus() {
+				t.Fatal("closing settings retained input focus")
 			}
 
 			g.ToggleSettings()
@@ -61,7 +59,7 @@ func TestGUI_SettingsReopenRetainsControlsAndResetsState(t *testing.T) {
 			if got, want := input.GetText(), formatSettingFloat(g.config.FontSize); got != want {
 				t.Fatalf("reopened numeric input = %q, want %q", got, want)
 			}
-			if (checkbox.State() == widget.WidgetChecked) != g.config.BookMode || combo.SelectedEntry() != getSettingValueStringFromConfig(g.config, "SortMethod") {
+			if (checkbox.State() == widget.WidgetChecked) != g.config.BookMode || combo.value.Label != getSettingValueStringFromConfig(g.config, "SortMethod") {
 				t.Fatal("reopening settings retained discarded boolean or enum values")
 			}
 			if g.settingsIndex != 0 || c.lastSettingsIndex != 0 {
@@ -70,8 +68,8 @@ func TestGUI_SettingsReopenRetainsControlsAndResetsState(t *testing.T) {
 			if scroller.ScrollTop != 0 || scroller.ScrollLeft != 0 || c.settingsSlider.Current != 0 || c.settingsHorizontalSlider.Current != 0 {
 				t.Fatal("reopening settings did not reset both scroll axes")
 			}
-			if combo.ContentVisible() || c.HasFocus() {
-				t.Fatal("reopening settings restored a popup or input focus")
+			if c.HasFocus() {
+				t.Fatal("reopening settings restored input focus")
 			}
 
 			// Retained controls must still deliver user changes after reopening.
@@ -80,10 +78,14 @@ func TestGUI_SettingsReopenRetainsControlsAndResetsState(t *testing.T) {
 				state = widget.WidgetUnchecked
 			}
 			checkbox.SetState(state)
-			combo.SetSelectedEntry("Entry Order")
+			combo.next.Click()
 			settle()
-			if g.pendingConfig.BookMode == g.config.BookMode || getSettingValueStringFromConfig(g.pendingConfig, "SortMethod") != "Entry Order" {
+			wantSort := getSortMethodName((g.config.SortMethod + 1) % 3)
+			if g.pendingConfig.BookMode == g.config.BookMode || getSettingValueStringFromConfig(g.pendingConfig, "SortMethod") != wantSort {
 				t.Fatal("retained controls stopped updating pending settings")
+			}
+			if combo.value.Label != wantSort {
+				t.Fatalf("enum stepper label = %q, want %q", combo.value.Label, wantSort)
 			}
 		})
 	}
@@ -99,7 +101,7 @@ func TestGUI_SettingsReopenSyncsChangedConfig(t *testing.T) {
 	// Saved settings may change while the panel is closed (for example reload).
 	g.config.FontSize = 32
 	g.config.BookMode = !g.config.BookMode
-	setSettingEnumValue(&g.config, "SortMethod", "Entry Order")
+	g.config.SortMethod = SortEntryOrder
 	g.ToggleSettings()
 	for range 3 {
 		c.Update()
@@ -108,7 +110,7 @@ func TestGUI_SettingsReopenSyncsChangedConfig(t *testing.T) {
 	if c.numericInputs["FontSize"] != input || input.GetText() != "32" || c.lastUIFontSize != 32 {
 		t.Fatal("retained numeric input or theme did not reflect the saved font size")
 	}
-	if (c.settingCheckboxes["BookMode"].State() == widget.WidgetChecked) != g.config.BookMode || c.settingEnums["SortMethod"].SelectedEntry() != "Entry Order" {
+	if (c.settingCheckboxes["BookMode"].State() == widget.WidgetChecked) != g.config.BookMode || c.settingEnums["SortMethod"].value.Label != "Entry Order" {
 		t.Fatal("retained controls did not reflect changed saved settings")
 	}
 	if g.settingsIndex != 0 || !editableSettingsEqual(g.pendingConfig, g.config) {

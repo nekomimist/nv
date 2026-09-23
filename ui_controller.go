@@ -25,6 +25,7 @@ const errorWindowDrawLayer = -10
 const numericInputIdleRedrawInterval = 100 * time.Millisecond
 
 const (
+	numericSettingInputMinWidth   = 140
 	helpBindingColumnBaseMaxWidth = 600
 	helpTableHorizontalChrome     = 144
 	minEbitenUIFontSize           = 16.0
@@ -41,6 +42,15 @@ type uiErrorWindow struct {
 type uiSettingRow struct {
 	label  *widget.Container
 	editor *widget.Container
+}
+
+// uiEnumStepper cycles a small fixed option list in place. It replaces a
+// dropdown because EbitenUI list popups own screen-sized render buffers.
+type uiEnumStepper struct {
+	value   *widget.Label
+	prev    *widget.Button
+	next    *widget.Button
+	options []string
 }
 
 // UIController owns the application's single retained EbitenUI tree. The
@@ -66,7 +76,7 @@ type UIController struct {
 	settingsRows             []uiSettingRow
 	numericInputs            map[string]*widget.TextInput
 	settingCheckboxes        map[string]*widget.Checkbox
-	settingEnums             map[string]*widget.ListComboButton
+	settingEnums             map[string]*uiEnumStepper
 	settingRowIdle           *uiimage.NineSlice
 	settingRowActive         *uiimage.NineSlice
 
@@ -344,9 +354,6 @@ func (c *UIController) syncModalState() {
 		} else {
 			c.settingsOverlay.GetWidget().SetVisibility(widget.Visibility_Hide)
 			c.ui.ClearFocus()
-			for _, combo := range c.settingEnums {
-				combo.SetContentVisible(false)
-			}
 			c.lastSettingsConfig = Config{}
 		}
 		c.lastSettingsVisible = c.game.showSettings
@@ -388,6 +395,7 @@ func (c *UIController) syncUIFontSize() {
 
 	theme := ebitenUIThemeWithFontSize(c.baseTheme, size)
 	c.ui.PrimaryTheme = theme
+	c.updateEnumStepperWidths(*theme.DefaultFace)
 	c.redrawRequested = true
 	c.settingsSelectionPending = c.game.showSettings
 	for slot := range c.errorWindows {
@@ -442,25 +450,6 @@ func ebitenUIThemeWithFontSize(base *widget.Theme, size float64) *widget.Theme {
 		params := *base.TextAreaTheme
 		params.Face = facePtr
 		theme.TextAreaTheme = &params
-	}
-	if base.ListTheme != nil {
-		params := *base.ListTheme
-		params.EntryFace = facePtr
-		theme.ListTheme = &params
-	}
-	if base.ListComboButtonTheme != nil {
-		params := *base.ListComboButtonTheme
-		if base.ListComboButtonTheme.List != nil {
-			list := *base.ListComboButtonTheme.List
-			list.EntryFace = facePtr
-			params.List = &list
-		}
-		if base.ListComboButtonTheme.Button != nil {
-			button := *base.ListComboButtonTheme.Button
-			button.TextFace = facePtr
-			params.Button = &button
-		}
-		theme.ListComboButtonTheme = &params
 	}
 	if base.CheckboxTheme != nil {
 		params := *base.CheckboxTheme
@@ -832,7 +821,7 @@ func (c *UIController) buildSettingsPanel() {
 	}
 	c.numericInputs = make(map[string]*widget.TextInput)
 	c.settingCheckboxes = make(map[string]*widget.Checkbox)
-	c.settingEnums = make(map[string]*widget.ListComboButton)
+	c.settingEnums = make(map[string]*uiEnumStepper)
 	c.settingsPanel.AddChild(widget.NewLabel(
 		widget.LabelOpts.LabelText("Settings"),
 		widget.LabelOpts.LabelPadding(widget.NewInsetsSimple(10)),
@@ -949,33 +938,8 @@ func (c *UIController) buildSettingCells(index int, spec settingSpec) (*widget.C
 	}
 
 	if spec.Control == settingControlEnum {
-		options := spec.Options
-		entries := make([]any, len(options))
-		for i := range options {
-			entries[i] = options[i]
-		}
-		current := getSettingValueStringFromConfig(c.game.pendingConfig, name)
-		combo := widget.NewListComboButton(
-			widget.ListComboButtonOpts.Entries(entries),
-			widget.ListComboButtonOpts.InitialEntry(current),
-			widget.ListComboButtonOpts.EntryLabelFunc(
-				func(entry interface{}) string { return fmt.Sprint(entry) },
-				func(entry any) string { return fmt.Sprint(entry) },
-			),
-			widget.ListComboButtonOpts.EntrySelectedHandler(func(args *widget.ListComboButtonEntrySelectedEventArgs) {
-				// EbitenUI emits a deferred selection event while applying
-				// InitialEntry. It has no previous entry and must not move the
-				// Settings keyboard selection away from the first row.
-				value := fmt.Sprint(args.Entry)
-				if !c.game.showSettings || args.PreviousEntry == nil || getSettingValueStringFromConfig(c.game.pendingConfig, name) == value {
-					return
-				}
-				c.game.settingsIndex = index
-				setSettingEnumValue(&c.game.pendingConfig, name, value)
-			}),
-		)
-		c.settingEnums[name] = combo
-		editorCell.AddChild(combo)
+		stepper := c.newEnumStepper(index, spec)
+		editorCell.AddChild(stepper.prev, stepper.value, stepper.next)
 		return labelCell, editorCell
 	}
 
@@ -1115,11 +1079,8 @@ func (c *UIController) syncSettingsControls() {
 			checkbox.SetState(state)
 		}
 	}
-	for name, combo := range c.settingEnums {
-		value := getSettingValueStringFromConfig(c.game.pendingConfig, name)
-		if fmt.Sprint(combo.SelectedEntry()) != value {
-			combo.SetSelectedEntry(value)
-		}
+	for name, stepper := range c.settingEnums {
+		stepper.value.Label = getSettingValueStringFromConfig(c.game.pendingConfig, name)
 	}
 	for name, input := range c.numericInputs {
 		value, ok := getSettingNumericInputText(c.game.pendingConfig, name)
@@ -1142,6 +1103,53 @@ func newSettingCell(label string, background color.Color) *widget.Container {
 	return cell
 }
 
+func (c *UIController) newEnumStepper(index int, spec settingSpec) *uiEnumStepper {
+	step := func(left bool) widget.ButtonOpt {
+		return widget.ButtonOpts.ClickedHandler(func(*widget.ButtonClickedEventArgs) {
+			if !c.game.showSettings {
+				return
+			}
+			c.game.settingsIndex = index
+			c.game.settingsAdjust(left)
+		})
+	}
+	stepper := &uiEnumStepper{
+		value: widget.NewLabel(
+			widget.LabelOpts.LabelText(getSettingValueStringFromConfig(c.game.pendingConfig, spec.ID)),
+			widget.LabelOpts.TextOpts(
+				widget.TextOpts.Position(widget.TextPositionCenter, widget.TextPositionCenter),
+				widget.TextOpts.WidgetOpts(widget.WidgetOpts.LayoutData(widget.RowLayoutData{
+					Position: widget.RowLayoutPositionCenter,
+				})),
+			),
+		),
+		prev:    widget.NewButton(widget.ButtonOpts.TextLabel("<"), step(true)),
+		next:    widget.NewButton(widget.ButtonOpts.TextLabel(">"), step(false)),
+		options: spec.Options,
+	}
+	c.settingEnums[spec.ID] = stepper
+	c.updateEnumStepperWidths(c.currentUIFontFace())
+	return stepper
+}
+
+// updateEnumStepperWidths reserves room for the longest option so cycling
+// values does not move the next button under the pointer. The numeric input
+// width is the floor so stepper buttons line up with the numeric -/+ column,
+// and all steppers share one width so their buttons line up with each other.
+func (c *UIController) updateEnumStepperWidths(face text.Face) {
+	width := 0.0
+	for _, stepper := range c.settingEnums {
+		for _, option := range stepper.options {
+			w, _ := text.Measure(option, face, 0)
+			width = max(width, w)
+		}
+	}
+	minWidth := max(numericSettingInputMinWidth, int(math.Ceil(width))+16)
+	for _, stepper := range c.settingEnums {
+		stepper.value.GetWidget().MinWidth = minWidth
+	}
+}
+
 func (c *UIController) newNumericSettingInput(index int, spec settingSpec) *widget.TextInput {
 	value, _ := getSettingNumericInputText(c.game.pendingConfig, spec.ID)
 	input := widget.NewTextInput(
@@ -1151,7 +1159,7 @@ func (c *UIController) newNumericSettingInput(index int, spec settingSpec) *widg
 		widget.TextInputOpts.ChangedHandler(func(*widget.TextInputChangedEventArgs) {
 			c.redrawRequested = true
 		}),
-		widget.TextInputOpts.WidgetOpts(widget.WidgetOpts.MinSize(140, 0)),
+		widget.TextInputOpts.WidgetOpts(widget.WidgetOpts.MinSize(numericSettingInputMinWidth, 0)),
 	)
 	input.SetText(value)
 	input.SubmitEvent.AddHandler(func(any) {
@@ -1248,23 +1256,6 @@ func setSettingBoolValue(cfg *Config, name string, value bool) {
 		cfg.MouseSettings.EnableDragPan = value
 	case "Mouse.DragPanInverted":
 		cfg.MouseSettings.DragPanInverted = value
-	}
-}
-
-func setSettingEnumValue(cfg *Config, name, value string) {
-	if cfg == nil {
-		return
-	}
-	switch name {
-	case "SortMethod":
-		for method := 0; method < 3; method++ {
-			if getSortMethodName(method) == value {
-				cfg.SortMethod = method
-				return
-			}
-		}
-	case "InitialZoomMode":
-		cfg.InitialZoomMode = value
 	}
 }
 

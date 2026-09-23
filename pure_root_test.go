@@ -969,15 +969,6 @@ func TestPureSettingsControlAdapters(t *testing.T) {
 	if value, ok := settingBoolValue(cfg, "BookMode"); !ok || !value {
 		t.Fatalf("BookMode adapter = (%v, %v), want (true, true)", value, ok)
 	}
-
-	setSettingEnumValue(&cfg, "SortMethod", "Entry Order")
-	if got := getSettingValueStringFromConfig(cfg, "SortMethod"); got != "Entry Order" {
-		t.Fatalf("SortMethod = %q, want Entry Order", got)
-	}
-	setSettingEnumValue(&cfg, "InitialZoomMode", "actual_size")
-	if cfg.InitialZoomMode != "actual_size" {
-		t.Fatalf("InitialZoomMode = %q, want actual_size", cfg.InitialZoomMode)
-	}
 }
 
 func TestPureSettingsNumericInputAdapters(t *testing.T) {
